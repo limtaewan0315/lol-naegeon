@@ -1,0 +1,297 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Rajdhani:wght@500;700&display=swap');
+
+:root {
+  --bg: #0a0e17;
+  --bg2: #111827;
+  --bg3: #1a2235;
+  --border: rgba(200,170,110,0.15);
+  --border2: rgba(200,170,110,0.3);
+  --gold: #c8aa6e;
+  --gold2: #f0e6c8;
+  --blue: #1e90ff;
+  --blue-bg: rgba(30,144,255,0.1);
+  --blue-border: rgba(30,144,255,0.3);
+  --red: #e84057;
+  --red-bg: rgba(232,64,87,0.1);
+  --red-border: rgba(232,64,87,0.3);
+  --green: #3ecf8e;
+  --green-bg: rgba(62,207,142,0.1);
+  --text: #e8e0d0;
+  --text2: #9a8f7e;
+  --text3: #5a5348;
+  --radius: 8px;
+  --radius-lg: 12px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Noto Sans KR', sans-serif;
+  min-height: 100vh;
+}
+
+/* 배경 패턴 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    radial-gradient(ellipse at 20% 20%, rgba(200,170,110,0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 80%, rgba(30,144,255,0.04) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.layout {
+  position: relative;
+  z-index: 1;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+/* 헤더 */
+.header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+.header-title {
+  font-family: 'Rajdhani', sans-serif;
+  font-size: 2.2rem;
+  font-weight: 700;
+  color: var(--gold);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.header-sub {
+  font-size: 13px;
+  color: var(--text2);
+  margin-top: 4px;
+}
+
+/* 탭 */
+.tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg2);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 4px;
+  margin-bottom: 1.5rem;
+}
+.tab {
+  flex: 1;
+  padding: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: 'Noto Sans KR', sans-serif;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text2);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tab:hover { color: var(--text); }
+.tab.active {
+  background: var(--bg3);
+  color: var(--gold);
+  border: 0.5px solid var(--border2);
+}
+
+/* 카드 */
+.card {
+  background: var(--bg2);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+}
+.card-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--gold);
+  margin-bottom: 1rem;
+  letter-spacing: 0.03em;
+}
+
+/* 폼 */
+.add-row {
+  display: grid;
+  grid-template-columns: 1.4fr 2fr 1fr auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+input, select {
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: 'Noto Sans KR', sans-serif;
+  border: 0.5px solid var(--border2);
+  border-radius: var(--radius);
+  background: var(--bg3);
+  color: var(--text);
+  width: 100%;
+  outline: none;
+  transition: border-color 0.15s;
+}
+input:focus, select:focus { border-color: var(--gold); }
+select option { background: var(--bg3); }
+
+/* 버튼 */
+.btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-family: 'Noto Sans KR', sans-serif;
+  font-weight: 500;
+  border: 0.5px solid var(--border2);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.btn:hover { background: var(--bg3); border-color: var(--gold); color: var(--gold); }
+.btn-gold {
+  background: var(--gold);
+  color: var(--bg);
+  border-color: var(--gold);
+  font-weight: 700;
+}
+.btn-gold:hover { background: var(--gold2); border-color: var(--gold2); color: var(--bg); }
+.btn-blue { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); }
+.btn-blue:hover { background: rgba(30,144,255,0.2); color: var(--blue); }
+.btn-red { background: var(--red-bg); color: var(--red); border-color: var(--red-border); }
+.btn-red:hover { background: rgba(232,64,87,0.2); color: var(--red); }
+.btn-danger { color: var(--red); border-color: var(--red-border); font-size: 12px; padding: 3px 10px; }
+.btn-danger:hover { background: var(--red-bg); }
+.btn-sm { font-size: 12px; padding: 4px 10px; }
+
+/* 참가자 목록 */
+.player-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  background: var(--bg3);
+  border-radius: var(--radius);
+  font-size: 13px;
+  margin-bottom: 6px;
+  border: 0.5px solid transparent;
+  transition: border-color 0.15s;
+}
+.player-row:hover { border-color: var(--border); }
+
+/* 배지 */
+.badge {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.b-tier { background: rgba(200,170,110,0.12); color: var(--gold); border: 0.5px solid rgba(200,170,110,0.2); }
+.b-line { background: rgba(62,207,142,0.1); color: var(--green); border: 0.5px solid rgba(62,207,142,0.2); }
+.b-score { background: rgba(30,144,255,0.1); color: var(--blue); border: 0.5px solid rgba(30,144,255,0.2); }
+.b-win { background: rgba(62,207,142,0.1); color: var(--green); border: 0.5px solid rgba(62,207,142,0.2); }
+.b-lose { background: var(--red-bg); color: var(--red); border: 0.5px solid var(--red-border); }
+
+/* 팀 그리드 */
+.teams-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.team-card {
+  background: var(--bg2);
+  border-radius: var(--radius-lg);
+  padding: 1rem;
+  border: 0.5px solid var(--border);
+}
+.team-card.blue { border-color: var(--blue-border); }
+.team-card.red { border-color: var(--red-border); }
+.team-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 0.5px solid var(--border);
+}
+.team-player {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 0.5px solid var(--border);
+  font-size: 13px;
+}
+.team-player:last-child { border-bottom: none; }
+
+/* 통계 카드 */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 1rem;
+}
+.stat-box {
+  background: var(--bg3);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  text-align: center;
+  border: 0.5px solid var(--border);
+}
+.stat-label { font-size: 11px; color: var(--text2); margin-bottom: 4px; }
+.stat-value { font-size: 22px; font-weight: 700; font-family: 'Rajdhani', sans-serif; color: var(--gold); }
+.stat-value.blue-v { color: var(--blue); }
+.stat-value.red-v { color: var(--red); }
+
+/* 기록 행 */
+.record-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg3);
+  border-radius: var(--radius);
+  font-size: 12px;
+  margin-bottom: 6px;
+  border: 0.5px solid transparent;
+  transition: border-color 0.15s;
+}
+.record-row:hover { border-color: var(--border); }
+
+/* 승률 바 */
+.wr-bar-bg {
+  flex: 1;
+  height: 4px;
+  background: var(--bg3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.wr-bar { height: 100%; background: var(--blue); border-radius: 2px; transition: width 0.4s ease; }
+
+/* 에러 */
+.error { color: var(--red); font-size: 13px; padding: 4px 0; }
+
+/* count bar */
+.count-bar { font-size: 13px; color: var(--text2); margin-bottom: 0.75rem; }
+.count-bar span { color: var(--gold); font-weight: 500; }
+
+/* 빈 상태 */
+.empty { font-size: 13px; color: var(--text3); padding: 4px 0; }
+
+/* 분리선 */
+.divider { border: none; border-top: 0.5px solid var(--border); margin: 1rem 0; }
+
+@media (max-width: 600px) {
+  .add-row { grid-template-columns: 1fr 1fr; }
+  .add-row input { grid-column: 1 / -1; }
+  .teams-grid { grid-template-columns: 1fr; }
+  .stat-grid { grid-template-columns: repeat(2, 1fr); }
+}
