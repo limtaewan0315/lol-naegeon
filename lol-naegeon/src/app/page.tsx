@@ -1,9 +1,15 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { createClient } from '@supabase/supabase-js'
 import { TIERS, LINES, getScore, shuffle } from '@/lib/data'
 import type { Line } from '@/lib/data'
 import type { Player, GameRecord, BalanceResult } from '@/lib/types'
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
 const LINE_ORDER: Record<string, number> = { 탑: 0, 정글: 1, 미드: 2, 원딜: 3, 서포터: 4 }
 
@@ -265,32 +271,40 @@ function StatsTab({ records }: { records: GameRecord[] }) {
 export default function Home() {
   const [tab, setTab] = useState<'team' | 'record' | 'stats'>('team')
   const [records, setRecords] = useState<GameRecord[]>([])
+  const [loading, setLoading] = useState(true)
 
-  // localStorage에서 불러오기
+  // Supabase에서 불러오기
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('lol-naegeon-records')
-      if (saved) setRecords(JSON.parse(saved))
-    } catch {}
+    const fetchRecords = async () => {
+      const { data } = await supabase
+        .from('records')
+        .select('*')
+        .order('created_at', { ascending: false })
+      if (data) setRecords(data.map(r => ({ ...r, blue: r.blue, red: r.red })))
+      setLoading(false)
+    }
+    fetchRecords()
   }, [])
 
-  // localStorage에 저장
-  const saveRecords = (r: GameRecord[]) => {
-    setRecords(r)
-    try { localStorage.setItem('lol-naegeon-records', JSON.stringify(r)) } catch {}
-  }
-
-  const addRecord = ({ winner, blue, red }: { winner: 'blue' | 'red'; blue: string[]; red: string[] }) => {
+  const addRecord = async ({ winner, blue, red }: { winner: 'blue' | 'red'; blue: string[]; red: string[] }) => {
     const now = new Date()
     const time = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-    saveRecords([{ id: Date.now(), winner, blue, red, time }, ...records])
+    const { data } = await supabase
+      .from('records')
+      .insert([{ winner, blue, red, time }])
+      .select()
+    if (data) setRecords(prev => [data[0], ...prev])
   }
 
-  const deleteRecord = (id: number) => saveRecords(records.filter(r => r.id !== id))
+  const deleteRecord = async (id: number) => {
+    await supabase.from('records').delete().eq('id', id)
+    setRecords(prev => prev.filter(r => r.id !== id))
+  }
 
-  const clearRecords = () => {
+  const clearRecords = async () => {
     if (!confirm('전체 기록을 삭제할까요?')) return
-    saveRecords([])
+    await supabase.from('records').delete().neq('id', 0)
+    setRecords([])
   }
 
   return (
@@ -308,9 +322,15 @@ export default function Home() {
         ))}
       </div>
 
-      {tab === 'team' && <TeamTab onRecord={addRecord} />}
-      {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
-      {tab === 'stats' && <StatsTab records={records} />}
+      {loading ? (
+        <div className="empty">불러오는 중...</div>
+      ) : (
+        <>
+          {tab === 'team' && <TeamTab onRecord={addRecord} />}
+          {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
+          {tab === 'stats' && <StatsTab records={records} />}
+        </>
+      )}
     </div>
   )
 }
