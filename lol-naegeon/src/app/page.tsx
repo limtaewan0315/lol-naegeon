@@ -13,11 +13,111 @@ const supabase = createClient(
 
 const LINE_ORDER: Record<string, number> = { 탑: 0, 정글: 1, 미드: 2, 원딜: 3, 서포터: 4 }
 
+function tierUp(tier: string): string {
+  const idx = TIERS.indexOf(tier)
+  if (idx <= 0) return TIERS[0]
+  return TIERS[idx - 1]
+}
+function tierDown(tier: string): string {
+  const idx = TIERS.indexOf(tier)
+  if (idx < 0 || idx >= TIERS.length - 1) return TIERS[TIERS.length - 1]
+  return TIERS[idx + 1]
+}
+
+// ── 소환사 관리 탭 ──────────────────────────────────────────────
+function SummonerTab({ summoners, onRefresh }: { summoners: Record<string, { tier: string; line: Line }>; onRefresh: () => void }) {
+  const [name, setName] = useState('')
+  const [tier, setTier] = useState('골드2')
+  const [line, setLine] = useState<Line>('탑')
+  const [editing, setEditing] = useState<string | null>(null)
+  const [editTier, setEditTier] = useState('')
+  const [editLine, setEditLine] = useState<Line>('탑')
+  const [error, setError] = useState('')
+
+  const add = async () => {
+    const n = name.trim()
+    if (!n) { setError('소환사명을 입력해주세요.'); return }
+    setError('')
+    await supabase.from('summoners').upsert({ name: n, tier, line }, { onConflict: 'name' })
+    setName('')
+    onRefresh()
+  }
+
+  const remove = async (n: string) => {
+    await supabase.from('summoners').delete().eq('name', n)
+    onRefresh()
+  }
+
+  const startEdit = (n: string) => {
+    setEditing(n)
+    setEditTier(summoners[n].tier)
+    setEditLine(summoners[n].line)
+  }
+
+  const saveEdit = async (n: string) => {
+    await supabase.from('summoners').update({ tier: editTier, line: editLine }).eq('name', n)
+    setEditing(null)
+    onRefresh()
+  }
+
+  return (
+    <div>
+      <div className="card">
+        <div className="card-title">소환사 등록</div>
+        <div className="add-row">
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="소환사명" onKeyDown={e => e.key === 'Enter' && add()} />
+          <select value={tier} onChange={e => setTier(e.target.value)}>
+            {TIERS.map(t => <option key={t}>{t}</option>)}
+          </select>
+          <select value={line} onChange={e => setLine(e.target.value as Line)}>
+            {LINES.map(l => <option key={l}>{l}</option>)}
+          </select>
+          <button className="btn btn-gold" onClick={add}>등록</button>
+        </div>
+        {error && <div className="error">{error}</div>}
+      </div>
+
+      <div className="card">
+        <div className="card-title">등록된 소환사 ({Object.keys(summoners).length}명)</div>
+        {Object.keys(summoners).length === 0
+          ? <div className="empty">등록된 소환사가 없어요.</div>
+          : Object.entries(summoners).map(([n, info]) => (
+            <div key={n} className="player-row">
+              <span style={{ flex: 1, fontWeight: 500 }}>{n}</span>
+              {editing === n ? (
+                <>
+                  <select value={editTier} onChange={e => setEditTier(e.target.value)} style={{ width: 130 }}>
+                    {TIERS.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                  <select value={editLine} onChange={e => setEditLine(e.target.value as Line)} style={{ width: 90 }}>
+                    {LINES.map(l => <option key={l}>{l}</option>)}
+                  </select>
+                  <button className="btn btn-gold btn-sm" onClick={() => saveEdit(n)}>저장</button>
+                  <button className="btn btn-sm" onClick={() => setEditing(null)}>취소</button>
+                </>
+              ) : (
+                <>
+                  <span className="badge b-tier">{info.tier}</span>
+                  <span className="badge b-line">{info.line}</span>
+                  <button className="btn btn-sm" onClick={() => startEdit(n)}>수정</button>
+                  <button className="btn btn-danger btn-sm" onClick={() => remove(n)}>삭제</button>
+                </>
+              )}
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  )
+}
+
 // ── 팀 뽑기 탭 ──────────────────────────────────────────────
 function TeamTab({
   onRecord,
+  summoners,
 }: {
   onRecord: (r: { winner: 'blue' | 'red'; blue: string[]; red: string[] }) => void
+  summoners: Record<string, { tier: string; line: Line }>
 }) {
   const [players, setPlayers] = useState<Player[]>([])
   const [name, setName] = useState('')
@@ -26,6 +126,26 @@ function TeamTab({
   const [error, setError] = useState('')
   const [result, setResult] = useState<BalanceResult | null>(null)
   const [recorded, setRecorded] = useState<'blue' | 'red' | null>(null)
+  const [suggestions, setSuggestions] = useState<string[]>([])
+
+  const handleNameChange = (val: string) => {
+    setName(val)
+    if (val.trim()) {
+      const matched = Object.keys(summoners).filter(n => n.includes(val.trim()))
+      setSuggestions(matched.slice(0, 5))
+    } else {
+      setSuggestions([])
+    }
+  }
+
+  const selectSuggestion = (n: string) => {
+    setName(n)
+    setSuggestions([])
+    if (summoners[n]) {
+      setTier(summoners[n].tier)
+      setLine(summoners[n].line)
+    }
+  }
 
   const addPlayer = () => {
     const n = name.trim()
@@ -33,6 +153,7 @@ function TeamTab({
     if (players.find(p => p.name === n)) { setError('이미 추가된 소환사입니다.'); return }
     if (players.length >= 10) { setError('최대 10명까지만 추가 가능해요.'); return }
     setError('')
+    setSuggestions([])
     setPlayers(prev => [...prev, { name: n, tier, line, score: getScore(tier, line) }])
     setName('')
   }
@@ -78,8 +199,25 @@ function TeamTab({
     setResult(best)
   }, [players])
 
-  const recordWin = (winner: 'blue' | 'red') => {
+  const recordWin = async (winner: 'blue' | 'red') => {
     if (!result) return
+    const winners = winner === 'blue' ? result.team1 : result.team2
+    const losers = winner === 'blue' ? result.team2 : result.team1
+
+    // 티어 자동 업데이트
+    for (const p of winners) {
+      if (summoners[p.name]) {
+        const newTier = tierUp(summoners[p.name].tier)
+        await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name)
+      }
+    }
+    for (const p of losers) {
+      if (summoners[p.name]) {
+        const newTier = tierDown(summoners[p.name].tier)
+        await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name)
+      }
+    }
+
     onRecord({ winner, blue: result.team1.map(p => p.name), red: result.team2.map(p => p.name) })
     setRecorded(winner)
   }
@@ -90,12 +228,36 @@ function TeamTab({
     <div>
       <div className="card">
         <div className="card-title">참가자 추가</div>
-        <div className="add-row">
-          <input
-            value={name} onChange={e => setName(e.target.value)}
-            placeholder="소환사명"
-            onKeyDown={e => e.key === 'Enter' && addPlayer()}
-          />
+        <div className="add-row" style={{ position: 'relative' }}>
+          <div style={{ position: 'relative' }}>
+            <input
+              value={name} onChange={e => handleNameChange(e.target.value)}
+              placeholder="소환사명"
+              onKeyDown={e => e.key === 'Enter' && addPlayer()}
+              autoComplete="off"
+            />
+            {suggestions.length > 0 && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+                background: 'var(--bg3)', border: '0.5px solid var(--border2)',
+                borderRadius: 'var(--radius)', marginTop: 2, overflow: 'hidden'
+              }}>
+                {suggestions.map(s => (
+                  <div key={s} onClick={() => selectSuggestion(s)} style={{
+                    padding: '8px 12px', cursor: 'pointer', fontSize: 13,
+                    display: 'flex', alignItems: 'center', gap: 8
+                  }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg2)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <span style={{ flex: 1 }}>{s}</span>
+                    <span className="badge b-tier" style={{ fontSize: 10 }}>{summoners[s].tier}</span>
+                    <span className="badge b-line" style={{ fontSize: 10 }}>{summoners[s].line}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <select value={tier} onChange={e => setTier(e.target.value)}>
             {TIERS.map(t => <option key={t}>{t}</option>)}
           </select>
@@ -157,14 +319,15 @@ function TeamTab({
 
           <div className="card" style={{ textAlign: 'center' }}>
             <div className="card-title" style={{ marginBottom: 8 }}>경기 결과 기록</div>
-            <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 12 }}>어느 팀이 이겼나요?</div>
+            <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 4 }}>어느 팀이 이겼나요?</div>
+            <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>🏆 이긴 팀은 티어 UP, 진 팀은 티어 DOWN</div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
               <button className="btn btn-blue" onClick={() => recordWin('blue')} disabled={!!recorded}>🔵 블루팀 승리</button>
               <button className="btn btn-red" onClick={() => recordWin('red')} disabled={!!recorded}>🔴 레드팀 승리</button>
             </div>
             {recorded && (
               <div style={{ marginTop: 12, fontSize: 13, color: 'var(--green)' }}>
-                {recorded === 'blue' ? '🔵 블루팀 승리' : '🔴 레드팀 승리'}로 기록되었어요!
+                {recorded === 'blue' ? '🔵 블루팀 승리' : '🔴 레드팀 승리'}로 기록되었어요! 티어가 자동으로 업데이트됐어요 🎉
               </div>
             )}
           </div>
@@ -226,7 +389,7 @@ function RecordTab({ records, onDelete, onClear }: {
 }
 
 // ── 개인 통계 탭 ──────────────────────────────────────────────
-function StatsTab({ records }: { records: GameRecord[] }) {
+function StatsTab({ records, summoners }: { records: GameRecord[]; summoners: Record<string, { tier: string; line: Line }> }) {
   const playerMap: Record<string, { win: number; lose: number }> = {}
   records.forEach(r => {
     const winners = r.winner === 'blue' ? r.blue : r.red
@@ -253,6 +416,7 @@ function StatsTab({ records }: { records: GameRecord[] }) {
           return (
             <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '0.5px solid var(--border)' }}>
               <span style={{ flex: '0 0 90px', fontWeight: 500, fontSize: 13 }}>{name}</span>
+              {summoners[name] && <span className="badge b-tier" style={{ fontSize: 10 }}>{summoners[name].tier}</span>}
               <span className="badge b-win">{s.win}승</span>
               <span className="badge b-lose" style={{ marginLeft: 4 }}>{s.lose}패</span>
               <div className="wr-bar-bg" style={{ marginLeft: 8 }}>
@@ -269,31 +433,33 @@ function StatsTab({ records }: { records: GameRecord[] }) {
 
 // ── 메인 페이지 ──────────────────────────────────────────────
 export default function Home() {
-  const [tab, setTab] = useState<'team' | 'record' | 'stats'>('team')
+  const [tab, setTab] = useState<'team' | 'record' | 'stats' | 'summoners'>('team')
   const [records, setRecords] = useState<GameRecord[]>([])
+  const [summoners, setSummoners] = useState<Record<string, { tier: string; line: Line }>>({})
   const [loading, setLoading] = useState(true)
 
-  // Supabase에서 불러오기
-  useEffect(() => {
-    const fetchRecords = async () => {
-      const { data } = await supabase
-        .from('records')
-        .select('*')
-        .order('created_at', { ascending: false })
-      if (data) setRecords(data.map(r => ({ ...r, blue: r.blue, red: r.red })))
-      setLoading(false)
+  const fetchAll = useCallback(async () => {
+    const [{ data: recs }, { data: sums }] = await Promise.all([
+      supabase.from('records').select('*').order('created_at', { ascending: false }),
+      supabase.from('summoners').select('*'),
+    ])
+    if (recs) setRecords(recs)
+    if (sums) {
+      const map: Record<string, { tier: string; line: Line }> = {}
+      sums.forEach((s: { name: string; tier: string; line: Line }) => { map[s.name] = { tier: s.tier, line: s.line } })
+      setSummoners(map)
     }
-    fetchRecords()
+    setLoading(false)
   }, [])
+
+  useEffect(() => { fetchAll() }, [fetchAll])
 
   const addRecord = async ({ winner, blue, red }: { winner: 'blue' | 'red'; blue: string[]; red: string[] }) => {
     const now = new Date()
     const time = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-    const { data } = await supabase
-      .from('records')
-      .insert([{ winner, blue, red, time }])
-      .select()
+    const { data } = await supabase.from('records').insert([{ winner, blue, red, time }]).select()
     if (data) setRecords(prev => [data[0], ...prev])
+    await fetchAll()
   }
 
   const deleteRecord = async (id: number) => {
@@ -315,9 +481,9 @@ export default function Home() {
       </div>
 
       <div className="tabs">
-        {(['team', 'record', 'stats'] as const).map((t, i) => (
+        {(['team', 'record', 'stats', 'summoners'] as const).map((t, i) => (
           <button key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-            {['팀 뽑기', '전적 기록', '개인 통계'][i]}
+            {['팀 뽑기', '전적 기록', '개인 통계', '소환사 관리'][i]}
           </button>
         ))}
       </div>
@@ -326,9 +492,10 @@ export default function Home() {
         <div className="empty">불러오는 중...</div>
       ) : (
         <>
-          {tab === 'team' && <TeamTab onRecord={addRecord} />}
+          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
-          {tab === 'stats' && <StatsTab records={records} />}
+          {tab === 'stats' && <StatsTab records={records} summoners={summoners} />}
+          {tab === 'summoners' && <SummonerTab summoners={summoners} onRefresh={fetchAll} />}
         </>
       )}
     </div>
