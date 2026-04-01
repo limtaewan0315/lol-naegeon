@@ -10,7 +10,8 @@
   "dependencies": {
     "next": "14.2.3",
     "react": "^18",
-    "react-dom": "^18"
+    "react-dom": "^18",
+    "@supabase/supabase-js": "^2"
   },
   "devDependencies": {
     "@types/node": "^20",
