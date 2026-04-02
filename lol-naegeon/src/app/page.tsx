@@ -504,7 +504,18 @@ function RecordTab({ records, onDelete, onClear }: {
   const total = records.length
   const blue = records.filter(r => r.winner === 'blue').length
   const red = records.filter(r => r.winner === 'red').length
-  const wr = total ? Math.round(blue / total * 100) : null
+
+  const playerMap: Record<string, { win: number; lose: number }> = {}
+  records.forEach(r => {
+    const winners = r.winner === 'blue' ? r.blue : r.red
+    const losers = r.winner === 'blue' ? r.red : r.blue
+    ;[...winners, ...losers].forEach(n => { if (!playerMap[n]) playerMap[n] = { win: 0, lose: 0 } })
+    winners.forEach(n => playerMap[n].win++)
+    losers.forEach(n => playerMap[n].lose++)
+  })
+  const topPlayer = Object.entries(playerMap)
+    .filter(([, s]) => s.win + s.lose >= 10)
+    .sort((a, b) => (b[1].win / (b[1].win + b[1].lose)) - (a[1].win / (a[1].win + a[1].lose)))[0] ?? null
 
   return (
     <div>
@@ -513,6 +524,21 @@ function RecordTab({ records, onDelete, onClear }: {
           <div className="stat-box"><div className="stat-label">총 경기</div><div className="stat-value">{total}</div></div>
           <div className="stat-box"><div className="stat-label">블루 승</div><div className="stat-value blue-v">{blue}</div></div>
           <div className="stat-box"><div className="stat-label">레드 승</div><div className="stat-value red-v">{red}</div></div>
+          <div className="stat-box">
+            <div className="stat-label">🏆 최고의 소환사</div>
+            {topPlayer
+              ? <>
+                  <div className="stat-value" style={{ fontSize: 16, marginTop: 2 }}>{topPlayer[0]}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
+                    {topPlayer[1].win}승 {topPlayer[1].lose}패 
+                    <span style={{ color: 'var(--gold)', fontWeight: 600 }}>
+                      {Math.round(topPlayer[1].win / (topPlayer[1].win + topPlayer[1].lose) * 100)}%
+                    </span>
+                  </div>
+                </>
+              : <div className="stat-value" style={{ fontSize: 13, color: 'var(--text3)' }}>-</div>
+            }
+          </div>
         </div>
 
         <div className="card-title">경기 기록</div>
