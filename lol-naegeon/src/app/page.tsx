@@ -4,7 +4,10 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { TIERS, LINES, getScore, shuffle } from '@/lib/data'
 import type { Line } from '@/lib/data'
-import type { GameRecord, BalanceResult } from '@/lib/types'
+import type { GameRecord } from '@/lib/types'
+
+type TeamPlayer = { name: string; tier: string; line: Line; score: number }
+interface BalanceResult { team1: TeamPlayer[]; team2: TeamPlayer[]; s1: number; s2: number }
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -296,7 +299,7 @@ function TeamTab({
     setRecorded(winner)
   }
 
-  const sortByLine = (arr: typeof result.team1) => [...arr].sort((a, b) => (LINE_ORDER[a.line] ?? 9) - (LINE_ORDER[b.line] ?? 9))
+  const sortByLine = (arr: TeamPlayer[]) => [...arr].sort((a, b) => (LINE_ORDER[a.line] ?? 9) - (LINE_ORDER[b.line] ?? 9))
 
   return (
     <div>
