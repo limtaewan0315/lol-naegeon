@@ -285,7 +285,26 @@ function TeamTab({
       if (diff === 0) break
     }
 
-    if (!best) { setError('팀 구성 실패. 라인 다양성이 부족해요. 모스트 라인을 다양하게 설정해보세요.'); return }
+    if (!best) {
+      // 어떤 라인이 부족한지 분석
+      const linePossible: Record<string, number> = {}
+      LINES.forEach(l => { linePossible[l] = 0 })
+      players.forEach(p => {
+        linePossible[p.most1] = (linePossible[p.most1] ?? 0) + 1
+        if (p.most2) linePossible[p.most2] = (linePossible[p.most2] ?? 0) + 1
+      })
+      const shortLines = LINES.filter(l => (linePossible[l] ?? 0) < 2)
+      if (shortLines.length > 0) {
+        const msg = shortLines.map(l => {
+          const cnt = linePossible[l] ?? 0
+          return `${l} (${cnt}명 → 2명 필요)`
+        }).join(', ')
+        setError(`팀 구성 실패. 다음 라인 인원이 부족해요: ${msg}`)
+      } else {
+        setError('팀 구성 실패. 모스트 라인을 다양하게 설정해보세요.')
+      }
+      return
+    }
     setResult(best)
   }, [players, summoners])
 
