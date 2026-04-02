@@ -154,7 +154,7 @@ function TeamTab({
   players, setPlayers,
   result, setResult,
 }: {
-  onRecord: (r: { winner: 'blue' | 'red'; blue: string[]; red: string[] }) => void
+  onRecord: (r: { winner: 'blue' | 'red'; blue: string[]; red: string[]; skipInsert?: boolean }) => void
   summoners: SummonerMap
   players: PlayerEntry[]
   setPlayers: React.Dispatch<React.SetStateAction<PlayerEntry[]>>
@@ -281,15 +281,55 @@ function TeamTab({
     setResult(best)
   }, [players, summoners])
 
+  // 실버3 이하 여부 체크
+  const isSilver3OrBelow = (tier: string) => {
+    const silver3Idx = TIERS.indexOf('실버3 이하')
+    const tierIdx = TIERS.indexOf(tier)
+    return tierIdx >= silver3Idx
+  }
+
+  // 특정 플레이어의 최근 N판 승률 계산
+  const getRecentWinRate = (playerName: string, currentRecords: GameRecord[], n = 5) => {
+    const playerRecords = currentRecords.filter(r => r.blue.includes(playerName) || r.red.includes(playerName))
+    const recent = playerRecords.slice(0, n)
+    if (recent.length === 0) return 0
+    const wins = recent.filter(r => {
+      const isBlue = r.blue.includes(playerName)
+      return (isBlue && r.winner === 'blue') || (!isBlue && r.winner === 'red')
+    }).length
+    return wins / recent.length
+  }
+
   const recordWin = async (winner: 'blue' | 'red') => {
     if (!result) return
     const winners = winner === 'blue' ? result.team1 : result.team2
     const losers = winner === 'blue' ? result.team2 : result.team1
 
+    // 현재 기록 먼저 저장 (승률 계산에 이번 판 포함)
+    const now = new Date()
+    const time = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+    const { data: newRecord } = await supabase
+      .from('records')
+      .insert([{ winner, blue: result.team1.map(p => p.name), red: result.team2.map(p => p.name), time }])
+      .select()
+
+    // 이번 판 포함한 최신 records로 승률 계산
+    const updatedRecords = newRecord ? [newRecord[0], ...records] : records
+
     for (const p of winners) {
       if (summoners[p.name]?.[p.line]) {
-        const newTier = tierUp(summoners[p.name][p.line])
-        await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
+        const currentTier = summoners[p.name][p.line]
+        if (isSilver3OrBelow(currentTier)) {
+          // 실버3 이하: 최근 5판 승률 50% 이상일 때만 티어 UP
+          const wr = getRecentWinRate(p.name, updatedRecords, 5)
+          if (wr >= 0.5) {
+            const newTier = tierUp(currentTier)
+            await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
+          }
+        } else {
+          const newTier = tierUp(currentTier)
+          await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
+        }
       }
     }
     for (const p of losers) {
@@ -299,7 +339,7 @@ function TeamTab({
       }
     }
 
-    onRecord({ winner, blue: result.team1.map(p => p.name), red: result.team2.map(p => p.name) })
+    onRecord({ winner, blue: result.team1.map(p => p.name), red: result.team2.map(p => p.name), skipInsert: true })
     setRecorded(winner)
   }
 
@@ -581,11 +621,13 @@ export default function Home() {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
-  const addRecord = async ({ winner, blue, red }: { winner: 'blue' | 'red'; blue: string[]; red: string[] }) => {
-    const now = new Date()
-    const time = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-    const { data } = await supabase.from('records').insert([{ winner, blue, red, time }]).select()
-    if (data) setRecords(prev => [data[0], ...prev])
+  const addRecord = async ({ winner, blue, red, skipInsert }: { winner: 'blue' | 'red'; blue: string[]; red: string[]; skipInsert?: boolean }) => {
+    if (!skipInsert) {
+      const now = new Date()
+      const time = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+      const { data } = await supabase.from('records').insert([{ winner, blue, red, time }]).select()
+      if (data) setRecords(prev => [data[0], ...prev])
+    }
     await fetchAll()
   }
 
