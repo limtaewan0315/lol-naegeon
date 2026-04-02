@@ -290,11 +290,11 @@ function TeamTab({
     return tierIdx >= silver3Idx
   }
 
-  // 특정 플레이어의 최근 N판 승률 계산
-  const getRecentWinRate = (playerName: string, currentRecords: GameRecord[], n = 5) => {
+  // 특정 플레이어의 최근 N판 승률 계산 (N판 미만이면 null 반환)
+  const getRecentWinRate = (playerName: string, currentRecords: GameRecord[], n = 5): number | null => {
     const playerRecords = currentRecords.filter(r => r.blue.includes(playerName) || r.red.includes(playerName))
     const recent = playerRecords.slice(0, n)
-    if (recent.length === 0) return 0
+    if (recent.length < n) return null  // 최소 n판 미만이면 승급 불가
     const wins = recent.filter(r => {
       const isBlue = r.blue.includes(playerName)
       return (isBlue && r.winner === 'blue') || (!isBlue && r.winner === 'red')
@@ -324,7 +324,7 @@ function TeamTab({
         if (isSilver3OrBelow(currentTier)) {
           // 실버3 이하: 최근 5판 승률 50% 이상일 때만 티어 UP
           const wr = getRecentWinRate(p.name, updatedRecords, 5)
-          if (wr >= 0.5) {
+          if (wr !== null && wr >= 0.5) {
             const newTier = tierUp(currentTier)
             await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
           }
@@ -594,9 +594,99 @@ function StatsTab({ records, summoners }: { records: GameRecord[]; summoners: Su
   )
 }
 
+
+// ── 전체 랭킹 탭 ──────────────────────────────────────────────
+function RankingTab({ records }: { records: GameRecord[] }) {
+  const playerMap: Record<string, { win: number; lose: number }> = {}
+  records.forEach(r => {
+    const winners = r.winner === 'blue' ? r.blue : r.red
+    const losers = r.winner === 'blue' ? r.red : r.blue
+    ;[...winners, ...losers].forEach(n => { if (!playerMap[n]) playerMap[n] = { win: 0, lose: 0 } })
+    winners.forEach(n => playerMap[n].win++)
+    losers.forEach(n => playerMap[n].lose++)
+  })
+
+  // 10판 이상인 소환사만, 승률 내림차순 정렬
+  const entries = Object.entries(playerMap)
+    .filter(([, s]) => s.win + s.lose >= 10)
+    .sort((a, b) => {
+      const wA = a[1].win / (a[1].win + a[1].lose)
+      const wB = b[1].win / (b[1].win + b[1].lose)
+      return wB - wA
+    })
+
+  const medals = ['🥇', '🥈', '🥉']
+
+  return (
+    <div className="card">
+      <div className="card-title">전체 랭킹</div>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
+        🏆 10판 이상 참가한 소환사만 집계돼요
+      </div>
+      {entries.length === 0
+        ? <div className="empty">10판 이상 참가한 소환사가 없어요. 경기를 더 쌓아보세요!</div>
+        : entries.map(([name, s], i) => {
+          const total = s.win + s.lose
+          const wr = Math.round(s.win / total * 100)
+          const medal = medals[i] ?? null
+          const isTop3 = i < 3
+
+          return (
+            <div key={name} style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '12px 14px', marginBottom: 8,
+              background: isTop3 ? (
+                i === 0 ? 'rgba(255,215,0,0.07)' :
+                i === 1 ? 'rgba(192,192,192,0.07)' :
+                'rgba(205,127,50,0.07)'
+              ) : 'var(--bg3)',
+              borderRadius: 'var(--radius)',
+              border: '0.5px solid ' + (isTop3 ? (
+                i === 0 ? 'rgba(255,215,0,0.3)' :
+                i === 1 ? 'rgba(192,192,192,0.3)' :
+                'rgba(205,127,50,0.3)'
+              ) : 'var(--border)'),
+            }}>
+              {/* 순위 */}
+              <div style={{ width: 32, textAlign: 'center', flexShrink: 0 }}>
+                {medal
+                  ? <span style={{ fontSize: 22 }}>{medal}</span>
+                  : <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text3)' }}>{i + 1}</span>
+                }
+              </div>
+
+              {/* 소환사명 */}
+              <span style={{ fontWeight: 700, fontSize: 14, flex: '0 0 90px' }}>{name}</span>
+
+              {/* 승/패 */}
+              <span className="badge b-win">{s.win}승</span>
+              <span className="badge b-lose">{s.lose}패</span>
+              <span style={{ fontSize: 12, color: 'var(--text2)' }}>{total}판</span>
+
+              {/* 승률 바 */}
+              <div className="wr-bar-bg" style={{ flex: 1, marginLeft: 4 }}>
+                <div className="wr-bar" style={{
+                  width: `${wr}%`,
+                  background: i === 0 ? '#FFD700' : i === 1 ? '#C0C0C0' : i === 2 ? '#CD7F32' : 'var(--blue)'
+                }} />
+              </div>
+
+              {/* 승률 % */}
+              <span style={{
+                fontSize: 15, fontWeight: 700, minWidth: 40, textAlign: 'right',
+                color: i === 0 ? '#FFD700' : i === 1 ? '#C0C0C0' : i === 2 ? '#CD7F32' : 'var(--text)'
+              }}>{wr}%</span>
+            </div>
+          )
+        })
+      }
+    </div>
+  )
+}
+
 // ── 메인 페이지 ──────────────────────────────────────────────
 export default function Home() {
-  const [tab, setTab] = useState<'team' | 'record' | 'stats' | 'summoners'>('team')
+  const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'stats' | 'summoners'>('team')
   const [records, setRecords] = useState<GameRecord[]>([])
   const [summoners, setSummoners] = useState<SummonerMap>({})
   const [loading, setLoading] = useState(true)
@@ -652,9 +742,9 @@ export default function Home() {
       </div>
 
       <div className="tabs">
-        {(['team', 'record', 'stats', 'summoners'] as const).map((t, i) => (
+        {(['team', 'record', 'ranking', 'stats', 'summoners'] as const).map((t, i) => (
           <button key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-            {['팀 뽑기', '전적 기록', '개인 통계', '소환사 관리'][i]}
+            {['팀 뽑기', '전적 기록', '전체 랭킹', '개인 통계', '소환사 관리'][i]}
           </button>
         ))}
       </div>
@@ -665,6 +755,7 @@ export default function Home() {
         <>
           {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
+          {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} />}
           {tab === 'summoners' && <SummonerTab summoners={summoners} onRefresh={fetchAll} />}
         </>
