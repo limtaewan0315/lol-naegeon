@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { TIERS, LINES, getScore, shuffle } from '@/lib/data'
 import type { Line } from '@/lib/data'
@@ -151,15 +151,19 @@ function SummonerTab({ summoners, onRefresh }: { summoners: SummonerMap; onRefre
 function TeamTab({
   onRecord,
   summoners,
+  players, setPlayers,
+  result, setResult,
 }: {
   onRecord: (r: { winner: 'blue' | 'red'; blue: string[]; red: string[] }) => void
   summoners: SummonerMap
+  players: PlayerEntry[]
+  setPlayers: React.Dispatch<React.SetStateAction<PlayerEntry[]>>
+  result: BalanceResult | null
+  setResult: React.Dispatch<React.SetStateAction<BalanceResult | null>>
 }) {
-  const [players, setPlayers] = useState<PlayerEntry[]>([])
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [suggestions, setSuggestions] = useState<string[]>([])
-  const [result, setResult] = useState<BalanceResult | null>(null)
   const [recorded, setRecorded] = useState<'blue' | 'red' | null>(null)
 
   // 소환사의 등록된 라인 목록 (LINE_ORDER 순)
@@ -554,6 +558,9 @@ export default function Home() {
   const [records, setRecords] = useState<GameRecord[]>([])
   const [summoners, setSummoners] = useState<SummonerMap>({})
   const [loading, setLoading] = useState(true)
+  // 팀뽑기 상태 유지 (탭 이동해도 안 날아감)
+  const [teamPlayers, setTeamPlayers] = useState<PlayerEntry[]>([])
+  const [teamResult, setTeamResult] = useState<BalanceResult | null>(null)
 
   const fetchAll = useCallback(async () => {
     const [{ data: recs }, { data: sums }] = await Promise.all([
@@ -612,7 +619,7 @@ export default function Home() {
         <div className="empty">불러오는 중...</div>
       ) : (
         <>
-          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} />}
+          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} />}
           {tab === 'summoners' && <SummonerTab summoners={summoners} onRefresh={fetchAll} />}
