@@ -4,10 +4,16 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { TIERS, LINES, getScore, shuffle } from '@/lib/data'
 import type { Line } from '@/lib/data'
-import type { GameRecord } from '@/lib/types'
-
 type TeamPlayer = { name: string; tier: string; line: Line; score: number }
 interface BalanceResult { team1: TeamPlayer[]; team2: TeamPlayer[]; s1: number; s2: number }
+// blue/red는 이제 {name, line} 객체 배열로 저장
+interface GameRecord {
+  id: number
+  winner: 'blue' | 'red'
+  blue: { name: string; line: Line }[]
+  red: { name: string; line: Line }[]
+  time: string
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -155,7 +161,7 @@ function TeamTab({
   result, setResult,
   records,
 }: {
-  onRecord: (r: { winner: 'blue' | 'red'; blue: string[]; red: string[]; skipInsert?: boolean }) => void
+  onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
   summoners: SummonerMap
   players: PlayerEntry[]
   setPlayers: React.Dispatch<React.SetStateAction<PlayerEntry[]>>
@@ -292,11 +298,13 @@ function TeamTab({
 
   // 특정 플레이어의 최근 N판 승률 계산 (N판 미만이면 null 반환)
   const getRecentWinRate = (playerName: string, currentRecords: GameRecord[], n = 5): number | null => {
-    const playerRecords = currentRecords.filter(r => r.blue.includes(playerName) || r.red.includes(playerName))
+    const playerRecords = currentRecords.filter(r =>
+      r.blue.some(p => p.name === playerName) || r.red.some(p => p.name === playerName)
+    )
     const recent = playerRecords.slice(0, n)
-    if (recent.length < n) return null  // 최소 n판 미만이면 승급 불가
+    if (recent.length === 0) return null
     const wins = recent.filter(r => {
-      const isBlue = r.blue.includes(playerName)
+      const isBlue = r.blue.some(p => p.name === playerName)
       return (isBlue && r.winner === 'blue') || (!isBlue && r.winner === 'red')
     }).length
     return wins / recent.length
@@ -310,9 +318,11 @@ function TeamTab({
     // 현재 기록 먼저 저장 (승률 계산에 이번 판 포함)
     const now = new Date()
     const time = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+    const blueData = result.team1.map(p => ({ name: p.name, line: p.line }))
+    const redData = result.team2.map(p => ({ name: p.name, line: p.line }))
     const { data: newRecord } = await supabase
       .from('records')
-      .insert([{ winner, blue: result.team1.map(p => p.name), red: result.team2.map(p => p.name), time }])
+      .insert([{ winner, blue: blueData, red: redData, time }])
       .select()
 
     // 이번 판 포함한 최신 records로 승률 계산
@@ -341,7 +351,7 @@ function TeamTab({
       }
     }
 
-    onRecord({ winner, blue: result.team1.map(p => p.name), red: result.team2.map(p => p.name), skipInsert: true })
+    onRecord({ winner, blue: blueData, red: redData, skipInsert: true })
     setRecorded(winner)
   }
 
@@ -509,9 +519,9 @@ function RecordTab({ records, onDelete, onClear }: {
   records.forEach(r => {
     const winners = r.winner === 'blue' ? r.blue : r.red
     const losers = r.winner === 'blue' ? r.red : r.blue
-    ;[...winners, ...losers].forEach(n => { if (!playerMap[n]) playerMap[n] = { win: 0, lose: 0 } })
-    winners.forEach(n => playerMap[n].win++)
-    losers.forEach(n => playerMap[n].lose++)
+    ;[...winners, ...losers].forEach(p => { if (!playerMap[p.name]) playerMap[p.name] = { win: 0, lose: 0 } })
+    winners.forEach(p => playerMap[p.name].win++)
+    losers.forEach(p => playerMap[p.name].lose++)
   })
   const topPlayer = Object.entries(playerMap)
     .filter(([, s]) => s.win + s.lose >= 10)
@@ -544,21 +554,46 @@ function RecordTab({ records, onDelete, onClear }: {
         <div className="card-title">경기 기록</div>
         {records.length === 0
           ? <div className="empty">아직 기록된 경기가 없어요.</div>
-          : records.map((r, i) => (
-            <div key={r.id} className="record-row">
-              <span style={{ fontSize: 12, color: 'var(--text3)', width: 20, flexShrink: 0 }}>{records.length - i}</span>
-              <span className={`badge ${r.winner === 'blue' ? 'b-win' : 'b-lose'}`} style={{ fontSize: 12 }}>
-                {r.winner === 'blue' ? '🔵 블루승' : '🔴 레드승'}
-              </span>
-              <span style={{ flex: 1, fontSize: 11, color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                <span style={{ color: 'var(--blue)' }}>{r.blue.join(', ')}</span>
-                <span style={{ margin: '0 4px' }}>vs</span>
-                <span style={{ color: 'var(--red)' }}>{r.red.join(', ')}</span>
-              </span>
-              <span style={{ fontSize: 11, color: 'var(--text3)', flexShrink: 0 }}>{r.time}</span>
-              <button className="btn btn-danger btn-sm" onClick={() => onDelete(r.id)}>삭제</button>
+          : records.map((r, i) => {
+            const sortTeam = (team: {name:string; line:Line}[]) => [...team].sort((a,b) => (LINE_ORDER[a.line]??9)-(LINE_ORDER[b.line]??9))
+            return (
+            <div key={r.id} style={{ background: 'var(--bg3)', borderRadius: 'var(--radius)', marginBottom: 8, border: '0.5px solid var(--border)', overflow: 'hidden' }}>
+              {/* 헤더 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderBottom: '0.5px solid var(--border)' }}>
+                <span style={{ fontSize: 12, color: 'var(--text3)', width: 20, flexShrink: 0 }}>{records.length - i}</span>
+                <span className={`badge ${r.winner === 'blue' ? 'b-win' : 'b-lose'}`} style={{ fontSize: 11 }}>
+                  {r.winner === 'blue' ? '🔵 블루승' : '🔴 레드승'}
+                </span>
+                <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text3)' }}>{r.time}</span>
+                <button className="btn btn-danger btn-sm" onClick={() => onDelete(r.id)}>삭제</button>
+              </div>
+              {/* 블루팀 */}
+              <div style={{ padding: '6px 12px', borderBottom: '0.5px solid var(--border)' }}>
+                <div style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 600, marginBottom: 4 }}>🔵 블루팀</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {sortTeam(r.blue).map(p => (
+                    <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px', background: 'var(--blue-bg)', border: '0.5px solid var(--blue-border)', borderRadius: 999, fontSize: 11 }}>
+                      <span style={{ color: 'var(--text2)', fontSize: 10 }}>{p.line}</span>
+                      <span style={{ color: 'var(--text)', fontWeight: 500 }}>{p.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* 레드팀 */}
+              <div style={{ padding: '6px 12px' }}>
+                <div style={{ fontSize: 10, color: 'var(--red)', fontWeight: 600, marginBottom: 4 }}>🔴 레드팀</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {sortTeam(r.red).map(p => (
+                    <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px', background: 'var(--red-bg)', border: '0.5px solid var(--red-border)', borderRadius: 999, fontSize: 11 }}>
+                      <span style={{ color: 'var(--text2)', fontSize: 10 }}>{p.line}</span>
+                      <span style={{ color: 'var(--text)', fontWeight: 500 }}>{p.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
-          ))
+            )
+          })
         }
 
         {records.length > 0 && (
@@ -573,13 +608,24 @@ function RecordTab({ records, onDelete, onClear }: {
 
 // ── 개인 통계 탭 ──────────────────────────────────────────────
 function StatsTab({ records, summoners }: { records: GameRecord[]; summoners: SummonerMap }) {
-  const playerMap: Record<string, { win: number; lose: number }> = {}
+  // 전체 승/패 + 라인별 승/패
+  const playerMap: Record<string, { win: number; lose: number; lines: Record<string, { win: number; lose: number }> }> = {}
+
   records.forEach(r => {
     const winners = r.winner === 'blue' ? r.blue : r.red
     const losers = r.winner === 'blue' ? r.red : r.blue
-    ;[...winners, ...losers].forEach(n => { if (!playerMap[n]) playerMap[n] = { win: 0, lose: 0 } })
-    winners.forEach(n => playerMap[n].win++)
-    losers.forEach(n => playerMap[n].lose++)
+    ;[...winners, ...losers].forEach(p => {
+      if (!playerMap[p.name]) playerMap[p.name] = { win: 0, lose: 0, lines: {} }
+      if (!playerMap[p.name].lines[p.line]) playerMap[p.name].lines[p.line] = { win: 0, lose: 0 }
+    })
+    winners.forEach(p => {
+      playerMap[p.name].win++
+      playerMap[p.name].lines[p.line].win++
+    })
+    losers.forEach(p => {
+      playerMap[p.name].lose++
+      playerMap[p.name].lines[p.line].lose++
+    })
   })
 
   const entries = Object.entries(playerMap).sort((a, b) => {
@@ -590,27 +636,65 @@ function StatsTab({ records, summoners }: { records: GameRecord[]; summoners: Su
 
   return (
     <div className="card">
-      <div className="card-title">소환사별 승률</div>
+      <div className="card-title">소환사별 개인 통계</div>
       {entries.length === 0
         ? <div className="empty">경기 기록이 쌓이면 통계가 나타나요.</div>
         : entries.map(([name, s]) => {
           const total = s.win + s.lose
           const wr = Math.round(s.win / total * 100)
-          const lines = summoners[name] ? (Object.keys(summoners[name]) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b]) : []
+          const sortedLines = (Object.keys(s.lines) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b])
+          // 최근 5게임 결과
+          const recentResults = records
+            .filter(r => r.blue.some(p => p.name === name) || r.red.some(p => p.name === name))
+            .slice(0, 5)
+            .map(r => {
+              const isBlue = r.blue.some(p => p.name === name)
+              return (isBlue && r.winner === 'blue') || (!isBlue && r.winner === 'red')
+            })
           return (
-            <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '0.5px solid var(--border)' }}>
-              <span style={{ flex: '0 0 80px', fontWeight: 500, fontSize: 13 }}>{name}</span>
-              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flex: 1 }}>
-                {lines.map(l => (
-                  <span key={l} className="badge b-line" style={{ fontSize: 10 }}>{l} {summoners[name][l]}</span>
-                ))}
+            <div key={name} style={{ padding: '12px 0', borderBottom: '0.5px solid var(--border)' }}>
+              {/* 소환사명 + 총 승률 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span style={{ fontWeight: 600, fontSize: 14, flex: '0 0 90px' }}>{name}</span>
+                <span className="badge b-win">{s.win}승</span>
+                <span className="badge b-lose">{s.lose}패</span>
+                <span style={{ fontSize: 12, color: 'var(--text2)' }}>{total}판</span>
+                {/* 최근 5게임 O/X */}
+                <div style={{ display: 'flex', gap: 3, marginLeft: 4 }}>
+                  {recentResults.map((isWin, idx) => (
+                    <span key={idx} style={{
+                      width: 20, height: 20, borderRadius: 4, fontSize: 11, fontWeight: 600,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: isWin ? 'rgba(62,207,142,0.12)' : 'rgba(232,64,87,0.1)',
+                      color: isWin ? 'var(--green)' : 'var(--red)',
+                      border: isWin ? '0.5px solid rgba(62,207,142,0.3)' : '0.5px solid rgba(232,64,87,0.25)',
+                    }}>{isWin ? 'O' : 'X'}</span>
+                  ))}
+                </div>
+                <span style={{ marginLeft: 'auto', fontSize: 15, fontWeight: 600, color: wr >= 50 ? 'var(--green)' : 'var(--red)' }}>{wr}%</span>
               </div>
-              <span className="badge b-win">{s.win}승</span>
-              <span className="badge b-lose" style={{ marginLeft: 4 }}>{s.lose}패</span>
-              <div className="wr-bar-bg" style={{ marginLeft: 8 }}>
-                <div className="wr-bar" style={{ width: `${wr}%` }} />
-              </div>
-              <span style={{ fontSize: 13, fontWeight: 500, minWidth: 36, textAlign: 'right' }}>{wr}%</span>
+              {/* 라인별 승률 */}
+              {sortedLines.length > 0 && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', paddingLeft: 4 }}>
+                  {sortedLines.map(l => {
+                    const ls = s.lines[l]
+                    const lTotal = ls.win + ls.lose
+                    const lWr = Math.round(ls.win / lTotal * 100)
+                    return (
+                      <div key={l} style={{
+                        display: 'flex', alignItems: 'center', gap: 5,
+                        padding: '4px 10px', borderRadius: 'var(--radius)',
+                        background: 'var(--bg3)', border: '0.5px solid var(--border)'
+                      }}>
+                        <span className="badge b-line" style={{ fontSize: 10, padding: '1px 6px' }}>{l}</span>
+                        {summoners[name]?.[l] && <span className="badge b-tier" style={{ fontSize: 10, padding: '1px 6px' }}>{summoners[name][l]}</span>}
+                        <span style={{ fontSize: 11, color: 'var(--text2)' }}>{ls.win}승 {ls.lose}패 {lTotal}판</span>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: lWr >= 50 ? 'var(--green)' : 'var(--red)' }}>{lWr}%</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )
         })
@@ -626,9 +710,9 @@ function RankingTab({ records }: { records: GameRecord[] }) {
   records.forEach(r => {
     const winners = r.winner === 'blue' ? r.blue : r.red
     const losers = r.winner === 'blue' ? r.red : r.blue
-    ;[...winners, ...losers].forEach(n => { if (!playerMap[n]) playerMap[n] = { win: 0, lose: 0 } })
-    winners.forEach(n => playerMap[n].win++)
-    losers.forEach(n => playerMap[n].lose++)
+    ;[...winners, ...losers].forEach(p => { if (!playerMap[p.name]) playerMap[p.name] = { win: 0, lose: 0 } })
+    winners.forEach(p => playerMap[p.name].win++)
+    losers.forEach(p => playerMap[p.name].lose++)
   })
 
   // 10판 이상인 소환사만, 승률 내림차순 정렬
@@ -738,7 +822,7 @@ export default function Home() {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
-  const addRecord = async ({ winner, blue, red, skipInsert }: { winner: 'blue' | 'red'; blue: string[]; red: string[]; skipInsert?: boolean }) => {
+  const addRecord = async ({ winner, blue, red, skipInsert }: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => {
     if (!skipInsert) {
       const now = new Date()
       const time = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
