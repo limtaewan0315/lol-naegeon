@@ -513,7 +513,6 @@ function RecordTab({ records, onDelete, onClear }: {
           <div className="stat-box"><div className="stat-label">총 경기</div><div className="stat-value">{total}</div></div>
           <div className="stat-box"><div className="stat-label">블루 승</div><div className="stat-value blue-v">{blue}</div></div>
           <div className="stat-box"><div className="stat-label">레드 승</div><div className="stat-value red-v">{red}</div></div>
-          <div className="stat-box"><div className="stat-label">블루 승률</div><div className="stat-value">{wr !== null ? `${wr}%` : '-'}</div></div>
         </div>
 
         <div className="card-title">경기 기록</div>
