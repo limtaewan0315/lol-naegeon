@@ -153,6 +153,7 @@ function TeamTab({
   summoners,
   players, setPlayers,
   result, setResult,
+  records,
 }: {
   onRecord: (r: { winner: 'blue' | 'red'; blue: string[]; red: string[]; skipInsert?: boolean }) => void
   summoners: SummonerMap
@@ -160,6 +161,7 @@ function TeamTab({
   setPlayers: React.Dispatch<React.SetStateAction<PlayerEntry[]>>
   result: BalanceResult | null
   setResult: React.Dispatch<React.SetStateAction<BalanceResult | null>>
+  records: GameRecord[]
 }) {
   const [name, setName] = useState('')
   const [error, setError] = useState('')
@@ -661,7 +663,7 @@ export default function Home() {
         <div className="empty">불러오는 중...</div>
       ) : (
         <>
-          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} />}
+          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} />}
           {tab === 'summoners' && <SummonerTab summoners={summoners} onRefresh={fetchAll} />}
