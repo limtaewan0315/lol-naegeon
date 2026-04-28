@@ -504,6 +504,169 @@ function TeamTab({
             <button className="btn" onClick={balance}>다시 섞기</button>
           </div>
 
+          {/* 예상 승률 */}
+          {(() => {
+            const blue1 = sortByLine(result.team1)
+            const red1 = sortByLine(result.team2)
+            const TIER_SCORE_MAP: Record<string, number> = {}
+            TIERS.forEach((t, i) => { TIER_SCORE_MAP[t] = (TIERS.length - i) * 10 })
+
+            // 라인별 블루팀 승률 계산 (판수 가중)
+            const lineWrs = LINES.map(line => {
+              const bp = blue1.find(p => p.line === line)
+              const rp = red1.find(p => p.line === line)
+              if (!bp || !rp) return null
+
+              const matchRecs = records.filter(r => {
+                const bpInBlue = r.blue.some(p => p.name === bp.name && p.line === line)
+                const bpInRed  = r.red.some(p => p.name === bp.name && p.line === line)
+                const rpInBlue = r.blue.some(p => p.name === rp.name && p.line === line)
+                const rpInRed  = r.red.some(p => p.name === rp.name && p.line === line)
+                return (bpInBlue && rpInRed) || (bpInRed && rpInBlue)
+              })
+              const total = matchRecs.length
+              if (total > 0) {
+                const bpWin = matchRecs.filter(r => {
+                  const bpInBlue = r.blue.some(p => p.name === bp.name && p.line === line)
+                  return (bpInBlue && r.winner === 'blue') || (!bpInBlue && r.winner === 'red')
+                }).length
+                return { line, wr: bpWin / total, total, estimated: false }
+              } else {
+                // 전적 없으면 티어 점수 차이로 추정
+                const bs = TIER_SCORE_MAP[bp.tier] ?? 50
+                const rs = TIER_SCORE_MAP[rp.tier] ?? 50
+                const diff = bs - rs
+                const wr = Math.min(0.9, Math.max(0.1, 0.5 + diff * 0.01))
+                return { line, wr, total: 0, estimated: true }
+              }
+            }).filter(Boolean) as { line: string; wr: number; total: number; estimated: boolean }[]
+
+            // 판수 가중 평균 (전적없는 라인은 가중치 3)
+            const totalWeight = lineWrs.reduce((s, l) => s + (l.total > 0 ? l.total : 3), 0)
+            const blueWr = lineWrs.reduce((s, l) => s + l.wr * (l.total > 0 ? l.total : 3), 0) / totalWeight
+            const blueWrPct = Math.round(blueWr * 100)
+            const redWrPct = 100 - blueWrPct
+            const hasEstimated = lineWrs.some(l => l.estimated)
+
+            return (
+              <div className="card">
+                <div className="card-title">예상 승률</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--blue)' }}>🔵 블루팀</div>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--gold)', letterSpacing: 2 }}>VS</div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--red)' }}>🔴 레드팀</div>
+                  </div>
+                </div>
+
+                {/* 큰 승률 바 */}
+                <div style={{ position: 'relative', height: 38, background: 'var(--bg)', borderRadius: 'var(--radius)', overflow: 'hidden', marginBottom: 10, border: '1px solid var(--border)' }}>
+                  <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${blueWrPct}%`, background: 'linear-gradient(90deg, rgba(11,196,227,0.35), rgba(11,196,227,0.1))', display: 'flex', alignItems: 'center', paddingLeft: 12 }}>
+                    <span style={{ fontSize: 17, fontWeight: 600, color: 'var(--blue)' }}>{blueWrPct}%</span>
+                  </div>
+                  <div style={{ position: 'absolute', right: 0, top: 0, height: '100%', width: `${redWrPct}%`, background: 'linear-gradient(270deg, rgba(232,64,87,0.35), rgba(232,64,87,0.1))', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 12 }}>
+                    <span style={{ fontSize: 17, fontWeight: 600, color: 'var(--red)' }}>{redWrPct}%</span>
+                  </div>
+                  <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: 'rgba(200,155,60,0.4)' }} />
+                  <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 5, height: 5, background: 'var(--gold)', borderRadius: '50%' }} />
+                </div>
+
+                {hasEstimated && (
+                  <div style={{ fontSize: 10, color: 'var(--gold3)', background: 'rgba(120,90,40,0.08)', border: '1px solid rgba(120,90,40,0.2)', borderRadius: 'var(--radius)', padding: '5px 9px', marginTop: 7 }}>
+                    ⚠ 전적이 없는 라인은 티어 점수로 추정되어 정확도가 낮을 수 있어요
+                  </div>
+                )}
+              </div>
+            )
+          })()}
+
+          {/* 라인별 맞대결 전적 */}
+          <div className="card">
+            <div className="card-title">라인별 맞대결 전적</div>
+            {(() => {
+              const blue1 = sortByLine(result.team1)
+              const red1 = sortByLine(result.team2)
+              const matchups = LINES.map(line => {
+                const bp = blue1.find(p => p.line === line)
+                const rp = red1.find(p => p.line === line)
+                if (!bp || !rp) return null
+                // 같은 라인에서 상대팀으로 맞붙었을 때만 계산
+                const matchRecords = records.filter(r => {
+                  const bpInBlue = r.blue.some(p => p.name === bp.name && p.line === line)
+                  const bpInRed  = r.red.some(p => p.name === bp.name && p.line === line)
+                  const rpInBlue = r.blue.some(p => p.name === rp.name && p.line === line)
+                  const rpInRed  = r.red.some(p => p.name === rp.name && p.line === line)
+                  // bp가 블루 line, rp가 레드 line 이거나 / bp가 레드 line, rp가 블루 line
+                  return (bpInBlue && rpInRed) || (bpInRed && rpInBlue)
+                })
+                const total = matchRecords.length
+                const bpWin = matchRecords.filter(r => {
+                  const bpInBlue = r.blue.some(p => p.name === bp.name && p.line === line)
+                  return (bpInBlue && r.winner === 'blue') || (!bpInBlue && r.winner === 'red')
+                }).length
+                return { line, bp, rp, total, bpWin, rpWin: total - bpWin }
+              }).filter(Boolean)
+
+              return (
+                <div>
+                  {matchups.map(m => {
+                    if (!m) return null
+                    const bpWr = m.total > 0 ? Math.round(m.bpWin / m.total * 100) : null
+                    const rpWr = m.total > 0 ? Math.round(m.rpWin / m.total * 100) : null
+                    return (
+                      <div key={m.line} style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '10px 12px', marginBottom: 6,
+                        background: 'var(--bg3)', borderRadius: 'var(--radius)',
+                        border: '0.5px solid var(--border)'
+                      }}>
+                        {/* 블루팀 플레이어 */}
+                        <div style={{ flex: 1, textAlign: 'right' }}>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--blue)' }}>{m.bp.name}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text2)' }}>{m.bp.tier}</div>
+                        </div>
+
+                        {/* 라인 + 전적 */}
+                        <div style={{ textAlign: 'center', minWidth: 100 }}>
+                          <div style={{ marginBottom: 4 }}>
+                            <span className="badge b-line" style={{ fontSize: 10 }}>{m.line}</span>
+                          </div>
+                          {m.total === 0 ? (
+                            <div style={{ fontSize: 11, color: 'var(--text3)' }}>전적 없음</div>
+                          ) : (
+                            <>
+                              <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 4 }}>
+                                <span style={{ color: 'var(--blue)', fontWeight: 600 }}>{m.bpWin}승</span>
+                                <span style={{ margin: '0 4px' }}>-</span>
+                                <span style={{ color: 'var(--red)', fontWeight: 600 }}>{m.rpWin}승</span>
+                                <span style={{ color: 'var(--text3)', marginLeft: 4 }}>({m.total}판)</span>
+                              </div>
+                              <div style={{ height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden', position: 'relative' }}>
+                                <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${bpWr}%`, background: 'var(--blue)', borderRadius: 2 }} />
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginTop: 2 }}>
+                                <span style={{ color: bpWr && bpWr >= 50 ? 'var(--blue)' : 'var(--text3)' }}>{bpWr}%</span>
+                                <span style={{ color: rpWr && rpWr >= 50 ? 'var(--red)' : 'var(--text3)' }}>{rpWr}%</span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+
+                        {/* 레드팀 플레이어 */}
+                        <div style={{ flex: 1, textAlign: 'left' }}>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--red)' }}>{m.rp.name}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text2)' }}>{m.rp.tier}</div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
+          </div>
+
           <div className="card" style={{ textAlign: 'center' }}>
             <div className="card-title" style={{ marginBottom: 8 }}>경기 결과 기록</div>
             <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 4 }}>어느 팀이 이겼나요?</div>
