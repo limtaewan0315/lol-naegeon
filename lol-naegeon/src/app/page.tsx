@@ -543,7 +543,7 @@ function RecordTab({ records, onDelete, onClear }: {
     losers.forEach(p => playerMap[p.name].lose++)
   })
   const topPlayer = Object.entries(playerMap)
-    .filter(([, s]) => s.win + s.lose >= 10)
+    .filter(([, s]) => s.win + s.lose >= 30)
     .sort((a, b) => (b[1].win / (b[1].win + b[1].lose)) - (a[1].win / (a[1].win + a[1].lose)))[0] ?? null
 
   return (
@@ -736,7 +736,7 @@ function RankingTab({ records }: { records: GameRecord[] }) {
 
   // 10판 이상인 소환사만, 승률 내림차순 정렬
   const entries = Object.entries(playerMap)
-    .filter(([, s]) => s.win + s.lose >= 10)
+    .filter(([, s]) => s.win + s.lose >= 30)
     .sort((a, b) => {
       const wA = a[1].win / (a[1].win + a[1].lose)
       const wB = b[1].win / (b[1].win + b[1].lose)
@@ -749,10 +749,10 @@ function RankingTab({ records }: { records: GameRecord[] }) {
     <div className="card">
       <div className="card-title">전체 랭킹</div>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
-        🏆 10판 이상 참가한 소환사만 집계돼요
+        🏆 30판 이상 참가한 소환사만 집계돼요
       </div>
       {entries.length === 0
-        ? <div className="empty">10판 이상 참가한 소환사가 없어요. 경기를 더 쌓아보세요!</div>
+        ? <div className="empty">30판 이상 참가한 소환사가 없어요. 경기를 더 쌓아보세요!</div>
         : entries.map(([name, s], i) => {
           const total = s.win + s.lose
           const wr = Math.round(s.win / total * 100)
