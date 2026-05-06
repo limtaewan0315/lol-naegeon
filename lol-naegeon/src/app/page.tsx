@@ -316,14 +316,16 @@ function TeamTab({
   }
 
   // 특정 플레이어의 최근 N판 승률 계산 (N판 미만이면 null 반환)
-  const getRecentWinRate = (playerName: string, currentRecords: GameRecord[], n = 5): number | null => {
-    const playerRecords = currentRecords.filter(r =>
-      r.blue.some(p => p.name === playerName) || r.red.some(p => p.name === playerName)
+  // 라인별 최근 N판 승률 계산
+  const getRecentLineWinRate = (playerName: string, line: Line, currentRecords: GameRecord[], n = 5): number | null => {
+    const lineRecords = currentRecords.filter(r =>
+      r.blue.some(p => p.name === playerName && p.line === line) ||
+      r.red.some(p => p.name === playerName && p.line === line)
     )
-    const recent = playerRecords.slice(0, n)
+    const recent = lineRecords.slice(0, n)
     if (recent.length === 0) return null
     const wins = recent.filter(r => {
-      const isBlue = r.blue.some(p => p.name === playerName)
+      const isBlue = r.blue.some(p => p.name === playerName && p.line === line)
       return (isBlue && r.winner === 'blue') || (!isBlue && r.winner === 'red')
     }).length
     return wins / recent.length
@@ -351,9 +353,9 @@ function TeamTab({
       if (summoners[p.name]?.[p.line]) {
         const currentTier = summoners[p.name][p.line]
         if (isSilver3OrBelow(currentTier)) {
-          // 실버3 이하: 최근 5판 승률 50% 이상일 때만 티어 UP
-          const wr = getRecentWinRate(p.name, updatedRecords, 5)
-          if (wr !== null && wr >= 0.5) {
+          // 실버3 이하: 해당 라인 최근 5판 승률 60% 이상일 때만 티어 UP
+          const wr = getRecentLineWinRate(p.name, p.line, updatedRecords, 5)
+          if (wr !== null && wr >= 0.6) {
             const newTier = tierUp(currentTier)
             await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
           }
@@ -790,101 +792,285 @@ function RecordTab({ records, onDelete, onClear }: {
 
 // ── 개인 통계 탭 ──────────────────────────────────────────────
 function StatsTab({ records, summoners }: { records: GameRecord[]; summoners: SummonerMap }) {
-  // 전체 승/패 + 라인별 승/패
-  const playerMap: Record<string, { win: number; lose: number; lines: Record<string, { win: number; lose: number }> }> = {}
+  const [search, setSearch] = useState('')
+  const [selected, setSelected] = useState<string | null>(null)
+  const [suggestions, setSuggestions] = useState<string[]>([])
 
-  records.forEach(r => {
-    const winners = r.winner === 'blue' ? r.blue : r.red
-    const losers = r.winner === 'blue' ? r.red : r.blue
-    ;[...winners, ...losers].forEach(p => {
-      if (!playerMap[p.name]) playerMap[p.name] = { win: 0, lose: 0, lines: {} }
-      if (!playerMap[p.name].lines[p.line]) playerMap[p.name].lines[p.line] = { win: 0, lose: 0 }
-    })
-    winners.forEach(p => {
-      playerMap[p.name].win++
-      playerMap[p.name].lines[p.line].win++
-    })
-    losers.forEach(p => {
-      playerMap[p.name].lose++
-      playerMap[p.name].lines[p.line].lose++
-    })
-  })
+  // 전체 플레이어 목록 (records 기반)
+  const allNames = Array.from(new Set(records.flatMap(r => [...r.blue, ...r.red].map(p => p.name)))).sort()
 
-  const entries = Object.entries(playerMap).sort((a, b) => {
-    const wA = a[1].win / (a[1].win + a[1].lose)
-    const wB = b[1].win / (b[1].win + b[1].lose)
-    return wB - wA
-  })
+  const handleSearch = (val: string) => {
+    setSearch(val)
+    setSelected(null)
+    if (val.trim()) setSuggestions(allNames.filter(n => n.includes(val.trim())).slice(0, 6))
+    else setSuggestions([])
+  }
+
+  const selectName = (name: string) => {
+    setSelected(name)
+    setSearch(name)
+    setSuggestions([])
+  }
+
+  // 선택된 소환사 통계 계산
+  const getStats = (name: string) => {
+    let win = 0, lose = 0
+    const lines: Record<string, { win: number; lose: number; recent: boolean[] }> = {}
+    const recentAll: boolean[] = []
+
+    records.forEach(r => {
+      const inBlue = r.blue.some(p => p.name === name)
+      const inRed = r.red.some(p => p.name === name)
+      if (!inBlue && !inRed) return
+      const isWin = (inBlue && r.winner === 'blue') || (inRed && r.winner === 'red')
+      if (isWin) win++; else lose++
+      recentAll.push(isWin)
+
+      // 라인별
+      const p = [...r.blue, ...r.red].find(p => p.name === name)
+      if (p) {
+        if (!lines[p.line]) lines[p.line] = { win: 0, lose: 0, recent: [] }
+        if (isWin) lines[p.line].win++; else lines[p.line].lose++
+        lines[p.line].recent.push(isWin)
+      }
+    })
+    return { win, lose, lines, recentAll }
+  }
+
+  const OX = ({ results }: { results: boolean[] }) => (
+    <div style={{ display: 'flex', gap: 3 }}>
+      {results.slice(0, 5).map((isWin, idx) => (
+        <span key={idx} style={{
+          width: 20, height: 20, borderRadius: 4, fontSize: 11, fontWeight: 600,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: isWin ? 'rgba(62,207,142,0.12)' : 'rgba(232,64,87,0.1)',
+          color: isWin ? 'var(--green)' : 'var(--red)',
+          border: isWin ? '0.5px solid rgba(62,207,142,0.3)' : '0.5px solid rgba(232,64,87,0.25)',
+        }}>{isWin ? 'O' : 'X'}</span>
+      ))}
+    </div>
+  )
 
   return (
-    <div className="card">
-      <div className="card-title">소환사별 개인 통계</div>
-      {entries.length === 0
-        ? <div className="empty">경기 기록이 쌓이면 통계가 나타나요.</div>
-        : entries.map(([name, s]) => {
-          const total = s.win + s.lose
-          const wr = Math.round(s.win / total * 100)
-          const sortedLines = (Object.keys(s.lines) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b])
-          // 최근 5게임 결과
-          const recentResults = records
-            .filter(r => r.blue.some(p => p.name === name) || r.red.some(p => p.name === name))
-            .slice(0, 5)
-            .map(r => {
-              const isBlue = r.blue.some(p => p.name === name)
-              return (isBlue && r.winner === 'blue') || (!isBlue && r.winner === 'red')
-            })
+    <div>
+      <div className="card">
+        <div className="card-title">개인 통계 검색</div>
+        <div style={{ position: 'relative', marginBottom: 10 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input value={search} onChange={e => handleSearch(e.target.value)} placeholder="소환사명 검색" autoComplete="off" style={{ flex: 1 }} />
+            {selected && <button className="btn btn-sm" onClick={() => { setSearch(''); setSelected(null); setSuggestions([]) }}>초기화</button>}
+          </div>
+          {suggestions.length > 0 && (
+            <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--bg3)', border: '0.5px solid var(--border2)', borderRadius: 'var(--radius)', marginTop: 2, overflow: 'hidden' }}>
+              {suggestions.map(s => (
+                <div key={s} onClick={() => selectName(s)} style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg2)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                  {s}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        {!selected && <div className="empty">소환사명을 검색해서 통계를 확인하세요</div>}
+        {selected && (() => {
+          const { win, lose, lines, recentAll } = getStats(selected)
+          const total = win + lose
+          if (total === 0) return <div className="empty">전적이 없어요.</div>
+          const wr = Math.round(win / total * 100)
+          const sortedLines = (Object.keys(lines) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b])
           return (
-            <div key={name} style={{ padding: '12px 0', borderBottom: '0.5px solid var(--border)' }}>
-              {/* 소환사명 + 총 승률 */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span style={{ fontWeight: 600, fontSize: 14, flex: '0 0 90px' }}>{name}</span>
-                <span className="badge b-win">{s.win}승</span>
-                <span className="badge b-lose">{s.lose}패</span>
+            <div>
+              {/* 총 통계 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
+                <span style={{ fontWeight: 700, fontSize: 15, flex: '0 0 100px' }}>{selected}</span>
+                <span className="badge b-win">{win}승</span>
+                <span className="badge b-lose">{lose}패</span>
                 <span style={{ fontSize: 12, color: 'var(--text2)' }}>{total}판</span>
-                {/* 최근 5게임 O/X */}
-                <div style={{ display: 'flex', gap: 3, marginLeft: 4 }}>
-                  {recentResults.map((isWin, idx) => (
-                    <span key={idx} style={{
-                      width: 20, height: 20, borderRadius: 4, fontSize: 11, fontWeight: 600,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      background: isWin ? 'rgba(62,207,142,0.12)' : 'rgba(232,64,87,0.1)',
-                      color: isWin ? 'var(--green)' : 'var(--red)',
-                      border: isWin ? '0.5px solid rgba(62,207,142,0.3)' : '0.5px solid rgba(232,64,87,0.25)',
-                    }}>{isWin ? 'O' : 'X'}</span>
-                  ))}
-                </div>
-                <span style={{ marginLeft: 'auto', fontSize: 15, fontWeight: 600, color: wr >= 50 ? 'var(--green)' : 'var(--red)' }}>{wr}%</span>
+                <OX results={recentAll} />
+                <span style={{ marginLeft: 'auto', fontSize: 16, fontWeight: 700, color: wr >= 50 ? 'var(--green)' : 'var(--red)' }}>{wr}%</span>
               </div>
-              {/* 라인별 승률 */}
-              {sortedLines.length > 0 && (
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', paddingLeft: 4 }}>
-                  {sortedLines.map(l => {
-                    const ls = s.lines[l]
-                    const lTotal = ls.win + ls.lose
-                    const lWr = Math.round(ls.win / lTotal * 100)
-                    return (
-                      <div key={l} style={{
-                        display: 'flex', alignItems: 'center', gap: 5,
-                        padding: '4px 10px', borderRadius: 'var(--radius)',
-                        background: 'var(--bg3)', border: '0.5px solid var(--border)'
-                      }}>
-                        <span className="badge b-line" style={{ fontSize: 10, padding: '1px 6px' }}>{l}</span>
-                        {summoners[name]?.[l] && <span className="badge b-tier" style={{ fontSize: 10, padding: '1px 6px' }}>{summoners[name][l]}</span>}
-                        <span style={{ fontSize: 11, color: 'var(--text2)' }}>{ls.win}승 {ls.lose}패 {lTotal}판</span>
-                        <span style={{ fontSize: 11, fontWeight: 600, color: lWr >= 50 ? 'var(--green)' : 'var(--red)' }}>{lWr}%</span>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
+              {/* 라인별 통계 */}
+              <div style={{ fontSize: 11, color: 'var(--text3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>라인별 통계</div>
+              {sortedLines.map(l => {
+                const ls = lines[l]
+                const lTotal = ls.win + ls.lose
+                const lWr = Math.round(ls.win / lTotal * 100)
+                return (
+                  <div key={l} style={{ padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)', marginBottom: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span className="badge b-line">{l}</span>
+                      {summoners[selected]?.[l] && <span className="badge b-tier">{summoners[selected][l]}</span>}
+                      <span className="badge b-win" style={{ fontSize: 10 }}>{ls.win}승</span>
+                      <span className="badge b-lose" style={{ fontSize: 10 }}>{ls.lose}패</span>
+                      <span style={{ fontSize: 11, color: 'var(--text2)' }}>{lTotal}판</span>
+                      <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 600, color: lWr >= 50 ? 'var(--green)' : 'var(--red)' }}>{lWr}%</span>
+                    </div>
+                    {/* 라인별 최근 5판 */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 10, color: 'var(--text3)' }}>최근</span>
+                      <OX results={ls.recent} />
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )
-        })
-      }
+        })()}
+      </div>
     </div>
   )
 }
 
+
+// ── 상대 전적 검색 탭 ──────────────────────────────────────────────
+function MatchupTab({ records }: { records: GameRecord[] }) {
+  const [nameA, setNameA] = useState('')
+  const [nameB, setNameB] = useState('')
+  const [sugA, setSugA] = useState<string[]>([])
+  const [sugB, setSugB] = useState<string[]>([])
+
+  const allNames = Array.from(new Set(records.flatMap(r => [...r.blue, ...r.red].map(p => p.name)))).sort()
+
+  const handleA = (val: string) => { setNameA(val); setSugA(val ? allNames.filter(n => n.includes(val) && n !== nameB).slice(0, 5) : []) }
+  const handleB = (val: string) => { setNameB(val); setSugB(val ? allNames.filter(n => n.includes(val) && n !== nameA).slice(0, 5) : []) }
+
+  // 두 소환사가 같은 게임에 있었던 전적 계산
+  const getMatchup = () => {
+    if (!nameA || !nameB) return null
+    const matched = records.filter(r => {
+      const allP = [...r.blue, ...r.red].map(p => p.name)
+      return allP.includes(nameA) && allP.includes(nameB)
+    })
+    if (matched.length === 0) return { total: 0, aWin: 0, bWin: 0, sameTeam: 0, oppose: 0, sameWin: 0 }
+
+    let aWin = 0, bWin = 0, sameTeam = 0, oppose = 0, sameWin = 0
+    matched.forEach(r => {
+      const aInBlue = r.blue.some(p => p.name === nameA)
+      const bInBlue = r.blue.some(p => p.name === nameB)
+      const aWins = (aInBlue && r.winner === 'blue') || (!aInBlue && r.winner === 'red')
+
+      if (aInBlue === bInBlue) {
+        sameTeam++
+        if (aWins) sameWin++
+      } else {
+        oppose++
+        if (aWins) aWin++; else bWin++
+      }
+    })
+    return { total: matched.length, aWin, bWin, sameTeam, oppose, sameWin }
+  }
+
+  const result = nameA && nameB && nameA !== nameB ? getMatchup() : null
+
+  return (
+    <div>
+      <div className="card">
+        <div className="card-title">상대 전적 검색</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+          {/* 소환사 A */}
+          <div style={{ position: 'relative' }}>
+            <input value={nameA} onChange={e => handleA(e.target.value)} placeholder="소환사 A" autoComplete="off" />
+            {sugA.length > 0 && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--bg3)', border: '0.5px solid var(--border2)', borderRadius: 'var(--radius)', marginTop: 2, overflow: 'hidden' }}>
+                {sugA.map(s => (
+                  <div key={s} onClick={() => { setNameA(s); setSugA([]) }} style={{ padding: '7px 12px', cursor: 'pointer', fontSize: 13 }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg2)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{s}</div>
+                ))}
+              </div>
+            )}
+          </div>
+          <span style={{ fontSize: 13, color: 'var(--gold)', textAlign: 'center', letterSpacing: 2 }}>VS</span>
+          {/* 소환사 B */}
+          <div style={{ position: 'relative' }}>
+            <input value={nameB} onChange={e => handleB(e.target.value)} placeholder="소환사 B" autoComplete="off" />
+            {sugB.length > 0 && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--bg3)', border: '0.5px solid var(--border2)', borderRadius: 'var(--radius)', marginTop: 2, overflow: 'hidden' }}>
+                {sugB.map(s => (
+                  <div key={s} onClick={() => { setNameB(s); setSugB([]) }} style={{ padding: '7px 12px', cursor: 'pointer', fontSize: 13 }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg2)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{s}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {!nameA || !nameB || nameA === nameB
+          ? <div className="empty">두 소환사를 검색해서 전적을 확인하세요</div>
+          : result === null ? null
+          : result.total === 0
+          ? <div className="empty">두 소환사가 함께한 게임이 없어요.</div>
+          : (
+            <div>
+              {/* 상대팀 전적 */}
+              {result.oppose > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>맞대결 전적</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
+                    {/* A */}
+                    <div style={{ flex: 1, textAlign: 'right' }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--blue)' }}>{nameA}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>{result.aWin}승</div>
+                    </div>
+                    {/* 가운데 바 */}
+                    <div style={{ textAlign: 'center', minWidth: 120 }}>
+                      <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>
+                        <span style={{ color: 'var(--blue)', fontWeight: 600 }}>{result.aWin}</span>
+                        <span style={{ margin: '0 6px', color: 'var(--text3)' }}>-</span>
+                        <span style={{ color: 'var(--red)', fontWeight: 600 }}>{result.bWin}</span>
+                        <span style={{ color: 'var(--text3)', marginLeft: 6, fontSize: 11 }}>({result.oppose}판)</span>
+                      </div>
+                      <div style={{ height: 5, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden', display: 'flex' }}>
+                        <div style={{ height: '100%', width: `${Math.round(result.aWin / result.oppose * 100)}%`, background: 'var(--blue)' }} />
+                        <div style={{ height: '100%', flex: 1, background: 'var(--red)' }} />
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 3 }}>
+                        <span style={{ color: 'var(--blue)', fontWeight: 600 }}>{Math.round(result.aWin / result.oppose * 100)}%</span>
+                        <span style={{ color: 'var(--red)', fontWeight: 600 }}>{Math.round(result.bWin / result.oppose * 100)}%</span>
+                      </div>
+                    </div>
+                    {/* B */}
+                    <div style={{ flex: 1, textAlign: 'left' }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--red)' }}>{nameB}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>{result.bWin}승</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 같은팀 전적 */}
+              {result.sameTeam > 0 && (
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--text3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>같은 팀 전적</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)', marginBottom: 4 }}>
+                        <span style={{ color: 'var(--blue)', fontWeight: 600 }}>{nameA}</span>
+                        <span style={{ margin: '0 6px', color: 'var(--text3)' }}>+</span>
+                        <span style={{ color: 'var(--red)', fontWeight: 600 }}>{nameB}</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: 'var(--text2)' }}>
+                        <span style={{ color: 'var(--green)', fontWeight: 600 }}>{result.sameWin}승</span>
+                        <span style={{ margin: '0 4px', color: 'var(--text3)' }}>/</span>
+                        <span style={{ color: 'var(--red)' }}>{result.sameTeam - result.sameWin}패</span>
+                        <span style={{ color: 'var(--text3)', marginLeft: 6 }}>({result.sameTeam}판)</span>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: Math.round(result.sameWin / result.sameTeam * 100) >= 50 ? 'var(--green)' : 'var(--red)' }}>
+                      {Math.round(result.sameWin / result.sameTeam * 100)}%
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        }
+      </div>
+    </div>
+  )
+}
 
 // ── 전체 랭킹 탭 ──────────────────────────────────────────────
 function RankingTab({ records }: { records: GameRecord[] }) {
@@ -977,7 +1163,7 @@ function RankingTab({ records }: { records: GameRecord[] }) {
 
 // ── 메인 페이지 ──────────────────────────────────────────────
 export default function Home() {
-  const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'stats' | 'summoners'>('team')
+  const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'stats' | 'matchup' | 'summoners'>('team')
   const [records, setRecords] = useState<GameRecord[]>([])
   const [summoners, setSummoners] = useState<SummonerMap>({})
   const [loading, setLoading] = useState(true)
@@ -1033,9 +1219,9 @@ export default function Home() {
       </div>
 
       <div className="tabs">
-        {(['team', 'record', 'ranking', 'stats', 'summoners'] as const).map((t, i) => (
+        {(['team', 'record', 'ranking', 'stats', 'matchup', 'summoners'] as const).map((t, i) => (
           <button key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-            {['팀 뽑기', '전적 기록', '전체 랭킹', '개인 통계', '소환사 관리'][i]}
+            {['팀 뽑기', '전적 기록', '전체 랭킹', '개인 통계', '상대 전적', '소환사 관리'][i]}
           </button>
         ))}
       </div>
@@ -1048,6 +1234,7 @@ export default function Home() {
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} />}
+          {tab === 'matchup' && <MatchupTab records={records} />}
           {tab === 'summoners' && <SummonerTab summoners={summoners} onRefresh={fetchAll} />}
         </>
       )}
