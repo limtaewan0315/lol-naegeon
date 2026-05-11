@@ -176,6 +176,8 @@ function VoteSection({ recordId, winner, result, summoners, records, startedAt, 
   const [aceVote, setAceVote] = useState('')
   const [votes, setVotes] = useState<{ vote_type: string; candidate: string; voter: string }[]>([])
   const [myVoted, setMyVoted] = useState(false)
+  // votes 데이터에서 이미 투표한 이름 목록
+  const votedVoters = new Set(votes.map(v => v.voter))
   const [finished, setFinished] = useState(false)
   const [voteResult, setVoteResult] = useState<{ bus: string | null; ace: string | null; tied: boolean; busValid?: boolean; aceValid?: boolean; busTied?: boolean; aceTied?: boolean } | null>(null)
 
@@ -324,7 +326,9 @@ function VoteSection({ recordId, winner, result, summoners, records, startedAt, 
 
   // 이름 선택 후 내 팀 판별
   const myTeam = myName ? (isWinner(myName) ? 'winner' : isLoser(myName) ? 'loser' : null) : null
-  const canVote = myName && ((myTeam === 'winner' && busVote) || (myTeam === 'loser' && aceVote))
+  const canVote = myName && !votedVoters.has(myName) && ((myTeam === 'winner' && busVote) || (myTeam === 'loser' && aceVote))
+  // 이름 선택 시 이미 투표했으면 자동 완료 처리
+  const alreadyVoted = myName ? votedVoters.has(myName) : false
 
   if (voteResult) {
     return (
@@ -432,7 +436,7 @@ function VoteSection({ recordId, winner, result, summoners, records, startedAt, 
         </div>
       </div>
 
-      {!myVoted ? (
+      {!myVoted && !alreadyVoted ? (
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
           <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>
             {!myName
@@ -447,7 +451,11 @@ function VoteSection({ recordId, winner, result, summoners, records, startedAt, 
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <select value={myName} onChange={e => setMyName(e.target.value)} style={{ flex: 1 }}>
               <option value=''>나는 누구인가요?</option>
-              {allPlayers.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+              {allPlayers.map(p => (
+                <option key={p.name} value={p.name}>
+                  {votedVoters.has(p.name) ? `✅ ${p.name} (투표완료)` : p.name}
+                </option>
+              ))}
             </select>
             <button className="btn btn-gold" onClick={submitVote} disabled={!canVote}>
               투표 완료
@@ -462,7 +470,7 @@ function VoteSection({ recordId, winner, result, summoners, records, startedAt, 
         </div>
       ) : (
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12, textAlign: 'center', fontSize: 13, color: 'var(--green)' }}>
-          투표 완료! 결과를 기다리는 중... ({timeLeft}초 후 자동 마감)
+          {alreadyVoted ? `✅ ${myName}은(는) 이미 투표했어요!` : '투표 완료!'} 결과를 기다리는 중... ({timeLeft}초 후 자동 마감)
         </div>
       )}
     </div>
