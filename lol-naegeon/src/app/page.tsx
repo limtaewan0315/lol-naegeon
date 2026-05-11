@@ -155,15 +155,22 @@ function SummonerTab({ summoners, onRefresh }: { summoners: SummonerMap; onRefre
 
 
 // ── 투표 섹션 ──────────────────────────────────────────────
-function VoteSection({ recordId, winner, result, summoners, records, onComplete }: {
+function VoteSection({ recordId, winner, result, summoners, records, startedAt, onComplete }: {
   recordId: number
   winner: 'blue' | 'red'
   result: BalanceResult
   summoners: SummonerMap
   records: GameRecord[]
+  startedAt: string | null
   onComplete: () => void
 }) {
-  const [timeLeft, setTimeLeft] = useState(60)
+  // startedAt 기준으로 남은 시간 계산
+  const calcTimeLeft = () => {
+    if (!startedAt) return 60
+    const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)
+    return Math.max(0, 60 - elapsed)
+  }
+  const [timeLeft, setTimeLeft] = useState(calcTimeLeft)
   const [myName, setMyName] = useState('')
   const [busVote, setBusVote] = useState('')
   const [aceVote, setAceVote] = useState('')
@@ -191,17 +198,16 @@ function VoteSection({ recordId, winner, result, summoners, records, onComplete 
     return () => { supabase.removeChannel(channel) }
   }, [recordId])
 
-  // 60초 타이머
+  // 60초 타이머 (startedAt 기준으로 매초 재계산)
   useEffect(() => {
     if (finished) return
     const timer = setInterval(() => {
-      setTimeLeft(t => {
-        if (t <= 1) { clearInterval(timer); processResult(); return 0 }
-        return t - 1
-      })
+      const left = calcTimeLeft()
+      setTimeLeft(left)
+      if (left <= 0) { clearInterval(timer); processResult() }
     }, 1000)
     return () => clearInterval(timer)
-  }, [finished])
+  }, [finished, startedAt])
 
   // 투표 결과 처리
   const processResult = async () => {
@@ -493,6 +499,7 @@ function TeamTab({
   onSessionUpdate,
   voteRecordId,
   voteWinner,
+  voteStartedAt,
   onVoteStart,
   onVoteEnd,
 }: {
@@ -506,6 +513,7 @@ function TeamTab({
   onSessionUpdate: (players: PlayerEntry[], result: BalanceResult | null) => void
   voteRecordId: number | null
   voteWinner: 'blue' | 'red' | null
+  voteStartedAt: string | null
   onVoteStart: (recordId: number, winner: 'blue' | 'red') => void
   onVoteEnd: () => void
 }) {
@@ -1044,6 +1052,7 @@ function TeamTab({
               result={result!}
               summoners={summoners}
               records={records}
+              startedAt={voteStartedAt}
               onComplete={() => onVoteEnd()}
             />
           )}
@@ -1537,6 +1546,7 @@ export default function Home() {
   // 투표 상태 (전체 공유)
   const [voteRecordId, setVoteRecordId] = useState<number | null>(null)
   const [voteWinner, setVoteWinner] = useState<'blue' | 'red' | null>(null)
+  const [voteStartedAt, setVoteStartedAt] = useState<string | null>(null)
 
   const fetchAll = useCallback(async () => {
     const [{ data: recs }, { data: sums }, { data: sess }] = await Promise.all([
@@ -1559,9 +1569,11 @@ export default function Home() {
       if (sess.vote_record_id) {
         setVoteRecordId(sess.vote_record_id)
         setVoteWinner(sess.vote_winner)
+        setVoteStartedAt(sess.vote_started_at ?? null)
       } else {
         setVoteRecordId(null)
         setVoteWinner(null)
+        setVoteStartedAt(null)
       }
     }
     setLoading(false)
@@ -1581,9 +1593,11 @@ export default function Home() {
           if (sess.vote_record_id) {
             setVoteRecordId(sess.vote_record_id)
             setVoteWinner(sess.vote_winner)
+            setVoteStartedAt(sess.vote_started_at ?? null)
           } else {
             setVoteRecordId(null)
             setVoteWinner(null)
+            setVoteStartedAt(null)
           }
         }
       })
@@ -1596,21 +1610,19 @@ export default function Home() {
     await supabase.from('session').upsert({ id: 1, players, result, updated_at: new Date().toISOString() })
   }
 
-  // 투표 세션 업데이트
-  const updateVoteSession = async (recordId: number | null, winner: string | null) => {
-    await supabase.from('session').upsert({ id: 1, vote_record_id: recordId, vote_winner: winner, updated_at: new Date().toISOString() })
-  }
+
 
   const handleVoteStart = async (recordId: number, winner: 'blue' | 'red') => {
     setVoteRecordId(recordId)
     setVoteWinner(winner)
-    await updateVoteSession(recordId, winner)
+    const startedAt = new Date().toISOString()
+    await supabase.from('session').upsert({ id: 1, vote_record_id: recordId, vote_winner: winner, vote_started_at: startedAt, updated_at: startedAt })
   }
 
   const handleVoteEnd = async () => {
     setVoteRecordId(null)
     setVoteWinner(null)
-    await updateVoteSession(null, null)
+    await supabase.from('session').upsert({ id: 1, vote_record_id: null, vote_winner: null, vote_started_at: null, updated_at: new Date().toISOString() })
     await fetchAll()
   }
 
@@ -1674,7 +1686,7 @@ export default function Home() {
         <div className="empty">불러오는 중...</div>
       ) : (
         <>
-          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} voteRecordId={voteRecordId} voteWinner={voteWinner} onVoteStart={handleVoteStart} onVoteEnd={handleVoteEnd} />}
+          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} voteRecordId={voteRecordId} voteWinner={voteWinner} voteStartedAt={voteStartedAt} onVoteStart={handleVoteStart} onVoteEnd={handleVoteEnd} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} />}
