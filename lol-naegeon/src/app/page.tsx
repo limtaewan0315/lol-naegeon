@@ -1318,15 +1318,21 @@ function StatsTab({ records, summoners, voteResults, tierHistory }: {
     const twoWeeksAgo = new Date()
     twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14)
     const history = tierHistory
-      .filter(h => h.name === name && new Date((h as any).created_at ?? 0) >= twoWeeksAgo)
+      .filter(h => {
+        if (h.name !== name) return false
+        const createdAt = (h as any).created_at
+        if (!createdAt) return true // created_at 없으면 포함
+        return new Date(createdAt) >= twoWeeksAgo
+      })
       .slice()
       .reverse()
     return history
   }
 
-  // 날짜+시간 포맷 (M/D HH:mm)
   const fmtDate = (dateStr: string) => {
+    if (!dateStr) return ''
     const d = new Date(dateStr)
+    if (isNaN(d.getTime())) return ''
     return `${d.getMonth() + 1}/${d.getDate()}`
   }
 
