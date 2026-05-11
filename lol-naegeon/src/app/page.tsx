@@ -170,7 +170,7 @@ function VoteSection({ recordId, winner, result, summoners, records, onComplete 
   const [votes, setVotes] = useState<{ vote_type: string; candidate: string; voter: string }[]>([])
   const [myVoted, setMyVoted] = useState(false)
   const [finished, setFinished] = useState(false)
-  const [voteResult, setVoteResult] = useState<{ bus: string | null; ace: string | null; tied: boolean } | null>(null)
+  const [voteResult, setVoteResult] = useState<{ bus: string | null; ace: string | null; tied: boolean; busValid?: boolean; aceValid?: boolean; busTied?: boolean; aceTied?: boolean } | null>(null)
 
   const winners = winner === 'blue' ? result.team1 : result.team2
   const losers = winner === 'blue' ? result.team2 : result.team1
@@ -214,42 +214,47 @@ function VoteSection({ recordId, winner, result, summoners, records, onComplete 
     const aceVotes = voteData.filter(v => v.vote_type === 'ace')
     const totalVoters = voteData.filter(v => v.vote_type === 'bus').length + voteData.filter(v => v.vote_type === 'ace').length
 
-    // 투표율 체크 (BUS 투표 기준, 10명 중 6명 이상)
+    // BUS/ACE 각각 독립적으로 유효성 체크
     const busCount = busVotes.length
-    const valid = busCount >= 6
+    const aceCount = aceVotes.length
+    const busValid = busCount >= 3
+    const aceValid = aceCount >= 3
 
     let busWinner: string | null = null
     let aceWinner: string | null = null
-    let tied = false
+    let busTied = false
+    let aceTied = false
 
-    if (valid) {
-      // BUS 집계
-      const busTally: Record<string, number> = {}
-      busVotes.forEach(v => { busTally[v.candidate] = (busTally[v.candidate] ?? 0) + 1 })
-      const busMax = Math.max(...Object.values(busTally))
-      const busTop = Object.entries(busTally).filter(([, c]) => c === busMax)
+    if (busValid) {
+      const busTallyMap: Record<string, number> = {}
+      busVotes.forEach(v => { busTallyMap[v.candidate] = (busTallyMap[v.candidate] ?? 0) + 1 })
+      const busMax = Math.max(...Object.values(busTallyMap))
+      const busTop = Object.entries(busTallyMap).filter(([, c]) => c === busMax)
       if (busTop.length === 1) busWinner = busTop[0][0]
-      else tied = true
-
-      // ACE 집계
-      const aceTally: Record<string, number> = {}
-      aceVotes.forEach(v => { aceTally[v.candidate] = (aceTally[v.candidate] ?? 0) + 1 })
-      const aceMax = Math.max(...Object.values(aceTally))
-      const aceTop = Object.entries(aceTally).filter(([, c]) => c === aceMax)
-      if (aceTop.length === 1) aceWinner = aceTop[0][0]
+      else busTied = true
     }
 
-    setVoteResult({ bus: busWinner, ace: aceWinner, tied: !valid || tied })
+    if (aceValid) {
+      const aceTallyMap: Record<string, number> = {}
+      aceVotes.forEach(v => { aceTallyMap[v.candidate] = (aceTallyMap[v.candidate] ?? 0) + 1 })
+      const aceMax = Math.max(...Object.values(aceTallyMap))
+      const aceTop = Object.entries(aceTallyMap).filter(([, c]) => c === aceMax)
+      if (aceTop.length === 1) aceWinner = aceTop[0][0]
+      else aceTied = true
+    }
 
-    // 티어 변동 처리 (tier_history에 이력 저장)
+    setVoteResult({ bus: busWinner, ace: aceWinner, tied: false, busValid, aceValid, busTied, aceTied })
+
+    // 티어 변동 처리
     const updatedRecords = records
     const historyEntries: { record_id: number; name: string; line: string; tier_before: string; tier_after: string }[] = []
 
+    // 이긴팀: BUS 유효하면 1등 제외, 아니면 전원 UP
     for (const p of winners) {
       if (!summoners[p.name]?.[p.line]) continue
       const currentTier = summoners[p.name][p.line]
-      const skip = valid && !tied && busWinner === p.name
-      if (skip) continue
+      const skipBus = busValid && !busTied && busWinner === p.name
+      if (skipBus) continue
       let newTier: string | null = null
       if (isSilver3OrBelow(currentTier, summoners)) {
         const wr = getLineWR(p.name, p.line, updatedRecords)
@@ -262,10 +267,12 @@ function VoteSection({ recordId, winner, result, summoners, records, onComplete 
         historyEntries.push({ record_id: recordId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
       }
     }
+
+    // 진팀: ACE 유효하면 1등 제외, 아니면 전원 DOWN
     for (const p of losers) {
       if (!summoners[p.name]?.[p.line]) continue
-      const skip = valid && !tied && aceWinner === p.name
-      if (skip) continue
+      const skipAce = aceValid && !aceTied && aceWinner === p.name
+      if (skipAce) continue
       const currentTier = summoners[p.name][p.line]
       const newTier = tierDown(currentTier)
       if (newTier !== currentTier) {
@@ -273,17 +280,29 @@ function VoteSection({ recordId, winner, result, summoners, records, onComplete 
         historyEntries.push({ record_id: recordId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
       }
     }
+
     if (historyEntries.length > 0) {
       await supabase.from('tier_history').insert(historyEntries)
     }
   }
 
+  // 본인이 이긴팀인지 진팀인지 판별
+  const isWinner = (name: string) => winners.some(p => p.name === name)
+  const isLoser  = (name: string) => losers.some(p => p.name === name)
+
   const submitVote = async () => {
-    if (!myName || !busVote || !aceVote) return
-    await supabase.from('votes').upsert([
-      { record_id: recordId, vote_type: 'bus', voter: myName, candidate: busVote },
-      { record_id: recordId, vote_type: 'ace', voter: myName, candidate: aceVote },
-    ], { onConflict: 'record_id,vote_type,voter' })
+    if (!myName) return
+    const inWinTeam = isWinner(myName)
+    const inLoseTeam = isLoser(myName)
+    if (inWinTeam && !busVote) return
+    if (inLoseTeam && !aceVote) return
+
+    const entries: { record_id: number; vote_type: string; voter: string; candidate: string }[] = []
+    if (inWinTeam && busVote) entries.push({ record_id: recordId, vote_type: 'bus', voter: myName, candidate: busVote })
+    if (inLoseTeam && aceVote) entries.push({ record_id: recordId, vote_type: 'ace', voter: myName, candidate: aceVote })
+    if (entries.length > 0) {
+      await supabase.from('votes').upsert(entries, { onConflict: 'record_id,vote_type,voter' })
+    }
     setMyVoted(true)
     fetchVotes()
   }
@@ -296,32 +315,46 @@ function VoteSection({ recordId, winner, result, summoners, records, onComplete 
 
   const timerColor = timeLeft <= 10 ? 'var(--red)' : timeLeft <= 30 ? 'var(--gold)' : 'var(--green)'
 
+  // 이름 선택 후 내 팀 판별
+  const myTeam = myName ? (isWinner(myName) ? 'winner' : isLoser(myName) ? 'loser' : null) : null
+  const canVote = myName && ((myTeam === 'winner' && busVote) || (myTeam === 'loser' && aceVote))
+
   if (voteResult) {
     return (
       <div className="card" style={{ textAlign: 'center' }}>
         <div className="card-title" style={{ justifyContent: 'center' }}>투표 결과</div>
-        {voteResult.tied ? (
-          <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 12 }}>
-            동표 또는 투표율 부족으로 전원 티어 변동됐어요
-          </div>
-        ) : (
-          <div style={{ marginBottom: 12 }}>
-            {voteResult.bus && (
-              <div style={{ marginBottom: 8, padding: '10px 14px', background: 'var(--blue-bg)', border: '1px solid var(--blue-border)', borderRadius: 'var(--radius)' }}>
-                <span style={{ fontSize: 12, color: 'var(--blue)' }}>🚌 BUS</span>
-                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--blue)', marginLeft: 8 }}>{voteResult.bus}</span>
-                <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 6 }}>티어 UP 없음</span>
-              </div>
-            )}
-            {voteResult.ace && (
-              <div style={{ padding: '10px 14px', background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 'var(--radius)' }}>
-                <span style={{ fontSize: 12, color: 'var(--red)' }}>🏆 ACE</span>
-                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--red)', marginLeft: 8 }}>{voteResult.ace}</span>
-                <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 6 }}>티어 DOWN 없음</span>
-              </div>
-            )}
-          </div>
-        )}
+        <div style={{ marginBottom: 12 }}>
+          {/* BUS 결과 */}
+          {voteResult.busValid && !voteResult.busTied && voteResult.bus ? (
+            <div style={{ marginBottom: 8, padding: '10px 14px', background: 'var(--blue-bg)', border: '1px solid var(--blue-border)', borderRadius: 'var(--radius)' }}>
+              <span style={{ fontSize: 12, color: 'var(--blue)' }}>🚌 BUS</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--blue)', marginLeft: 8 }}>{voteResult.bus}</span>
+              <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 6 }}>티어 UP 없음</span>
+            </div>
+          ) : (
+            <div style={{ marginBottom: 8, padding: '10px 14px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+              <span style={{ fontSize: 12, color: 'var(--text3)' }}>🚌 BUS</span>
+              <span style={{ fontSize: 12, color: 'var(--text3)', marginLeft: 8 }}>
+                {!voteResult.busValid ? '투표율 부족 → 이긴팀 전원 티어 UP' : '동표 → 이긴팀 전원 티어 UP'}
+              </span>
+            </div>
+          )}
+          {/* ACE 결과 */}
+          {voteResult.aceValid && !voteResult.aceTied && voteResult.ace ? (
+            <div style={{ padding: '10px 14px', background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 'var(--radius)' }}>
+              <span style={{ fontSize: 12, color: 'var(--red)' }}>🏆 ACE</span>
+              <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--red)', marginLeft: 8 }}>{voteResult.ace}</span>
+              <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 6 }}>티어 DOWN 없음</span>
+            </div>
+          ) : (
+            <div style={{ padding: '10px 14px', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+              <span style={{ fontSize: 12, color: 'var(--text3)' }}>🏆 ACE</span>
+              <span style={{ fontSize: 12, color: 'var(--text3)', marginLeft: 8 }}>
+                {!voteResult.aceValid ? '투표율 부족 → 진팀 전원 티어 DOWN' : '동표 → 진팀 전원 티어 DOWN'}
+              </span>
+            </div>
+          )}
+        </div>
         <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 12 }}>티어가 업데이트됐어요 🎉</div>
         <button className="btn btn-gold" onClick={onComplete}>확인</button>
       </div>
@@ -333,7 +366,7 @@ function VoteSection({ recordId, winner, result, summoners, records, onComplete 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <div className="card-title" style={{ marginBottom: 0 }}>투표 진행중</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 12, color: 'var(--text2)' }}>{totalVoted}/10명 투표</span>
+          <span style={{ fontSize: 12, color: 'var(--text2)' }}>{totalVoted}/5명 BUS 투표</span>
           <span style={{ fontSize: 16, fontWeight: 700, color: timerColor, minWidth: 36, textAlign: 'right' }}>{timeLeft}초</span>
         </div>
       </div>
@@ -341,16 +374,18 @@ function VoteSection({ recordId, winner, result, summoners, records, onComplete 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
         {/* BUS 투표 */}
         <div style={{ background: 'var(--bg3)', borderRadius: 'var(--radius)', padding: '10px 12px', border: '1px solid var(--blue-border)' }}>
-          <div style={{ fontSize: 12, color: 'var(--blue)', fontWeight: 600, marginBottom: 8 }}>🚌 BUS 투표 (이긴팀)</div>
+          <div style={{ fontSize: 12, color: 'var(--blue)', fontWeight: 600, marginBottom: 8 }}>🚌 BUS 투표 (이긴팀만)</div>
           {winners.map(p => {
             const cnt = busTally[p.name] ?? 0
             const max = Math.max(...Object.values(busTally), 0)
+            const clickable = !myVoted && myTeam === 'winner'
             return (
-              <div key={p.name} onClick={() => !myVoted && setBusVote(p.name)} style={{
+              <div key={p.name} onClick={() => clickable && setBusVote(p.name)} style={{
                 display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px',
-                borderRadius: 4, marginBottom: 4, cursor: myVoted ? 'default' : 'pointer',
+                borderRadius: 4, marginBottom: 4, cursor: clickable ? 'pointer' : 'default',
                 background: busVote === p.name ? 'rgba(11,196,227,0.1)' : 'transparent',
                 border: busVote === p.name ? '1px solid var(--blue)' : '1px solid transparent',
+                opacity: !myVoted && myTeam === 'loser' ? 0.4 : 1,
               }}>
                 <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{p.name}</span>
                 <div style={{ width: 60, height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden' }}>
@@ -364,16 +399,18 @@ function VoteSection({ recordId, winner, result, summoners, records, onComplete 
 
         {/* ACE 투표 */}
         <div style={{ background: 'var(--bg3)', borderRadius: 'var(--radius)', padding: '10px 12px', border: '1px solid var(--red-border)' }}>
-          <div style={{ fontSize: 12, color: 'var(--red)', fontWeight: 600, marginBottom: 8 }}>🏆 ACE 투표 (진팀)</div>
+          <div style={{ fontSize: 12, color: 'var(--red)', fontWeight: 600, marginBottom: 8 }}>🏆 ACE 투표 (진팀만)</div>
           {losers.map(p => {
             const cnt = aceTally[p.name] ?? 0
             const max = Math.max(...Object.values(aceTally), 0)
+            const clickable = !myVoted && myTeam === 'loser'
             return (
-              <div key={p.name} onClick={() => !myVoted && setAceVote(p.name)} style={{
+              <div key={p.name} onClick={() => clickable && setAceVote(p.name)} style={{
                 display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px',
-                borderRadius: 4, marginBottom: 4, cursor: myVoted ? 'default' : 'pointer',
+                borderRadius: 4, marginBottom: 4, cursor: clickable ? 'pointer' : 'default',
                 background: aceVote === p.name ? 'rgba(232,64,87,0.1)' : 'transparent',
                 border: aceVote === p.name ? '1px solid var(--red)' : '1px solid transparent',
+                opacity: !myVoted && myTeam === 'winner' ? 0.4 : 1,
               }}>
                 <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{p.name}</span>
                 <div style={{ width: 60, height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden' }}>
@@ -388,21 +425,25 @@ function VoteSection({ recordId, winner, result, summoners, records, onComplete 
 
       {!myVoted ? (
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-          <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>본인 이름을 선택하고 투표해주세요</div>
+          <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>
+            본인 이름을 선택해주세요
+            {myTeam === 'winner' && <span style={{ color: 'var(--blue)', marginLeft: 6 }}>(이긴팀 → BUS 투표)</span>}
+            {myTeam === 'loser' && <span style={{ color: 'var(--red)', marginLeft: 6 }}>(진팀 → ACE 투표)</span>}
+          </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <select value={myName} onChange={e => setMyName(e.target.value)} style={{ flex: 1 }}>
               <option value=''>나는 누구인가요?</option>
               {allPlayers.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
             </select>
-            <button className="btn btn-gold" onClick={submitVote} disabled={!myName || !busVote || !aceVote}>
+            <button className="btn btn-gold" onClick={submitVote} disabled={!canVote}>
               투표 완료
             </button>
           </div>
-          {(!busVote || !aceVote) && myName && (
-            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6 }}>
-              {!busVote && '🚌 BUS 후보를 선택해주세요  '}
-              {!aceVote && '🏆 ACE 후보를 선택해주세요'}
-            </div>
+          {myTeam === 'winner' && !busVote && myName && (
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6 }}>🚌 BUS 후보를 선택해주세요</div>
+          )}
+          {myTeam === 'loser' && !aceVote && myName && (
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6 }}>🏆 ACE 후보를 선택해주세요</div>
           )}
         </div>
       ) : (
@@ -443,6 +484,10 @@ function TeamTab({
   result, setResult,
   records,
   onSessionUpdate,
+  voteRecordId,
+  voteWinner,
+  onVoteStart,
+  onVoteEnd,
 }: {
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
   summoners: SummonerMap
@@ -452,12 +497,15 @@ function TeamTab({
   setResult: React.Dispatch<React.SetStateAction<BalanceResult | null>>
   records: GameRecord[]
   onSessionUpdate: (players: PlayerEntry[], result: BalanceResult | null) => void
+  voteRecordId: number | null
+  voteWinner: 'blue' | 'red' | null
+  onVoteStart: (recordId: number, winner: 'blue' | 'red') => void
+  onVoteEnd: () => void
 }) {
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [suggestions, setSuggestions] = useState<string[]>([])
-  const [voteRecordId, setVoteRecordId] = useState<number | null>(null)
-  const [voteWinner, setVoteWinner] = useState<'blue' | 'red' | null>(null)
+  // voteRecordId/voteWinner는 props로 받음
 
   // 소환사의 등록된 라인 목록 (LINE_ORDER 순)
   const getSummonerLines = (n: string): Line[] => {
@@ -514,8 +562,7 @@ function TeamTab({
   // 팀 균형 맞추기: 각 플레이어마다 most1/most2 중 랜덤 라인 선택 후 밸런싱
   const balance = useCallback(() => {
     setError('')
-    setVoteRecordId(null)
-    setVoteWinner(null)
+    onVoteEnd()
     if (players.length !== 10) { setError(`정확히 10명이 필요해요. (현재 ${players.length}명)`); return }
 
     // 각 플레이어의 가능한 라인 목록 생성
@@ -676,8 +723,7 @@ function TeamTab({
     onRecord({ winner, blue: blueData, red: redData, skipInsert: true })
     // 투표 시작
     if (recId) {
-      setVoteRecordId(recId)
-      setVoteWinner(winner)
+      onVoteStart(recId, winner)
     }
   }
 
@@ -991,7 +1037,7 @@ function TeamTab({
               result={result!}
               summoners={summoners}
               records={records}
-              onComplete={() => { setVoteRecordId(null); setVoteWinner(null) }}
+              onComplete={() => onVoteEnd()}
             />
           )}
         </>
@@ -1481,6 +1527,9 @@ export default function Home() {
   // 팀뽑기 상태 유지 (탭 이동해도 안 날아감)
   const [teamPlayers, setTeamPlayers] = useState<PlayerEntry[]>([])
   const [teamResult, setTeamResult] = useState<BalanceResult | null>(null)
+  // 투표 상태 (전체 공유)
+  const [voteRecordId, setVoteRecordId] = useState<number | null>(null)
+  const [voteWinner, setVoteWinner] = useState<'blue' | 'red' | null>(null)
 
   const fetchAll = useCallback(async () => {
     const [{ data: recs }, { data: sums }, { data: sess }] = await Promise.all([
@@ -1500,6 +1549,13 @@ export default function Home() {
     if (sess) {
       setTeamPlayers(sess.players ?? [])
       setTeamResult(sess.result ?? null)
+      if (sess.vote_record_id) {
+        setVoteRecordId(sess.vote_record_id)
+        setVoteWinner(sess.vote_winner)
+      } else {
+        setVoteRecordId(null)
+        setVoteWinner(null)
+      }
     }
     setLoading(false)
   }, [])
@@ -1515,6 +1571,13 @@ export default function Home() {
         if (sess) {
           setTeamPlayers(sess.players ?? [])
           setTeamResult(sess.result ?? null)
+          if (sess.vote_record_id) {
+            setVoteRecordId(sess.vote_record_id)
+            setVoteWinner(sess.vote_winner)
+          } else {
+            setVoteRecordId(null)
+            setVoteWinner(null)
+          }
         }
       })
       .subscribe()
@@ -1524,6 +1587,24 @@ export default function Home() {
   // 세션 업데이트 함수
   const updateSession = async (players: PlayerEntry[], result: BalanceResult | null) => {
     await supabase.from('session').upsert({ id: 1, players, result, updated_at: new Date().toISOString() })
+  }
+
+  // 투표 세션 업데이트
+  const updateVoteSession = async (recordId: number | null, winner: string | null) => {
+    await supabase.from('session').upsert({ id: 1, vote_record_id: recordId, vote_winner: winner, updated_at: new Date().toISOString() })
+  }
+
+  const handleVoteStart = async (recordId: number, winner: 'blue' | 'red') => {
+    setVoteRecordId(recordId)
+    setVoteWinner(winner)
+    await updateVoteSession(recordId, winner)
+  }
+
+  const handleVoteEnd = async () => {
+    setVoteRecordId(null)
+    setVoteWinner(null)
+    await updateVoteSession(null, null)
+    await fetchAll()
   }
 
   const addRecord = async ({ winner, blue, red, skipInsert }: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => {
@@ -1586,7 +1667,7 @@ export default function Home() {
         <div className="empty">불러오는 중...</div>
       ) : (
         <>
-          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} />}
+          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} voteRecordId={voteRecordId} voteWinner={voteWinner} onVoteStart={handleVoteStart} onVoteEnd={handleVoteEnd} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} />}
