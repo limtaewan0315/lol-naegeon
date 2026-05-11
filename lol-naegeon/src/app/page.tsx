@@ -1246,6 +1246,7 @@ function StatsTab({ records, summoners, voteResults, tierHistory }: {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>([])
+  const [openGraphLine, setOpenGraphLine] = useState<string | null>(null)
 
   // 전체 플레이어 목록 (records 기반)
   const allNames = Array.from(new Set(records.flatMap(r => [...r.blue, ...r.red].map(p => p.name)))).sort()
@@ -1301,16 +1302,35 @@ function StatsTab({ records, summoners, voteResults, tierHistory }: {
 
   // 연승/연패 불꽃 표시
   const getStreakDisplay = (streak: number) => {
-    if (streak === 0) return null
+    if (Math.abs(streak) < 2) return null
     const isWin = streak > 0
     const abs = Math.abs(streak)
-    const fires = abs >= 5 ? '🔥🔥' : abs >= 3 ? '🔥' : null
-    if (!fires) return null
+    const fires = abs >= 5 ? '🔥🔥' : abs >= 3 ? '🔥' : ''
     return (
-      <span style={{ fontSize: 12, fontWeight: 700, color: isWin ? 'var(--red)' : 'var(--text3)' }}>
-        {fires} {isWin ? `${abs}연승` : `${abs}연패`}
+      <span style={{ fontSize: 11, fontWeight: 700, color: isWin ? 'var(--red)' : 'var(--text3)', marginLeft: 4 }}>
+        {fires}{fires ? ' ' : ''}{isWin ? `${abs}연승` : `${abs}연패`}
       </span>
     )
+  }
+
+  // 라인별 연승/연패 계산
+  const getLineStreak = (name: string, line: string) => {
+    const lineRecs = records.filter(r =>
+      r.blue.some(p => p.name === name && p.line === line) ||
+      r.red.some(p => p.name === name && p.line === line)
+    )
+    if (lineRecs.length === 0) return 0
+    const results = lineRecs.map(r => {
+      const inBlue = r.blue.some(p => p.name === name && p.line === line)
+      return (inBlue && r.winner === 'blue') || (!inBlue && r.winner === 'red')
+    })
+    const last = results[0]
+    let streak = 0
+    for (const r of results) {
+      if (r === last) streak++
+      else break
+    }
+    return last ? streak : -streak
   }
 
   // 티어 히스토리 그래프 (해당 소환사 + 라인별)
@@ -1397,14 +1417,13 @@ function StatsTab({ records, summoners, voteResults, tierHistory }: {
                   <span className="badge b-win">{win}승</span>
                   <span className="badge b-lose">{lose}패</span>
                   <span style={{ fontSize: 12, color: 'var(--text2)' }}>{total}판</span>
-                  {getStreakDisplay(streak)}
                   <span style={{ marginLeft: 'auto', fontSize: 16, fontWeight: 700, color: wr >= 50 ? 'var(--green)' : 'var(--red)' }}>{wr}%</span>
                 </div>
                 <OX results={recentAll} />
               </div>
 
-              {/* 티어 히스토리 그래프 */}
-              {tierGraph.length > 0 && (
+              {/* 티어 히스토리 그래프 - 라인별 버튼으로 통합됨 */}
+              {tierGraph.length > 0 && false && (
                 <div style={{ padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)', marginBottom: 12 }}>
                   <div style={{ fontSize: 11, color: 'var(--text3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 10 }}>티어 변동 히스토리</div>
                   {/* 라인별로 그룹화 */}
@@ -1497,23 +1516,86 @@ function StatsTab({ records, summoners, voteResults, tierHistory }: {
                   .map(r => r.id)
                 const busCount = voteResults.filter(v => lineRecordIds.includes(v.record_id) && v.vote_type === 'bus' && v.candidate === selected).length
                 const aceCount = voteResults.filter(v => lineRecordIds.includes(v.record_id) && v.vote_type === 'ace' && v.candidate === selected).length
+                const lineStreak = getLineStreak(selected, l)
+                const lineHistory = tierGraph.filter(h => h.line === l)
+                const isGraphOpen = openGraphLine === l
+                const hasGraph = lineHistory.length > 0
+
+                // 날짜별 1포인트 그래프 데이터
+                const graphPts: { score: number; tier: string; date: string; up: boolean | null }[] = []
+                if (lineHistory.length > 0) {
+                  graphPts.push({ score: TIER_SCORE[lineHistory[0].tier_before] ?? 5, tier: lineHistory[0].tier_before, date: fmtDate((lineHistory[0] as any).created_at ?? ''), up: null })
+                  lineHistory.forEach(h => {
+                    graphPts.push({ score: TIER_SCORE[h.tier_after] ?? 5, tier: h.tier_after, date: fmtDate((h as any).created_at ?? ''), up: (TIER_SCORE[h.tier_after] ?? 5) > (TIER_SCORE[h.tier_before] ?? 5) })
+                  })
+                }
+                const minS = graphPts.length > 0 ? Math.min(...graphPts.map(p => p.score)) - 1 : 0
+                const maxS = graphPts.length > 0 ? Math.max(...graphPts.map(p => p.score)) + 1 : 10
+                const rng = maxS - minS || 1
+                const GW = Math.max(260, graphPts.length * 40), GH = 65
+                const svgPts = graphPts.map((p, i) => ({
+                  x: graphPts.length === 1 ? GW/2 : (i / (graphPts.length - 1)) * GW,
+                  y: GH - ((p.score - minS) / rng) * GH,
+                  p
+                }))
+                const pathD = svgPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
+
                 return (
-                  <div key={l} style={{ padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)', marginBottom: 6 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                      <span className="badge b-line">{l}</span>
-                      {summoners[selected]?.[l] && <span className="badge b-tier">{summoners[selected][l]}</span>}
-                      <span className="badge b-win" style={{ fontSize: 10 }}>{ls.win}승</span>
-                      <span className="badge b-lose" style={{ fontSize: 10 }}>{ls.lose}패</span>
-                      <span style={{ fontSize: 11, color: 'var(--text2)' }}>{lTotal}판</span>
-                      {busCount > 0 && <span style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 600 }}>🚌BUS {busCount}회</span>}
-                      {aceCount > 0 && <span style={{ fontSize: 10, color: 'var(--red)', fontWeight: 600 }}>🏆ACE {aceCount}회</span>}
-                      <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 600, color: lWr >= 50 ? 'var(--green)' : 'var(--red)' }}>{lWr}%</span>
+                  <div key={l} style={{ background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)', marginBottom: 6, overflow: 'hidden' }}>
+                    <div style={{ padding: '10px 12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <span className="badge b-line">{l}</span>
+                        {summoners[selected]?.[l] && <span className="badge b-tier">{summoners[selected][l]}</span>}
+                        <span className="badge b-win" style={{ fontSize: 10 }}>{ls.win}승</span>
+                        <span className="badge b-lose" style={{ fontSize: 10 }}>{ls.lose}패</span>
+                        <span style={{ fontSize: 11, color: 'var(--text2)' }}>{lTotal}판</span>
+                        {busCount > 0 && <span style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 600 }}>🚌BUS {busCount}회</span>}
+                        {aceCount > 0 && <span style={{ fontSize: 10, color: 'var(--red)', fontWeight: 600 }}>🏆ACE {aceCount}회</span>}
+                        <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 600, color: lWr >= 50 ? 'var(--green)' : 'var(--red)' }}>{lWr}%</span>
+                        {hasGraph && (
+                          <button onClick={() => setOpenGraphLine(isGraphOpen ? null : l)} style={{
+                            padding: '3px 8px', fontSize: 10, border: `1px solid ${isGraphOpen ? 'var(--gold)' : 'rgba(200,155,60,0.35)'}`,
+                            borderRadius: 3, background: isGraphOpen ? 'rgba(200,155,60,0.12)' : 'rgba(200,155,60,0.04)',
+                            color: 'var(--gold)', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0
+                          }}>
+                            📈 티어그래프 {isGraphOpen ? '▲' : '▼'}
+                          </button>
+                        )}
+                      </div>
+                      {/* 최근 5판 + 라인 연승/연패 */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 10, color: 'var(--text3)' }}>최근</span>
+                        <OX results={ls.recent} />
+                        {getStreakDisplay(lineStreak)}
+                      </div>
                     </div>
-                    {/* 라인별 최근 5판 */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span style={{ fontSize: 10, color: 'var(--text3)' }}>최근</span>
-                      <OX results={ls.recent} />
-                    </div>
+                    {/* 티어 그래프 */}
+                    {isGraphOpen && hasGraph && (
+                      <div style={{ padding: '0 12px 12px', borderTop: '0.5px solid var(--border)' }}>
+                        <div style={{ fontSize: 10, color: 'var(--text3)', margin: '8px 0 6px', letterSpacing: '0.05em' }}>게임 참여일 기준 · 최근 2주</div>
+                        <div style={{ overflowX: 'auto' }}>
+                          <svg width={GW} height={GH + 32} style={{ overflow: 'visible', display: 'block' }}>
+                            {[0, 0.5, 1].map((t, i) => (
+                              <line key={i} x1={0} y1={GH * t} x2={GW} y2={GH * t} stroke="rgba(80,130,190,0.08)" strokeWidth={1} />
+                            ))}
+                            <path d={pathD} fill="none" stroke="rgba(11,196,227,0.5)" strokeWidth={2} />
+                            {svgPts.map((sp, i) => {
+                              const isStart = sp.p.up === null
+                              const col = isStart ? '#3a5a78' : sp.p.up ? 'var(--green)' : 'var(--red)'
+                              return (
+                                <g key={i}>
+                                  <circle cx={sp.x} cy={sp.y} r={isStart ? 3 : 5} fill={col} stroke="var(--bg)" strokeWidth={1.5} />
+                                  <text x={sp.x} y={sp.y - 8} textAnchor="middle" fontSize={7} fill={col}>
+                                    {sp.p.tier.replace('플래티넘','플').replace('에메랄드','에').replace('실버','실').replace('골드','골').replace(' 이하','↓')}
+                                  </text>
+                                  <text x={sp.x} y={GH + 20} textAnchor="middle" fontSize={7} fill="#3a5a78">{sp.p.date}</text>
+                                </g>
+                              )
+                            })}
+                          </svg>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}
