@@ -379,13 +379,14 @@ function VoteSection({ recordId, winner, result, summoners, records, onComplete 
             const cnt = busTally[p.name] ?? 0
             const max = Math.max(...Object.values(busTally), 0)
             const clickable = !myVoted && myTeam === 'winner'
+            const dimmed = myVoted || myTeam === 'loser' || (myName && myTeam === null)
             return (
               <div key={p.name} onClick={() => clickable && setBusVote(p.name)} style={{
                 display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px',
                 borderRadius: 4, marginBottom: 4, cursor: clickable ? 'pointer' : 'default',
                 background: busVote === p.name ? 'rgba(11,196,227,0.1)' : 'transparent',
                 border: busVote === p.name ? '1px solid var(--blue)' : '1px solid transparent',
-                opacity: !myVoted && myTeam === 'loser' ? 0.4 : 1,
+                opacity: dimmed ? 0.35 : 1,
               }}>
                 <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{p.name}</span>
                 <div style={{ width: 60, height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden' }}>
@@ -404,13 +405,14 @@ function VoteSection({ recordId, winner, result, summoners, records, onComplete 
             const cnt = aceTally[p.name] ?? 0
             const max = Math.max(...Object.values(aceTally), 0)
             const clickable = !myVoted && myTeam === 'loser'
+            const dimmed = myVoted || myTeam === 'winner' || (myName && myTeam === null)
             return (
               <div key={p.name} onClick={() => clickable && setAceVote(p.name)} style={{
                 display: 'flex', alignItems: 'center', gap: 6, padding: '6px 8px',
                 borderRadius: 4, marginBottom: 4, cursor: clickable ? 'pointer' : 'default',
                 background: aceVote === p.name ? 'rgba(232,64,87,0.1)' : 'transparent',
                 border: aceVote === p.name ? '1px solid var(--red)' : '1px solid transparent',
-                opacity: !myVoted && myTeam === 'winner' ? 0.4 : 1,
+                opacity: dimmed ? 0.35 : 1,
               }}>
                 <span style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{p.name}</span>
                 <div style={{ width: 60, height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden' }}>
@@ -426,9 +428,14 @@ function VoteSection({ recordId, winner, result, summoners, records, onComplete 
       {!myVoted ? (
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
           <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>
-            본인 이름을 선택해주세요
-            {myTeam === 'winner' && <span style={{ color: 'var(--blue)', marginLeft: 6 }}>(이긴팀 → BUS 투표)</span>}
-            {myTeam === 'loser' && <span style={{ color: 'var(--red)', marginLeft: 6 }}>(진팀 → ACE 투표)</span>}
+            {!myName
+              ? <span style={{ color: 'var(--text3)' }}>👆 먼저 본인 이름을 선택해주세요</span>
+              : myTeam === 'winner'
+              ? <span>본인 확인 <span style={{ color: 'var(--blue)', fontWeight: 600 }}>이긴팀 → BUS만 투표 가능</span></span>
+              : myTeam === 'loser'
+              ? <span>본인 확인 <span style={{ color: 'var(--red)', fontWeight: 600 }}>진팀 → ACE만 투표 가능</span></span>
+              : <span style={{ color: 'var(--text3)' }}>이름을 다시 확인해주세요</span>
+            }
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <select value={myName} onChange={e => setMyName(e.target.value)} style={{ flex: 1 }}>
