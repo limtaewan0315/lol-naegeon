@@ -1429,7 +1429,7 @@ function StatsTab({ records, summoners, voteResults, tierHistory }: {
                   {/* 라인별로 그룹화 */}
                   {(Array.from(new Set(tierGraph.map(h => h.line))) as string[]).map(line => {
                     const lineHistory = tierGraph.filter(h => h.line === line)
-                    const currentTier = summoners[selected]?.[line as Line] ?? lineHistory[lineHistory.length - 1]?.tier_after ?? ''
+                    const currentTier = (selected ? summoners[selected]?.[line as Line] : null) ?? lineHistory[lineHistory.length - 1]?.tier_after ?? ''
 
                     // 게임 참여 순서대로 포인트 생성
                     // 시작점: 첫 변동의 tier_before
@@ -1514,9 +1514,9 @@ function StatsTab({ records, summoners, voteResults, tierHistory }: {
                 const lineRecordIds = records
                   .filter(r => [...r.blue, ...r.red].some(p => p.name === selected && p.line === l))
                   .map(r => r.id)
-                const busCount = voteResults.filter(v => lineRecordIds.includes(v.record_id) && v.vote_type === 'bus' && v.candidate === selected).length
+                const busCount = selected ? voteResults.filter(v => lineRecordIds.includes(v.record_id) && v.vote_type === 'bus' && v.candidate === selected).length : 0
                 const aceCount = voteResults.filter(v => lineRecordIds.includes(v.record_id) && v.vote_type === 'ace' && v.candidate === selected).length
-                const lineStreak = getLineStreak(selected, l)
+                const lineStreak = selected ? getLineStreak(selected, l) : 0
                 const lineHistory = tierGraph.filter(h => h.line === l)
                 const isGraphOpen = openGraphLine === l
                 const hasGraph = lineHistory.length > 0
@@ -1545,7 +1545,7 @@ function StatsTab({ records, summoners, voteResults, tierHistory }: {
                     <div style={{ padding: '10px 12px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                         <span className="badge b-line">{l}</span>
-                        {summoners[selected]?.[l] && <span className="badge b-tier">{summoners[selected][l]}</span>}
+                        {selected && summoners[selected]?.[l] && <span className="badge b-tier">{summoners[selected][l]}</span>}
                         <span className="badge b-win" style={{ fontSize: 10 }}>{ls.win}승</span>
                         <span className="badge b-lose" style={{ fontSize: 10 }}>{ls.lose}패</span>
                         <span style={{ fontSize: 11, color: 'var(--text2)' }}>{lTotal}판</span>
