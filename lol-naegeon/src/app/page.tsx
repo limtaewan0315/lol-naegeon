@@ -608,14 +608,14 @@ function TeamTab({
     setResult(null)
   }
 
-  const updateMost = (name: string, field: 'most1' | 'most2', value: Line | 'any' | '') => {
+  const updateMost = (name: string, field: 'most1' | 'most2', value: string) => {
     setPlayers(prev => {
       const next = prev.map(p => {
         if (p.name !== name) return p
         if (field === 'most1' && value === 'any') {
-          return { ...p, most1: 'any' as const, most2: null }
+          return { ...p, most1: 'any' as Line | 'any', most2: null }
         }
-        return { ...p, [field]: value === '' ? null : value }
+        return { ...p, [field]: value === '' ? null : value as Line }
       })
       onSessionUpdate(next, result)
       return next
@@ -636,10 +636,10 @@ function TeamTab({
       if (p.most1 === 'any') {
         opts.push(...allLines)
       } else {
-        opts.push(p.most1)
+        opts.push(p.most1 as Line)
       }
       if (p.most2 && p.most2 !== 'any') {
-        if (!opts.includes(p.most2)) opts.push(p.most2)
+        if (!opts.includes(p.most2 as Line)) opts.push(p.most2 as Line)
       }
       return opts.length > 0 ? opts : allLines
     }
@@ -844,13 +844,13 @@ function TeamTab({
                   <span style={{ fontSize: 11, color: p.most1 === 'any' ? 'var(--text2)' : 'var(--gold)', fontWeight: 600 }}>M1</span>
                   <select
                     value={p.most1}
-                    onChange={e => updateMost(p.name, 'most1', e.target.value as Line | '')}
+                    onChange={e => updateMost(p.name, 'most1', e.target.value)}
                     style={{ width: 85, padding: '4px 8px', fontSize: 12 }}
                   >
                     {lines.length >= 2 && <option value="any">상관없음</option>}
                     {lines.map(l => <option key={l} value={l}>{l}</option>)}
                   </select>
-                  {p.most1 !== 'any' && <span className="badge b-tier" style={{ fontSize: 10 }}>{summoners[p.name]?.[p.most1] ?? '-'}</span>}
+                  {p.most1 !== 'any' && <span className="badge b-tier" style={{ fontSize: 10 }}>{summoners[p.name]?.[p.most1 as Line] ?? '-'}</span>}
                 </div>
 
                 {/* 모스트2 */}
@@ -858,14 +858,15 @@ function TeamTab({
                   <span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>M2</span>
                   <select
                     value={p.most2 ?? ''}
-                    onChange={e => updateMost(p.name, 'most2', e.target.value as Line | '')}
+                    onChange={e => updateMost(p.name, 'most2', e.target.value)}
                     style={{ width: 85, padding: '4px 8px', fontSize: 12, opacity: p.most1 === 'any' ? 0.4 : 1 }}
                     disabled={p.most1 === 'any'}
                   >
                     <option value=''>없음</option>
-                    {lines.filter(l => l !== p.most1).map(l => <option key={l} value={l}>{l}</option>)}
+                    {lines.filter(l => l !== p.most1 && p.most1 !== 'any').map(l => <option key={l} value={l}>{l}</option>)}
+                    {p.most1 === 'any' && lines.map(l => <option key={l} value={l}>{l}</option>)}
                   </select>
-                  {p.most2 && p.most1 !== 'any' && <span className="badge b-tier" style={{ fontSize: 10 }}>{summoners[p.name]?.[p.most2] ?? '-'}</span>}
+                  {p.most2 && p.most1 !== 'any' && p.most2 !== 'any' && <span className="badge b-tier" style={{ fontSize: 10 }}>{summoners[p.name]?.[p.most2 as Line] ?? '-'}</span>}
                 </div>
 
                 <button className="btn btn-danger btn-sm" style={{ marginLeft: 'auto' }} onClick={() => removePlayer(p.name)}>삭제</button>
