@@ -1394,9 +1394,9 @@ function StatsTab({ records, summoners, voteResults, tierHistory }: {
                 <div style={{ padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)', marginBottom: 12 }}>
                   <div style={{ fontSize: 11, color: 'var(--text3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 10 }}>티어 변동 히스토리</div>
                   {/* 라인별로 그룹화 */}
-                  {Array.from(new Set(tierGraph.map(h => h.line))).map(line => {
+                  {(Array.from(new Set(tierGraph.map(h => h.line))) as string[]).map(line => {
                     const lineHistory = tierGraph.filter(h => h.line === line)
-                    const allTiers = [...new Set([...lineHistory.map(h => h.tier_before), ...lineHistory.map(h => h.tier_after)])]
+                    const allTiers = Array.from(new Set([...lineHistory.map(h => h.tier_before), ...lineHistory.map(h => h.tier_after)]))
                     const scores = lineHistory.map((h, i) => ({
                       idx: i,
                       before: TIER_SCORE[h.tier_before] ?? 5,
