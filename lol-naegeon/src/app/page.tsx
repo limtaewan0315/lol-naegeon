@@ -253,6 +253,23 @@ function VoteSection({ recordId, winner, result, summoners, records, startedAt, 
 
     setVoteResult({ bus: busWinner, ace: aceWinner, tied: false, busValid, aceValid, busTied, aceTied })
 
+    // 투표 완료 후 전적 저장
+    const { data: sessData } = await supabase.from('session').select('vote_pending').eq('id', 1).single()
+    const pending = sessData?.vote_pending
+    let savedRecordId = recordId
+
+    if (pending) {
+      const { data: newRecord } = await supabase
+        .from('records')
+        .insert([{ winner: pending.winner, blue: pending.blue, red: pending.red, time: pending.time }])
+        .select()
+      if (newRecord?.[0]?.id) {
+        savedRecordId = newRecord[0].id
+      }
+      // pending 데이터 정리
+      await supabase.from('session').update({ vote_pending: null }).eq('id', 1)
+    }
+
     // 전적 포함한 최신 records로 승률 계산
     const { data: latestRecs } = await supabase.from('records').select('*').order('created_at', { ascending: false })
     const updatedRecords = latestRecs ?? records
@@ -273,7 +290,7 @@ function VoteSection({ recordId, winner, result, summoners, records, startedAt, 
       }
       if (newTier && newTier !== currentTier) {
         await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
-        historyEntries.push({ record_id: recordId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
+        historyEntries.push({ record_id: savedRecordId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
       }
     }
 
@@ -286,7 +303,7 @@ function VoteSection({ recordId, winner, result, summoners, records, startedAt, 
       const newTier = tierDown(currentTier)
       if (newTier !== currentTier) {
         await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
-        historyEntries.push({ record_id: recordId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
+        historyEntries.push({ record_id: savedRecordId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
       }
     }
 
@@ -701,23 +718,24 @@ function TeamTab({
     if (!result || isRecording) return
     setIsRecording(true)
 
-    // 전적 저장 (티어 변동은 투표 완료 후 processResult에서 처리)
     const now = new Date()
     const time = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
     const blueData = result.team1.map(p => ({ name: p.name, line: p.line }))
     const redData = result.team2.map(p => ({ name: p.name, line: p.line }))
-    const { data: newRecord } = await supabase
-      .from('records')
-      .insert([{ winner, blue: blueData, red: redData, time }])
-      .select()
 
-    onRecord({ winner, blue: blueData, red: redData, skipInsert: true })
+    // 전적/티어는 투표 완료 후 저장 - 임시 데이터를 session에 보관
+    const pendingRecord = { winner, blue: blueData, red: redData, time }
+    const startedAt = new Date().toISOString()
+    await supabase.from('session').upsert({
+      id: 1,
+      vote_record_id: -1, // 임시 ID (-1: 아직 저장 전)
+      vote_winner: winner,
+      vote_started_at: startedAt,
+      vote_pending: pendingRecord,
+      updated_at: startedAt,
+    })
 
-    // 투표 시작
-    const recId = newRecord?.[0]?.id
-    if (recId) {
-      onVoteStart(recId, winner)
-    }
+    onVoteStart(-1, winner)
   }
 
   const sortByLine = (arr: TeamPlayer[]) => [...arr].sort((a, b) => (LINE_ORDER[a.line] ?? 9) - (LINE_ORDER[b.line] ?? 9))
@@ -1544,7 +1562,7 @@ export default function Home() {
     if (sess) {
       setTeamPlayers(sess.players ?? [])
       setTeamResult(sess.result ?? null)
-      if (sess.vote_record_id) {
+      if (sess.vote_record_id !== null && sess.vote_record_id !== undefined) {
         setVoteRecordId(sess.vote_record_id)
         setVoteWinner(sess.vote_winner)
         setVoteStartedAt(sess.vote_started_at ?? null)
@@ -1568,7 +1586,7 @@ export default function Home() {
         if (sess) {
           setTeamPlayers(sess.players ?? [])
           setTeamResult(sess.result ?? null)
-          if (sess.vote_record_id) {
+          if (sess.vote_record_id !== null && sess.vote_record_id !== undefined) {
             setVoteRecordId(sess.vote_record_id)
             setVoteWinner(sess.vote_winner)
             setVoteStartedAt(sess.vote_started_at ?? null)
@@ -1593,8 +1611,9 @@ export default function Home() {
   const handleVoteStart = async (recordId: number, winner: 'blue' | 'red') => {
     setVoteRecordId(recordId)
     setVoteWinner(winner)
-    const startedAt = new Date().toISOString()
-    await supabase.from('session').upsert({ id: 1, vote_record_id: recordId, vote_winner: winner, vote_started_at: startedAt, updated_at: startedAt })
+    // recordWin에서 이미 session에 저장했으므로 여기서는 상태만 업데이트
+    const { data: sess } = await supabase.from('session').select('vote_started_at').eq('id', 1).single()
+    setVoteStartedAt(sess?.vote_started_at ?? null)
   }
 
   const handleVoteEnd = async () => {
