@@ -29,8 +29,8 @@ type SummonerMap = Record<string, Record<Line, string>>
 // 팀 뽑기용 플레이어 (모스트1/2 포함)
 interface PlayerEntry {
   name: string
-  most1: Line
-  most2: Line | null
+  most1: Line | 'any'
+  most2: Line | 'any' | null
   // 매칭 결정 후 확정 라인/점수
   assignedLine?: Line
   assignedScore?: number
@@ -608,9 +608,15 @@ function TeamTab({
     setResult(null)
   }
 
-  const updateMost = (name: string, field: 'most1' | 'most2', value: Line | '') => {
+  const updateMost = (name: string, field: 'most1' | 'most2', value: Line | 'any' | '') => {
     setPlayers(prev => {
-      const next = prev.map(p => p.name !== name ? p : { ...p, [field]: value === '' ? null : value })
+      const next = prev.map(p => {
+        if (p.name !== name) return p
+        if (field === 'most1' && value === 'any') {
+          return { ...p, most1: 'any' as const, most2: null }
+        }
+        return { ...p, [field]: value === '' ? null : value }
+      })
       onSessionUpdate(next, result)
       return next
     })
@@ -625,9 +631,17 @@ function TeamTab({
 
     // 각 플레이어의 가능한 라인 목록 생성
     const getOptions = (p: PlayerEntry): Line[] => {
-      const opts: Line[] = [p.most1]
-      if (p.most2) opts.push(p.most2)
-      return opts
+      const allLines = getSummonerLines(p.name)
+      const opts: Line[] = []
+      if (p.most1 === 'any') {
+        opts.push(...allLines)
+      } else {
+        opts.push(p.most1)
+      }
+      if (p.most2 && p.most2 !== 'any') {
+        if (!opts.includes(p.most2)) opts.push(p.most2)
+      }
+      return opts.length > 0 ? opts : allLines
     }
 
     let best: BalanceResult | null = null
@@ -686,8 +700,17 @@ function TeamTab({
       const linePossible: Record<string, number> = {}
       LINES.forEach(l => { linePossible[l] = 0 })
       players.forEach(p => {
-        linePossible[p.most1] = (linePossible[p.most1] ?? 0) + 1
-        if (p.most2) linePossible[p.most2] = (linePossible[p.most2] ?? 0) + 1
+        const allLines = getSummonerLines(p.name)
+        if (p.most1 === 'any') {
+          allLines.forEach(l => { linePossible[l] = (linePossible[l] ?? 0) + 1 })
+        } else {
+          linePossible[p.most1] = (linePossible[p.most1] ?? 0) + 1
+        }
+        if (p.most2 === 'any') {
+          allLines.forEach(l => { linePossible[l] = (linePossible[l] ?? 0) + 1 })
+        } else if (p.most2) {
+          linePossible[p.most2] = (linePossible[p.most2] ?? 0) + 1
+        }
       })
       const shortLines = LINES.filter(l => (linePossible[l] ?? 0) < 2)
       if (shortLines.length > 0) {
@@ -818,15 +841,16 @@ function TeamTab({
 
                 {/* 모스트1 */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span style={{ fontSize: 11, color: 'var(--gold)', fontWeight: 600 }}>M1</span>
+                  <span style={{ fontSize: 11, color: p.most1 === 'any' ? 'var(--text2)' : 'var(--gold)', fontWeight: 600 }}>M1</span>
                   <select
                     value={p.most1}
-                    onChange={e => updateMost(p.name, 'most1', e.target.value as Line)}
-                    style={{ width: 80, padding: '4px 8px', fontSize: 12 }}
+                    onChange={e => updateMost(p.name, 'most1', e.target.value as Line | '')}
+                    style={{ width: 85, padding: '4px 8px', fontSize: 12 }}
                   >
+                    {lines.length >= 2 && <option value="any">상관없음</option>}
                     {lines.map(l => <option key={l} value={l}>{l}</option>)}
                   </select>
-                  <span className="badge b-tier" style={{ fontSize: 10 }}>{summoners[p.name]?.[p.most1] ?? '-'}</span>
+                  {p.most1 !== 'any' && <span className="badge b-tier" style={{ fontSize: 10 }}>{summoners[p.name]?.[p.most1] ?? '-'}</span>}
                 </div>
 
                 {/* 모스트2 */}
@@ -835,12 +859,13 @@ function TeamTab({
                   <select
                     value={p.most2 ?? ''}
                     onChange={e => updateMost(p.name, 'most2', e.target.value as Line | '')}
-                    style={{ width: 80, padding: '4px 8px', fontSize: 12 }}
+                    style={{ width: 85, padding: '4px 8px', fontSize: 12, opacity: p.most1 === 'any' ? 0.4 : 1 }}
+                    disabled={p.most1 === 'any'}
                   >
                     <option value=''>없음</option>
                     {lines.filter(l => l !== p.most1).map(l => <option key={l} value={l}>{l}</option>)}
                   </select>
-                  {p.most2 && <span className="badge b-tier" style={{ fontSize: 10 }}>{summoners[p.name]?.[p.most2] ?? '-'}</span>}
+                  {p.most2 && p.most1 !== 'any' && <span className="badge b-tier" style={{ fontSize: 10 }}>{summoners[p.name]?.[p.most2] ?? '-'}</span>}
                 </div>
 
                 <button className="btn btn-danger btn-sm" style={{ marginLeft: 'auto' }} onClick={() => removePlayer(p.name)}>삭제</button>
