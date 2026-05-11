@@ -241,25 +241,40 @@ function VoteSection({ recordId, winner, result, summoners, records, onComplete 
 
     setVoteResult({ bus: busWinner, ace: aceWinner, tied: !valid || tied })
 
-    // 티어 변동 처리
+    // 티어 변동 처리 (tier_history에 이력 저장)
     const updatedRecords = records
+    const historyEntries: { record_id: number; name: string; line: string; tier_before: string; tier_after: string }[] = []
+
     for (const p of winners) {
       if (!summoners[p.name]?.[p.line]) continue
       const currentTier = summoners[p.name][p.line]
       const skip = valid && !tied && busWinner === p.name
       if (skip) continue
+      let newTier: string | null = null
       if (isSilver3OrBelow(currentTier, summoners)) {
         const wr = getLineWR(p.name, p.line, updatedRecords)
-        if (wr !== null && wr >= 0.6) await supabase.from('summoners').update({ tier: tierUp(currentTier) }).eq('name', p.name).eq('line', p.line)
+        if (wr !== null && wr >= 0.6) newTier = tierUp(currentTier)
       } else {
-        await supabase.from('summoners').update({ tier: tierUp(currentTier) }).eq('name', p.name).eq('line', p.line)
+        newTier = tierUp(currentTier)
+      }
+      if (newTier && newTier !== currentTier) {
+        await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
+        historyEntries.push({ record_id: recordId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
       }
     }
     for (const p of losers) {
       if (!summoners[p.name]?.[p.line]) continue
       const skip = valid && !tied && aceWinner === p.name
       if (skip) continue
-      await supabase.from('summoners').update({ tier: tierDown(summoners[p.name][p.line]) }).eq('name', p.name).eq('line', p.line)
+      const currentTier = summoners[p.name][p.line]
+      const newTier = tierDown(currentTier)
+      if (newTier !== currentTier) {
+        await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
+        historyEntries.push({ record_id: recordId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
+      }
+    }
+    if (historyEntries.length > 0) {
+      await supabase.from('tier_history').insert(historyEntries)
     }
   }
 
@@ -625,33 +640,43 @@ function TeamTab({
     // 이번 판 포함한 최신 records로 승률 계산
     const updatedRecords = newRecord ? [newRecord[0], ...records] : records
 
+    const recordHistories: { record_id: number; name: string; line: string; tier_before: string; tier_after: string }[] = []
+    const recId = newRecord?.[0]?.id
+
     for (const p of winners) {
       if (summoners[p.name]?.[p.line]) {
         const currentTier = summoners[p.name][p.line]
+        let newTier: string | null = null
         if (isSilver3OrBelow(currentTier)) {
-          // 실버3 이하: 해당 라인 최근 5판 승률 60% 이상일 때만 티어 UP
           const wr = getRecentLineWinRate(p.name, p.line, updatedRecords, 5)
-          if (wr !== null && wr >= 0.6) {
-            const newTier = tierUp(currentTier)
-            await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
-          }
+          if (wr !== null && wr >= 0.6) newTier = tierUp(currentTier)
         } else {
-          const newTier = tierUp(currentTier)
+          newTier = tierUp(currentTier)
+        }
+        if (newTier && newTier !== currentTier) {
           await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
+          if (recId) recordHistories.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
         }
       }
     }
     for (const p of losers) {
       if (summoners[p.name]?.[p.line]) {
-        const newTier = tierDown(summoners[p.name][p.line])
-        await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
+        const currentTier = summoners[p.name][p.line]
+        const newTier = tierDown(currentTier)
+        if (newTier !== currentTier) {
+          await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
+          if (recId) recordHistories.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
+        }
       }
+    }
+    if (recordHistories.length > 0) {
+      await supabase.from('tier_history').insert(recordHistories)
     }
 
     onRecord({ winner, blue: blueData, red: redData, skipInsert: true })
     // 투표 시작
-    if (newRecord?.[0]?.id) {
-      setVoteRecordId(newRecord[0].id)
+    if (recId) {
+      setVoteRecordId(recId)
       setVoteWinner(winner)
     }
   }
@@ -1512,14 +1537,34 @@ export default function Home() {
   }
 
   const deleteRecord = async (id: number) => {
+    // 해당 전적의 티어 이력 조회 후 롤백
+    const { data: history } = await supabase.from('tier_history').select('*').eq('record_id', id)
+    if (history && history.length > 0) {
+      for (const h of history) {
+        // tier_before로 되돌리기
+        await supabase.from('summoners').update({ tier: h.tier_before }).eq('name', h.name).eq('line', h.line)
+      }
+      await supabase.from('tier_history').delete().eq('record_id', id)
+    }
     await supabase.from('records').delete().eq('id', id)
     setRecords(prev => prev.filter(r => r.id !== id))
+    await fetchAll()
   }
 
   const clearRecords = async () => {
-    if (!confirm('전체 기록을 삭제할까요?')) return
+    if (!confirm('전체 기록을 삭제할까요? 티어도 전부 롤백돼요!')) return
+    // 모든 tier_history 롤백
+    const { data: allHistory } = await supabase.from('tier_history').select('*').order('id', { ascending: false })
+    if (allHistory && allHistory.length > 0) {
+      // 최신 이력부터 역순으로 롤백
+      for (const h of allHistory) {
+        await supabase.from('summoners').update({ tier: h.tier_before }).eq('name', h.name).eq('line', h.line)
+      }
+      await supabase.from('tier_history').delete().neq('id', 0)
+    }
     await supabase.from('records').delete().neq('id', 0)
     setRecords([])
+    await fetchAll()
   }
 
   return (
