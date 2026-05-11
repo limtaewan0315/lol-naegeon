@@ -605,7 +605,8 @@ function TeamTab({
   // 팀 균형 맞추기: 각 플레이어마다 most1/most2 중 랜덤 라인 선택 후 밸런싱
   const balance = useCallback(() => {
     setError('')
-    onVoteEnd()
+    // 투표 중일 때만 초기화 (다시 섞기 시에는 호출 안 함)
+    if (voteRecordId !== null) onVoteEnd()
     if (players.length !== 10) { setError(`정확히 10명이 필요해요. (현재 ${players.length}명)`); return }
 
     // 각 플레이어의 가능한 라인 목록 생성
@@ -687,7 +688,7 @@ function TeamTab({
       return
     }
     setResult(best)
-  }, [players, summoners])
+  }, [players, summoners, voteRecordId])
 
   // 실버3 이하 여부 체크
   const isSilver3OrBelow = (tier: string) => {
