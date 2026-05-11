@@ -723,12 +723,15 @@ function TeamTab({
     const blueData = result.team1.map(p => ({ name: p.name, line: p.line }))
     const redData = result.team2.map(p => ({ name: p.name, line: p.line }))
 
+    // 이전 투표 데이터 완전 초기화
+    await supabase.from('votes').delete().neq('id', 0)
+
     // 전적/티어는 투표 완료 후 저장 - 임시 데이터를 session에 보관
     const pendingRecord = { winner, blue: blueData, red: redData, time }
     const startedAt = new Date().toISOString()
     await supabase.from('session').upsert({
       id: 1,
-      vote_record_id: -1, // 임시 ID (-1: 아직 저장 전)
+      vote_record_id: -1,
       vote_winner: winner,
       vote_started_at: startedAt,
       vote_pending: pendingRecord,
@@ -1615,9 +1618,9 @@ export default function Home() {
     return () => { supabase.removeChannel(channel) }
   }, [])
 
-  // 세션 업데이트 함수
+  // 세션 업데이트 함수 (팀편성 관련만 업데이트, 투표 상태 유지)
   const updateSession = async (players: PlayerEntry[], result: BalanceResult | null) => {
-    await supabase.from('session').upsert({ id: 1, players, result, updated_at: new Date().toISOString() })
+    await supabase.from('session').update({ players, result, updated_at: new Date().toISOString() }).eq('id', 1)
   }
 
 
@@ -1634,9 +1637,9 @@ export default function Home() {
     setVoteRecordId(null)
     setVoteWinner(null)
     setVoteStartedAt(null)
-    // 팀 구성 결과만 초기화 (참가자 목록은 유지)
     setTeamResult(null)
-    await supabase.from('session').upsert({ id: 1, vote_record_id: null, vote_winner: null, vote_started_at: null, vote_pending: null, result: null, updated_at: new Date().toISOString() })
+    // 투표 데이터 정리 + 팀 결과 초기화
+    await supabase.from('session').update({ vote_record_id: null, vote_winner: null, vote_started_at: null, vote_pending: null, result: null, updated_at: new Date().toISOString() }).eq('id', 1)
     await fetchAll()
   }
 
