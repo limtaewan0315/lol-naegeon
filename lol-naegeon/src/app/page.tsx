@@ -293,6 +293,8 @@ function VoteSection({ recordId, winner, result, summoners, records, startedAt, 
     if (historyEntries.length > 0) {
       await supabase.from('tier_history').insert(historyEntries)
     }
+    // 투표 완료 후 세션 정리 및 전적 반영
+    onComplete()
   }
 
   // 본인이 이긴팀인지 진팀인지 판별
@@ -367,7 +369,7 @@ function VoteSection({ recordId, winner, result, summoners, records, startedAt, 
           )}
         </div>
         <div style={{ fontSize: 12, color: 'var(--green)', marginBottom: 12 }}>티어가 업데이트됐어요 🎉</div>
-        <button className="btn btn-gold" onClick={onComplete}>확인</button>
+        <button className="btn btn-gold" onClick={onComplete}>닫기</button>
       </div>
     )
   }
@@ -701,7 +703,7 @@ function TeamTab({
 
     // 전적 저장 (티어 변동은 투표 완료 후 processResult에서 처리)
     const now = new Date()
-    const time = `\${now.getMonth() + 1}/\${now.getDate()} \${String(now.getHours()).padStart(2, '0')}:\${String(now.getMinutes()).padStart(2, '0')}`
+    const time = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
     const blueData = result.team1.map(p => ({ name: p.name, line: p.line }))
     const redData = result.team2.map(p => ({ name: p.name, line: p.line }))
     const { data: newRecord } = await supabase
