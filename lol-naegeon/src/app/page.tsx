@@ -1619,7 +1619,10 @@ export default function Home() {
   const handleVoteEnd = async () => {
     setVoteRecordId(null)
     setVoteWinner(null)
-    await supabase.from('session').upsert({ id: 1, vote_record_id: null, vote_winner: null, vote_started_at: null, updated_at: new Date().toISOString() })
+    setVoteStartedAt(null)
+    // 팀 구성 결과만 초기화 (참가자 목록은 유지)
+    setTeamResult(null)
+    await supabase.from('session').upsert({ id: 1, vote_record_id: null, vote_winner: null, vote_started_at: null, vote_pending: null, result: null, updated_at: new Date().toISOString() })
     await fetchAll()
   }
 
