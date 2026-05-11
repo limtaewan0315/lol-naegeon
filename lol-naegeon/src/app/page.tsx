@@ -299,6 +299,10 @@ function VoteSection({ recordId, winner, result, summoners, records, startedAt, 
       if (isSilver3OrBelow(currentTier, summoners)) {
         const wr = getLineWR(p.name, p.line, updatedRecords)
         if (wr !== null && wr >= 0.6) newTier = tierUp(currentTier)
+      } else if (isDia1OrAbove(currentTier)) {
+        // 다이아1 이상: 2연승 해야 UP
+        const streak = getConsecutiveLineWins(p.name, p.line, updatedRecords, 2)
+        if (streak >= 2) newTier = tierUp(currentTier)
       } else {
         newTier = tierUp(currentTier)
       }
@@ -511,6 +515,26 @@ function VoteSection({ recordId, winner, result, summoners, records, startedAt, 
 }
 
 // 헬퍼 함수 (VoteSection 외부)
+function isDia1OrAbove(tier: string): boolean {
+  const dia1Tiers = ['다이아1', '마/그/챌 0~99', '마/그/챌 100~199', '마/그/챌 200~299', '마/그/챌 300~399', '마/그/챌 400~499', '마/그/챌 500~599', '마/그/챌 600~699', '마/그/챌 700~799', '마/그/챌 800~899', '마/그/챌 900~999', '마/그/챌 1000~1099', '마/그/챌 1100~1199', '마/그/챌 1200~1299', '마/그/챌 1300~1399', '마/그/챌 1400~1499', '마/그/챌 1500~1599', '마/그/챌 1600~1699', '마/그/챌 1700~1799', '마/그/챌 1800이상']
+  return dia1Tiers.includes(tier)
+}
+
+function getConsecutiveLineWins(playerName: string, line: string, records: GameRecord[], n = 2): number {
+  const lineRecs = records.filter(r =>
+    r.blue.some(p => p.name === playerName && p.line === line) ||
+    r.red.some(p => p.name === playerName && p.line === line)
+  )
+  let streak = 0
+  for (const r of lineRecs) {
+    const inBlue = r.blue.some(p => p.name === playerName && p.line === line)
+    const isWin = (inBlue && r.winner === 'blue') || (!inBlue && r.winner === 'red')
+    if (isWin) streak++
+    else break
+  }
+  return streak
+}
+
 function isSilver3OrBelow(tier: string, summoners?: any): boolean {
   const SILVER3_IDX = 37 // TIERS 배열에서 실버3이하 인덱스
   const tiers = ['마/그/챌 1800이상','마/그/챌 1700~1799','마/그/챌 1600~1699','마/그/챌 1500~1599','마/그/챌 1400~1499','마/그/챌 1300~1399','마/그/챌 1200~1299','마/그/챌 1100~1199','마/그/챌 1000~1099','마/그/챌 900~999','마/그/챌 800~899','마/그/챌 700~799','마/그/챌 600~699','마/그/챌 500~599','마/그/챌 400~499','마/그/챌 300~399','마/그/챌 200~299','마/그/챌 100~199','마/그/챌 0~99','다이아1','다이아2','다이아3','다이아4','에메랄드1','에메랄드2','에메랄드3','에메랄드4','플래티넘1','플래티넘2','플래티넘3','플래티넘4','골드1','골드2','골드3','골드4','실버1','실버2','실버3 이하']
@@ -733,6 +757,8 @@ function TeamTab({
     const tierIdx = TIERS.indexOf(tier)
     return tierIdx >= silver3Idx
   }
+
+  const isDia1OrAboveLocal = (tier: string) => isDia1OrAbove(tier)
 
   // 특정 플레이어의 최근 N판 승률 계산 (N판 미만이면 null 반환)
   // 라인별 최근 N판 승률 계산
