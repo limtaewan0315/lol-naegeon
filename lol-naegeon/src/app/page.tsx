@@ -1315,11 +1315,19 @@ function StatsTab({ records, summoners, voteResults, tierHistory }: {
 
   // 티어 히스토리 그래프 (해당 소환사 + 라인별)
   const getTierGraph = (name: string) => {
+    const twoWeeksAgo = new Date()
+    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14)
     const history = tierHistory
-      .filter(h => h.name === name)
+      .filter(h => h.name === name && new Date((h as any).created_at ?? 0) >= twoWeeksAgo)
       .slice()
-      .reverse() // 오래된 순서로
+      .reverse()
     return history
+  }
+
+  // 날짜 포맷 (M/D)
+  const fmtDate = (dateStr: string) => {
+    const d = new Date(dateStr)
+    return `${d.getMonth() + 1}/${d.getDate()}`
   }
 
   // 티어 점수 (그래프용 간단 수치)
@@ -1396,53 +1404,97 @@ function StatsTab({ records, summoners, voteResults, tierHistory }: {
                   {/* 라인별로 그룹화 */}
                   {(Array.from(new Set(tierGraph.map(h => h.line))) as string[]).map(line => {
                     const lineHistory = tierGraph.filter(h => h.line === line)
-                    const allTiers = Array.from(new Set([...lineHistory.map(h => h.tier_before), ...lineHistory.map(h => h.tier_after)]))
-                    const scores = lineHistory.map((h, i) => ({
-                      idx: i,
-                      before: TIER_SCORE[h.tier_before] ?? 5,
-                      after: TIER_SCORE[h.tier_after] ?? 5,
-                      up: (TIER_SCORE[h.tier_after] ?? 5) > (TIER_SCORE[h.tier_before] ?? 5)
-                    }))
-                    const minScore = Math.min(...scores.flatMap(s => [s.before, s.after])) - 1
-                    const maxScore = Math.max(...scores.flatMap(s => [s.before, s.after])) + 1
+                    const currentTier = summoners[selected]?.[line as Line] ?? lineHistory[lineHistory.length - 1]?.tier_after ?? ''
+
+                    // 날짜별 마지막 티어 추출 (최근 14일)
+                    const today = new Date()
+                    const days: { date: string; score: number; tier: string }[] = []
+                    for (let d = 13; d >= 0; d--) {
+                      const dt = new Date(today)
+                      dt.setDate(dt.getDate() - d)
+                      const dateStr = `${dt.getMonth()+1}/${dt.getDate()}`
+                      // 해당 날짜까지의 마지막 티어
+                      const upTo = lineHistory.filter(h => {
+                        const hd = new Date((h as any).created_at ?? 0)
+                        return hd.getMonth() === dt.getMonth() && hd.getDate() <= dt.getDate() ||
+                               hd < dt
+                      })
+                      const lastTier = upTo.length > 0 ? upTo[upTo.length - 1].tier_after : null
+                      if (lastTier) {
+                        days.push({ date: dateStr, score: TIER_SCORE[lastTier] ?? 5, tier: lastTier })
+                      } else if (days.length === 0) {
+                        // 기록 전이면 첫 tier_before 사용
+                        const firstBefore = lineHistory[0]?.tier_before
+                        if (firstBefore) days.push({ date: dateStr, score: TIER_SCORE[firstBefore] ?? 5, tier: firstBefore })
+                      } else {
+                        days.push({ ...days[days.length - 1], date: dateStr })
+                      }
+                    }
+
+                    if (days.length === 0) return null
+                    const minScore = Math.min(...days.map(d => d.score)) - 1
+                    const maxScore = Math.max(...days.map(d => d.score)) + 1
                     const range = maxScore - minScore || 1
-                    const W = 280, H = 60
-                    const pts = scores.map((s, i) => {
-                      const x = scores.length === 1 ? W/2 : (i / (scores.length - 1)) * W
-                      const y = H - ((s.after - minScore) / range) * H
-                      return { x, y, s }
-                    })
+                    const W = 300, H = 70
+                    const pts = days.map((d, i) => ({
+                      x: days.length === 1 ? W/2 : (i / (days.length - 1)) * W,
+                      y: H - ((d.score - minScore) / range) * H,
+                      d
+                    }))
                     const pathD = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
-                    const currentTier = lineHistory[lineHistory.length - 1]?.tier_after ?? ''
+                    // 변동이 있는 날짜 찾기
+                    const changedDays = new Set(lineHistory.map(h => {
+                      const d = new Date((h as any).created_at ?? 0)
+                      return `${d.getMonth()+1}/${d.getDate()}`
+                    }))
+
                     return (
-                      <div key={line} style={{ marginBottom: 10 }}>
+                      <div key={line} style={{ marginBottom: 14 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                           <span className="badge b-line" style={{ fontSize: 10 }}>{line}</span>
-                          <span style={{ fontSize: 11, color: 'var(--text2)' }}>현재: </span>
+                          <span style={{ fontSize: 11, color: 'var(--text2)' }}>현재</span>
                           <span className="badge b-tier" style={{ fontSize: 10 }}>{currentTier}</span>
-                          <span style={{ fontSize: 10, color: 'var(--text3)', marginLeft: 4 }}>{lineHistory.length}번 변동</span>
+                          <span style={{ fontSize: 10, color: 'var(--text3)', marginLeft: 4 }}>최근 2주</span>
                         </div>
-                        <svg width={W} height={H + 20} style={{ overflow: 'visible' }}>
-                          {/* 그리드 라인 */}
-                          {[0, 0.5, 1].map((t, i) => (
-                            <line key={i} x1={0} y1={H * t} x2={W} y2={H * t}
-                              stroke="rgba(80,130,190,0.1)" strokeWidth={1} />
-                          ))}
-                          {/* 경로 */}
-                          <path d={pathD} fill="none" stroke="var(--blue)" strokeWidth={2} />
-                          {/* 포인트 */}
-                          {pts.map((p, i) => (
-                            <g key={i}>
-                              <circle cx={p.x} cy={p.y} r={4}
-                                fill={p.s.up ? 'var(--green)' : 'var(--red)'}
-                                stroke="var(--bg)" strokeWidth={1.5} />
-                              <text x={p.x} y={p.y + 16} textAnchor="middle"
-                                fontSize={8} fill="var(--text3)">
-                                {lineHistory[i]?.tier_after?.replace('플래티넘', '플').replace('에메랄드', '에').replace('실버', '실').replace('골드', '골').replace(' 이하', '↓')}
-                              </text>
-                            </g>
-                          ))}
-                        </svg>
+                        <div style={{ overflowX: 'auto' }}>
+                          <svg width={W} height={H + 32} style={{ overflow: 'visible', display: 'block' }}>
+                            {/* 그리드 */}
+                            {[0, 0.5, 1].map((t, i) => (
+                              <line key={i} x1={0} y1={H * t} x2={W} y2={H * t}
+                                stroke="rgba(80,130,190,0.08)" strokeWidth={1} />
+                            ))}
+                            {/* 경로 */}
+                            <path d={pathD} fill="none" stroke="rgba(11,196,227,0.6)" strokeWidth={1.5} />
+                            {/* 포인트 & 날짜 */}
+                            {pts.map((p, i) => {
+                              const isChanged = changedDays.has(p.d.date)
+                              const isToday = i === pts.length - 1
+                              const showLabel = i === 0 || i === pts.length - 1 || i % 3 === 0
+                              return (
+                                <g key={i}>
+                                  {isChanged && (
+                                    <circle cx={p.x} cy={p.y} r={5}
+                                      fill={i > 0 && days[i].score > days[i-1].score ? 'var(--green)' : 'var(--red)'}
+                                      stroke="var(--bg)" strokeWidth={1.5} />
+                                  )}
+                                  {!isChanged && (
+                                    <circle cx={p.x} cy={p.y} r={2} fill="rgba(11,196,227,0.3)" />
+                                  )}
+                                  {showLabel && (
+                                    <text x={p.x} y={H + 20} textAnchor="middle"
+                                      fontSize={7} fill="var(--text3)">{p.d.date}</text>
+                                  )}
+                                  {isChanged && (
+                                    <text x={p.x} y={p.y - 8} textAnchor="middle"
+                                      fontSize={7} fill={i > 0 && days[i].score > days[i-1].score ? 'var(--green)' : 'var(--red)'}>
+                                      {p.d.tier.replace('플래티넘','플').replace('에메랄드','에').replace('실버','실').replace('골드','골').replace(' 이하','↓')}
+                                    </text>
+                                  )}
+                                </g>
+                              )
+                            })}
+                          </svg>
+                        </div>
                       </div>
                     )
                   })}
