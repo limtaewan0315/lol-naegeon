@@ -1237,7 +1237,12 @@ function RecordTab({ records, onDelete, onClear, voteResults }: {
 }
 
 // ── 개인 통계 탭 ──────────────────────────────────────────────
-function StatsTab({ records, summoners, voteResults }: { records: GameRecord[]; summoners: SummonerMap; voteResults: { record_id: number; vote_type: string; candidate: string }[] }) {
+function StatsTab({ records, summoners, voteResults, tierHistory }: {
+  records: GameRecord[]
+  summoners: SummonerMap
+  voteResults: { record_id: number; vote_type: string; candidate: string }[]
+  tierHistory: { record_id: number; name: string; line: string; tier_before: string; tier_after: string }[]
+}) {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>([])
@@ -1272,7 +1277,6 @@ function StatsTab({ records, summoners, voteResults }: { records: GameRecord[]; 
       if (isWin) win++; else lose++
       recentAll.push(isWin)
 
-      // 라인별
       const p = [...r.blue, ...r.red].find(p => p.name === name)
       if (p) {
         if (!lines[p.line]) lines[p.line] = { win: 0, lose: 0, recent: [] }
@@ -1280,7 +1284,50 @@ function StatsTab({ records, summoners, voteResults }: { records: GameRecord[]; 
         lines[p.line].recent.push(isWin)
       }
     })
-    return { win, lose, lines, recentAll }
+
+    // 연승/연패 계산 (최신순 recentAll 기준)
+    let streak = 0
+    if (recentAll.length > 0) {
+      const last = recentAll[0]
+      for (const r of recentAll) {
+        if (r === last) streak++
+        else break
+      }
+      if (!last) streak = -streak // 연패는 음수
+    }
+
+    return { win, lose, lines, recentAll, streak }
+  }
+
+  // 연승/연패 불꽃 표시
+  const getStreakDisplay = (streak: number) => {
+    if (streak === 0) return null
+    const isWin = streak > 0
+    const abs = Math.abs(streak)
+    const fires = abs >= 5 ? '🔥🔥' : abs >= 3 ? '🔥' : null
+    if (!fires) return null
+    return (
+      <span style={{ fontSize: 12, fontWeight: 700, color: isWin ? 'var(--red)' : 'var(--text3)' }}>
+        {fires} {isWin ? `${abs}연승` : `${abs}연패`}
+      </span>
+    )
+  }
+
+  // 티어 히스토리 그래프 (해당 소환사 + 라인별)
+  const getTierGraph = (name: string) => {
+    const history = tierHistory
+      .filter(h => h.name === name)
+      .slice()
+      .reverse() // 오래된 순서로
+    return history
+  }
+
+  // 티어 점수 (그래프용 간단 수치)
+  const TIER_SCORE: Record<string, number> = {
+    '실버3 이하': 1, '실버2': 2, '실버1': 3, '골드4': 4, '골드3': 5, '골드2': 6, '골드1': 7,
+    '플래티넘4': 8, '플래티넘3': 9, '플래티넘2': 10, '플래티넘1': 11,
+    '에메랄드4': 12, '에메랄드3': 13, '에메랄드2': 14, '에메랄드1': 15,
+    '다이아4': 16, '다이아3': 17, '다이아2': 18, '다이아1': 19,
   }
 
   const OX = ({ results }: { results: boolean[] }) => (
@@ -1320,22 +1367,87 @@ function StatsTab({ records, summoners, voteResults }: { records: GameRecord[]; 
         </div>
         {!selected && <div className="empty">소환사명을 검색해서 통계를 확인하세요</div>}
         {selected && (() => {
-          const { win, lose, lines, recentAll } = getStats(selected)
+          const { win, lose, lines, recentAll, streak } = getStats(selected)
           const total = win + lose
           if (total === 0) return <div className="empty">전적이 없어요.</div>
           const wr = Math.round(win / total * 100)
           const sortedLines = (Object.keys(lines) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b])
+          const tierGraph = getTierGraph(selected)
+
           return (
             <div>
               {/* 총 통계 */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
-                <span style={{ fontWeight: 700, fontSize: 15, flex: '0 0 100px' }}>{selected}</span>
-                <span className="badge b-win">{win}승</span>
-                <span className="badge b-lose">{lose}패</span>
-                <span style={{ fontSize: 12, color: 'var(--text2)' }}>{total}판</span>
+              <div style={{ padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)', marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontWeight: 700, fontSize: 15, flex: '0 0 100px' }}>{selected}</span>
+                  <span className="badge b-win">{win}승</span>
+                  <span className="badge b-lose">{lose}패</span>
+                  <span style={{ fontSize: 12, color: 'var(--text2)' }}>{total}판</span>
+                  {getStreakDisplay(streak)}
+                  <span style={{ marginLeft: 'auto', fontSize: 16, fontWeight: 700, color: wr >= 50 ? 'var(--green)' : 'var(--red)' }}>{wr}%</span>
+                </div>
                 <OX results={recentAll} />
-                <span style={{ marginLeft: 'auto', fontSize: 16, fontWeight: 700, color: wr >= 50 ? 'var(--green)' : 'var(--red)' }}>{wr}%</span>
               </div>
+
+              {/* 티어 히스토리 그래프 */}
+              {tierGraph.length > 0 && (
+                <div style={{ padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)', marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 10 }}>티어 변동 히스토리</div>
+                  {/* 라인별로 그룹화 */}
+                  {Array.from(new Set(tierGraph.map(h => h.line))).map(line => {
+                    const lineHistory = tierGraph.filter(h => h.line === line)
+                    const allTiers = [...new Set([...lineHistory.map(h => h.tier_before), ...lineHistory.map(h => h.tier_after)])]
+                    const scores = lineHistory.map((h, i) => ({
+                      idx: i,
+                      before: TIER_SCORE[h.tier_before] ?? 5,
+                      after: TIER_SCORE[h.tier_after] ?? 5,
+                      up: (TIER_SCORE[h.tier_after] ?? 5) > (TIER_SCORE[h.tier_before] ?? 5)
+                    }))
+                    const minScore = Math.min(...scores.flatMap(s => [s.before, s.after])) - 1
+                    const maxScore = Math.max(...scores.flatMap(s => [s.before, s.after])) + 1
+                    const range = maxScore - minScore || 1
+                    const W = 280, H = 60
+                    const pts = scores.map((s, i) => {
+                      const x = scores.length === 1 ? W/2 : (i / (scores.length - 1)) * W
+                      const y = H - ((s.after - minScore) / range) * H
+                      return { x, y, s }
+                    })
+                    const pathD = pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
+                    const currentTier = lineHistory[lineHistory.length - 1]?.tier_after ?? ''
+                    return (
+                      <div key={line} style={{ marginBottom: 10 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                          <span className="badge b-line" style={{ fontSize: 10 }}>{line}</span>
+                          <span style={{ fontSize: 11, color: 'var(--text2)' }}>현재: </span>
+                          <span className="badge b-tier" style={{ fontSize: 10 }}>{currentTier}</span>
+                          <span style={{ fontSize: 10, color: 'var(--text3)', marginLeft: 4 }}>{lineHistory.length}번 변동</span>
+                        </div>
+                        <svg width={W} height={H + 20} style={{ overflow: 'visible' }}>
+                          {/* 그리드 라인 */}
+                          {[0, 0.5, 1].map((t, i) => (
+                            <line key={i} x1={0} y1={H * t} x2={W} y2={H * t}
+                              stroke="rgba(80,130,190,0.1)" strokeWidth={1} />
+                          ))}
+                          {/* 경로 */}
+                          <path d={pathD} fill="none" stroke="var(--blue)" strokeWidth={2} />
+                          {/* 포인트 */}
+                          {pts.map((p, i) => (
+                            <g key={i}>
+                              <circle cx={p.x} cy={p.y} r={4}
+                                fill={p.s.up ? 'var(--green)' : 'var(--red)'}
+                                stroke="var(--bg)" strokeWidth={1.5} />
+                              <text x={p.x} y={p.y + 16} textAnchor="middle"
+                                fontSize={8} fill="var(--text3)">
+                                {lineHistory[i]?.tier_after?.replace('플래티넘', '플').replace('에메랄드', '에').replace('실버', '실').replace('골드', '골').replace(' 이하', '↓')}
+                              </text>
+                            </g>
+                          ))}
+                        </svg>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
               {/* 라인별 통계 */}
               <div style={{ fontSize: 11, color: 'var(--text3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>라인별 통계</div>
               {sortedLines.map(l => {
@@ -1621,6 +1733,7 @@ export default function Home() {
   const [records, setRecords] = useState<GameRecord[]>([])
   const [summoners, setSummoners] = useState<SummonerMap>({})
   const [voteResults, setVoteResults] = useState<{ record_id: number; vote_type: string; candidate: string }[]>([])
+  const [tierHistory, setTierHistory] = useState<{ record_id: number; name: string; line: string; tier_before: string; tier_after: string }[]>([])
   const [loading, setLoading] = useState(true)
   // 팀뽑기 상태 유지 (탭 이동해도 안 날아감)
   const [teamPlayers, setTeamPlayers] = useState<PlayerEntry[]>([])
@@ -1631,14 +1744,16 @@ export default function Home() {
   const [voteStartedAt, setVoteStartedAt] = useState<string | null>(null)
 
   const fetchAll = useCallback(async () => {
-    const [{ data: recs }, { data: sums }, { data: sess }, { data: vots }] = await Promise.all([
+    const [{ data: recs }, { data: sums }, { data: sess }, { data: vots }, { data: hist }] = await Promise.all([
       supabase.from('records').select('*').order('created_at', { ascending: false }),
       supabase.from('summoners').select('*'),
       supabase.from('session').select('*').eq('id', 1).single(),
       supabase.from('votes').select('record_id, vote_type, candidate'),
+      supabase.from('tier_history').select('*').order('id', { ascending: true }),
     ])
     if (recs) setRecords(recs)
     if (vots) setVoteResults(vots)
+    if (hist) setTierHistory(hist)
     if (sums) {
       const map: SummonerMap = {}
       sums.forEach((s: { name: string; tier: string; line: Line }) => {
@@ -1777,7 +1892,7 @@ export default function Home() {
           {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} voteRecordId={voteRecordId} voteWinner={voteWinner} voteStartedAt={voteStartedAt} onVoteStart={handleVoteStart} onVoteEnd={handleVoteEnd} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} voteResults={voteResults} />}
           {tab === 'ranking' && <RankingTab records={records} />}
-          {tab === 'stats' && <StatsTab records={records} summoners={summoners} voteResults={voteResults} />}
+          {tab === 'stats' && <StatsTab records={records} summoners={summoners} voteResults={voteResults} tierHistory={tierHistory} />}
           {tab === 'matchup' && <MatchupTab records={records} />}
           {tab === 'summoners' && <SummonerTab summoners={summoners} onRefresh={fetchAll} />}
         </>
