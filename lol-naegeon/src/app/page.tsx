@@ -251,8 +251,9 @@ function VoteSection({ recordId, winner, result, summoners, records, startedAt, 
 
     setVoteResult({ bus: busWinner, ace: aceWinner, tied: false, busValid, aceValid, busTied, aceTied })
 
-    // 티어 변동 처리
-    const updatedRecords = records
+    // 전적 포함한 최신 records로 승률 계산
+    const { data: latestRecs } = await supabase.from('records').select('*').order('created_at', { ascending: false })
+    const updatedRecords = latestRecs ?? records
     const historyEntries: { record_id: number; name: string; line: string; tier_before: string; tier_after: string }[] = []
 
     // 이긴팀: BUS 유효하면 1등 제외, 아니면 전원 UP
@@ -684,14 +685,15 @@ function TeamTab({
     return wins / recent.length
   }
 
-  const recordWin = async (winner: 'blue' | 'red') => {
-    if (!result) return
-    const winners = winner === 'blue' ? result.team1 : result.team2
-    const losers = winner === 'blue' ? result.team2 : result.team1
+  const [isRecording, setIsRecording] = useState(false)
 
-    // 현재 기록 먼저 저장 (승률 계산에 이번 판 포함)
+  const recordWin = async (winner: 'blue' | 'red') => {
+    if (!result || isRecording) return
+    setIsRecording(true)
+
+    // 전적 저장 (티어 변동은 투표 완료 후 processResult에서 처리)
     const now = new Date()
-    const time = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+    const time = `\${now.getMonth() + 1}/\${now.getDate()} \${String(now.getHours()).padStart(2, '0')}:\${String(now.getMinutes()).padStart(2, '0')}`
     const blueData = result.team1.map(p => ({ name: p.name, line: p.line }))
     const redData = result.team2.map(p => ({ name: p.name, line: p.line }))
     const { data: newRecord } = await supabase
@@ -699,44 +701,10 @@ function TeamTab({
       .insert([{ winner, blue: blueData, red: redData, time }])
       .select()
 
-    // 이번 판 포함한 최신 records로 승률 계산
-    const updatedRecords = newRecord ? [newRecord[0], ...records] : records
-
-    const recordHistories: { record_id: number; name: string; line: string; tier_before: string; tier_after: string }[] = []
-    const recId = newRecord?.[0]?.id
-
-    for (const p of winners) {
-      if (summoners[p.name]?.[p.line]) {
-        const currentTier = summoners[p.name][p.line]
-        let newTier: string | null = null
-        if (isSilver3OrBelow(currentTier)) {
-          const wr = getRecentLineWinRate(p.name, p.line, updatedRecords, 5)
-          if (wr !== null && wr >= 0.6) newTier = tierUp(currentTier)
-        } else {
-          newTier = tierUp(currentTier)
-        }
-        if (newTier && newTier !== currentTier) {
-          await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
-          if (recId) recordHistories.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
-        }
-      }
-    }
-    for (const p of losers) {
-      if (summoners[p.name]?.[p.line]) {
-        const currentTier = summoners[p.name][p.line]
-        const newTier = tierDown(currentTier)
-        if (newTier !== currentTier) {
-          await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
-          if (recId) recordHistories.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
-        }
-      }
-    }
-    if (recordHistories.length > 0) {
-      await supabase.from('tier_history').insert(recordHistories)
-    }
-
     onRecord({ winner, blue: blueData, red: redData, skipInsert: true })
+
     // 투표 시작
+    const recId = newRecord?.[0]?.id
     if (recId) {
       onVoteStart(recId, winner)
     }
@@ -1041,8 +1009,8 @@ function TeamTab({
               <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 4 }}>어느 팀이 이겼나요?</div>
               <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>🏆 이긴 팀은 BUS 투표, 진 팀은 ACE 투표 후 티어 변동</div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-                <button className="btn btn-blue" onClick={() => recordWin('blue')}>🔵 블루팀 승리</button>
-                <button className="btn btn-red" onClick={() => recordWin('red')}>🔴 레드팀 승리</button>
+                <button className="btn btn-blue" onClick={() => recordWin('blue')} disabled={isRecording}>🔵 블루팀 승리</button>
+                <button className="btn btn-red" onClick={() => recordWin('red')} disabled={isRecording}>🔴 레드팀 승리</button>
               </div>
             </div>
           ) : (
