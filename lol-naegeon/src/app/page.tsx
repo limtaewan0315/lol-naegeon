@@ -55,6 +55,7 @@ function SummonerTab({ summoners, onRefresh }: { summoners: SummonerMap; onRefre
   const [error, setError] = useState('')
   const [editing, setEditing] = useState<{ name: string; line: Line } | null>(null)
   const [editTier, setEditTier] = useState('')
+  const [search, setSearch] = useState('')
 
   // 등록: name+line 복합키로 upsert
   const add = async () => {
@@ -89,7 +90,10 @@ function SummonerTab({ summoners, onRefresh }: { summoners: SummonerMap; onRefre
     onRefresh()
   }
 
-  const summonerNames = Object.keys(summoners).sort()
+  const allSummonerNames = Object.keys(summoners).sort()
+  const summonerNames = search.trim()
+    ? allSummonerNames.filter(n => n.includes(search.trim()))
+    : []
 
   return (
     <div>
@@ -112,9 +116,19 @@ function SummonerTab({ summoners, onRefresh }: { summoners: SummonerMap; onRefre
       </div>
 
       <div className="card">
-        <div className="card-title">등록된 소환사 ({summonerNames.length}명)</div>
-        {summonerNames.length === 0
-          ? <div className="empty">등록된 소환사가 없어요.</div>
+        <div className="card-title">등록된 소환사 ({allSummonerNames.length}명)</div>
+        <div style={{ marginBottom: 10 }}>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="소환사명 검색..."
+            style={{ width: '100%' }}
+          />
+        </div>
+        {!search.trim()
+          ? <div className="empty">소환사명을 검색해주세요</div>
+          : summonerNames.length === 0
+          ? <div className="empty">'{search}' 검색 결과가 없어요</div>
           : summonerNames.map(n => {
             const lines = summoners[n]
             const sortedLines = (Object.keys(lines) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b])
@@ -1069,6 +1083,10 @@ function RecordTab({ records, onDelete, onClear, voteResults }: {
   onClear: () => void
   voteResults: { record_id: number; vote_type: string; candidate: string }[]
 }) {
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 10
+  const totalPages = Math.ceil(records.length / PAGE_SIZE)
+  const pagedRecords = records.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
   const total = records.length
   const blue = records.filter(r => r.winner === 'blue').length
   const red = records.filter(r => r.winner === 'red').length
@@ -1112,7 +1130,7 @@ function RecordTab({ records, onDelete, onClear, voteResults }: {
         <div className="card-title">경기 기록</div>
         {records.length === 0
           ? <div className="empty">아직 기록된 경기가 없어요.</div>
-          : records.map((r, i) => {
+          : pagedRecords.map((r, i) => {
             const sortTeam = (team: {name:string; line:Line}[]) => [...team].sort((a,b) => (LINE_ORDER[a.line]??9)-(LINE_ORDER[b.line]??9))
             const busName = voteResults.find(v => v.record_id === r.id && v.vote_type === 'bus')?.candidate ?? null
             const aceName = voteResults.find(v => v.record_id === r.id && v.vote_type === 'ace')?.candidate ?? null
@@ -1128,7 +1146,7 @@ function RecordTab({ records, onDelete, onClear, voteResults }: {
             <div key={r.id} style={{ background: 'var(--bg3)', borderRadius: 'var(--radius)', marginBottom: 8, border: '0.5px solid var(--border)', overflow: 'hidden' }}>
               {/* 헤더 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderBottom: '0.5px solid var(--border)' }}>
-                <span style={{ fontSize: 12, color: 'var(--text3)', width: 20, flexShrink: 0 }}>{records.length - i}</span>
+                <span style={{ fontSize: 12, color: 'var(--text3)', width: 20, flexShrink: 0 }}>{records.length - ((page-1)*PAGE_SIZE + i)}</span>
                 <span className={`badge ${r.winner === 'blue' ? 'b-win' : 'b-lose'}`} style={{ fontSize: 11 }}>
                   {r.winner === 'blue' ? '🔵 블루승' : '🔴 레드승'}
                 </span>
@@ -1155,6 +1173,32 @@ function RecordTab({ records, onDelete, onClear, voteResults }: {
             )
           })
         }
+
+        {/* 페이지네이션 */}
+        {totalPages > 1 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 }}>
+            <button className="btn btn-sm" onClick={() => setPage(1)} disabled={page === 1}>{'<<'}</button>
+            <button className="btn btn-sm" onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1}>{'<'}</button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+              .reduce((acc: (number|string)[], p, idx, arr) => {
+                if (idx > 0 && (p as number) - (arr[idx-1] as number) > 1) acc.push('...')
+                acc.push(p)
+                return acc
+              }, [])
+              .map((p, idx) => typeof p === 'string'
+                ? <span key={idx} style={{ fontSize: 12, color: 'var(--text3)' }}>...</span>
+                : <button key={idx} className="btn btn-sm" onClick={() => setPage(p as number)}
+                    style={{ background: page === p ? 'var(--blue2)' : undefined, color: page === p ? '#fff' : undefined }}>
+                    {p}
+                  </button>
+              )
+            }
+            <button className="btn btn-sm" onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages}>{'>'}</button>
+            <button className="btn btn-sm" onClick={() => setPage(totalPages)} disabled={page === totalPages}>{'>>'}</button>
+            <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 4 }}>{page}/{totalPages}페이지</span>
+          </div>
+        )}
 
         {records.length > 0 && (
           <div style={{ marginTop: 12 }}>
