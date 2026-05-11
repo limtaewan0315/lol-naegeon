@@ -1059,10 +1059,11 @@ function TeamTab({
 }
 
 // ── 전적 기록 탭 ──────────────────────────────────────────────
-function RecordTab({ records, onDelete, onClear }: {
+function RecordTab({ records, onDelete, onClear, voteResults }: {
   records: GameRecord[]
   onDelete: (id: number) => void
   onClear: () => void
+  voteResults: { record_id: number; vote_type: string; candidate: string }[]
 }) {
   const total = records.length
   const blue = records.filter(r => r.winner === 'blue').length
@@ -1109,6 +1110,16 @@ function RecordTab({ records, onDelete, onClear }: {
           ? <div className="empty">아직 기록된 경기가 없어요.</div>
           : records.map((r, i) => {
             const sortTeam = (team: {name:string; line:Line}[]) => [...team].sort((a,b) => (LINE_ORDER[a.line]??9)-(LINE_ORDER[b.line]??9))
+            const busName = voteResults.find(v => v.record_id === r.id && v.vote_type === 'bus')?.candidate ?? null
+            const aceName = voteResults.find(v => v.record_id === r.id && v.vote_type === 'ace')?.candidate ?? null
+            const renderPlayer = (p: {name:string; line:Line}, bg: string, border: string) => (
+              <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px', background: bg, border: `0.5px solid ${border}`, borderRadius: 999, fontSize: 11 }}>
+                <span style={{ color: 'var(--text2)', fontSize: 10 }}>{p.line}</span>
+                <span style={{ color: 'var(--text)', fontWeight: 500 }}>{p.name}</span>
+                {p.name === busName && <span style={{ fontSize: 9, color: 'var(--blue)', fontWeight: 700, marginLeft: 2 }}>🚌BUS</span>}
+                {p.name === aceName && <span style={{ fontSize: 9, color: 'var(--red)', fontWeight: 700, marginLeft: 2 }}>🏆ACE</span>}
+              </div>
+            )
             return (
             <div key={r.id} style={{ background: 'var(--bg3)', borderRadius: 'var(--radius)', marginBottom: 8, border: '0.5px solid var(--border)', overflow: 'hidden' }}>
               {/* 헤더 */}
@@ -1117,6 +1128,8 @@ function RecordTab({ records, onDelete, onClear }: {
                 <span className={`badge ${r.winner === 'blue' ? 'b-win' : 'b-lose'}`} style={{ fontSize: 11 }}>
                   {r.winner === 'blue' ? '🔵 블루승' : '🔴 레드승'}
                 </span>
+                {busName && <span style={{ fontSize: 10, color: 'var(--blue)' }}>🚌{busName}</span>}
+                {aceName && <span style={{ fontSize: 10, color: 'var(--red)' }}>🏆{aceName}</span>}
                 <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text3)' }}>{r.time}</span>
                 <button className="btn btn-danger btn-sm" onClick={() => onDelete(r.id)}>삭제</button>
               </div>
@@ -1124,24 +1137,14 @@ function RecordTab({ records, onDelete, onClear }: {
               <div style={{ padding: '6px 12px', borderBottom: '0.5px solid var(--border)' }}>
                 <div style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 600, marginBottom: 4 }}>🔵 블루팀</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                  {sortTeam(r.blue).map(p => (
-                    <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px', background: 'var(--blue-bg)', border: '0.5px solid var(--blue-border)', borderRadius: 999, fontSize: 11 }}>
-                      <span style={{ color: 'var(--text2)', fontSize: 10 }}>{p.line}</span>
-                      <span style={{ color: 'var(--text)', fontWeight: 500 }}>{p.name}</span>
-                    </div>
-                  ))}
+                  {sortTeam(r.blue).map(p => renderPlayer(p, 'var(--blue-bg)', 'var(--blue-border)'))}
                 </div>
               </div>
               {/* 레드팀 */}
               <div style={{ padding: '6px 12px' }}>
                 <div style={{ fontSize: 10, color: 'var(--red)', fontWeight: 600, marginBottom: 4 }}>🔴 레드팀</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                  {sortTeam(r.red).map(p => (
-                    <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px', background: 'var(--red-bg)', border: '0.5px solid var(--red-border)', borderRadius: 999, fontSize: 11 }}>
-                      <span style={{ color: 'var(--text2)', fontSize: 10 }}>{p.line}</span>
-                      <span style={{ color: 'var(--text)', fontWeight: 500 }}>{p.name}</span>
-                    </div>
-                  ))}
+                  {sortTeam(r.red).map(p => renderPlayer(p, 'var(--red-bg)', 'var(--red-border)'))}
                 </div>
               </div>
             </div>
@@ -1160,7 +1163,7 @@ function RecordTab({ records, onDelete, onClear }: {
 }
 
 // ── 개인 통계 탭 ──────────────────────────────────────────────
-function StatsTab({ records, summoners }: { records: GameRecord[]; summoners: SummonerMap }) {
+function StatsTab({ records, summoners, voteResults }: { records: GameRecord[]; summoners: SummonerMap; voteResults: { record_id: number; vote_type: string; candidate: string }[] }) {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>([])
@@ -1265,6 +1268,12 @@ function StatsTab({ records, summoners }: { records: GameRecord[]; summoners: Su
                 const ls = lines[l]
                 const lTotal = ls.win + ls.lose
                 const lWr = Math.round(ls.win / lTotal * 100)
+                // 해당 라인의 BUS/ACE 횟수 계산
+                const lineRecordIds = records
+                  .filter(r => [...r.blue, ...r.red].some(p => p.name === selected && p.line === l))
+                  .map(r => r.id)
+                const busCount = voteResults.filter(v => lineRecordIds.includes(v.record_id) && v.vote_type === 'bus' && v.candidate === selected).length
+                const aceCount = voteResults.filter(v => lineRecordIds.includes(v.record_id) && v.vote_type === 'ace' && v.candidate === selected).length
                 return (
                   <div key={l} style={{ padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)', marginBottom: 6 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -1273,6 +1282,8 @@ function StatsTab({ records, summoners }: { records: GameRecord[]; summoners: Su
                       <span className="badge b-win" style={{ fontSize: 10 }}>{ls.win}승</span>
                       <span className="badge b-lose" style={{ fontSize: 10 }}>{ls.lose}패</span>
                       <span style={{ fontSize: 11, color: 'var(--text2)' }}>{lTotal}판</span>
+                      {busCount > 0 && <span style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 600 }}>🚌BUS {busCount}회</span>}
+                      {aceCount > 0 && <span style={{ fontSize: 10, color: 'var(--red)', fontWeight: 600 }}>🏆ACE {aceCount}회</span>}
                       <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 600, color: lWr >= 50 ? 'var(--green)' : 'var(--red)' }}>{lWr}%</span>
                     </div>
                     {/* 라인별 최근 5판 */}
@@ -1535,6 +1546,7 @@ export default function Home() {
   const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'stats' | 'matchup' | 'summoners'>('team')
   const [records, setRecords] = useState<GameRecord[]>([])
   const [summoners, setSummoners] = useState<SummonerMap>({})
+  const [voteResults, setVoteResults] = useState<{ record_id: number; vote_type: string; candidate: string }[]>([])
   const [loading, setLoading] = useState(true)
   // 팀뽑기 상태 유지 (탭 이동해도 안 날아감)
   const [teamPlayers, setTeamPlayers] = useState<PlayerEntry[]>([])
@@ -1545,12 +1557,14 @@ export default function Home() {
   const [voteStartedAt, setVoteStartedAt] = useState<string | null>(null)
 
   const fetchAll = useCallback(async () => {
-    const [{ data: recs }, { data: sums }, { data: sess }] = await Promise.all([
+    const [{ data: recs }, { data: sums }, { data: sess }, { data: vots }] = await Promise.all([
       supabase.from('records').select('*').order('created_at', { ascending: false }),
       supabase.from('summoners').select('*'),
       supabase.from('session').select('*').eq('id', 1).single(),
+      supabase.from('votes').select('record_id, vote_type, candidate'),
     ])
     if (recs) setRecords(recs)
+    if (vots) setVoteResults(vots)
     if (sums) {
       const map: SummonerMap = {}
       sums.forEach((s: { name: string; tier: string; line: Line }) => {
@@ -1687,9 +1701,9 @@ export default function Home() {
       ) : (
         <>
           {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} voteRecordId={voteRecordId} voteWinner={voteWinner} voteStartedAt={voteStartedAt} onVoteStart={handleVoteStart} onVoteEnd={handleVoteEnd} />}
-          {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
+          {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} voteResults={voteResults} />}
           {tab === 'ranking' && <RankingTab records={records} />}
-          {tab === 'stats' && <StatsTab records={records} summoners={summoners} />}
+          {tab === 'stats' && <StatsTab records={records} summoners={summoners} voteResults={voteResults} />}
           {tab === 'matchup' && <MatchupTab records={records} />}
           {tab === 'summoners' && <SummonerTab summoners={summoners} onRefresh={fetchAll} />}
         </>
