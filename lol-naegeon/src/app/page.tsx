@@ -536,11 +536,12 @@ function TeamTab({
 
       const fmtPlayer = (p: TeamPlayer, isWinner: boolean) => {
         const h = historyEntries.find(e => e.name===p.name && e.line===p.line)
-        const tierChange = h ? `${h.tier_before}→${h.tier_after} ${isWinner?'▲':'▼'}` : ''
+        const tierChange = h ? `↳ ${h.tier_before} → ${h.tier_after} ${isWinner?'▲':'▼'}` : ''
         const streak = getStreak(p.name, p.line, updatedRecords)
         const abs = Math.abs(streak)
         const streakStr = abs >= 2 ? (streak > 0 ? ` 🔥${abs}연승` : ` 💧${abs}연패`) : ''
-        return `\`${p.line}\` ${p.name} ${tierChange}${streakStr}`
+        const line1 = `\`${p.line}\` **${p.name}**${streakStr}`
+        return tierChange ? `${line1}\n${tierChange}` : line1
       }
 
       const winLabel = winner === 'blue' ? '🔵 블루팀' : '🔴 레드팀'
