@@ -348,8 +348,7 @@ function TeamTab({
           line = isM2 ? p.most2 as Line : p.most1 as Line
         }
         const tier = summoners[p.name]?.[line] ?? '골드2'
-        // M2 배정 시 점수 20% 감소
-        const score = getAdjustedScore(p.name, line, tier) * (isM2 ? 0.8 : 1.0)
+        const score = getAdjustedScore(p.name, line, tier)
         return { name: p.name, line, score }
       })
 
