@@ -296,6 +296,24 @@ function TeamTab({
       return opts.length > 0 ? opts : allLines
     }
 
+    // 라인별 승률 기반 점수 보정 (15판 이상일 때만)
+    const getAdjustedScore = (name: string, line: Line, tier: string): number => {
+      const baseScore = getScore(tier, line)
+      const lineRecs = records.filter(r =>
+        r.blue.some(p => p.name === name && p.line === line) ||
+        r.red.some(p => p.name === name && p.line === line)
+      )
+      const total = lineRecs.length
+      if (total < 15) return baseScore // 15판 미만이면 티어점수만 사용
+      const wins = lineRecs.filter(r => {
+        const inBlue = r.blue.some(p => p.name === name && p.line === line)
+        return (inBlue && r.winner === 'blue') || (!inBlue && r.winner === 'red')
+      }).length
+      const wr = wins / total
+      // 티어 70% + 승률 30% 반영
+      return baseScore * (0.7 + 0.3 * (wr / 0.5))
+    }
+
     let best: BalanceResult | null = null
     let bestDiff = Infinity
 
@@ -305,7 +323,7 @@ function TeamTab({
         const opts = getOptions(p)
         const line = opts[Math.floor(Math.random() * opts.length)]
         const tier = summoners[p.name]?.[line] ?? '골드2'
-        return { name: p.name, line, score: getScore(tier, line) }
+        return { name: p.name, line, score: getAdjustedScore(p.name, line, tier) }
       })
 
       // 2) 각 라인에 최소 2명이 있는지 체크
