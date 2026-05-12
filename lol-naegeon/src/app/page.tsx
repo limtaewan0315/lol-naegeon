@@ -420,15 +420,21 @@ function TeamTab({
     }
   }, [players, summoners])
 
-  // balanceStartedAt 변경 시 카운트다운 복원 (새로고침 대응)
+  // balanceStartedAt + pendingResult 둘 다 있을 때 카운트다운 시작
   useEffect(() => {
-    if (!balanceStartedAt) return
+    if (!balanceStartedAt || !pendingResult) return
     const elapsed = Math.floor((Date.now() - new Date(balanceStartedAt).getTime()) / 1000)
     const remaining = 10 - elapsed
     if (remaining > 0) {
       setCountdown(remaining)
+    } else {
+      // 이미 10초 지남 → 바로 결과 표시
+      setResult(pendingResult)
+      onSessionUpdate(players, pendingResult)
+      setPendingResult(null)
+      supabase.from('session').update({ balance_started_at: null, pending_result: null, result: pendingResult }).eq('id', 1)
     }
-  }, [balanceStartedAt])
+  }, [balanceStartedAt, pendingResult])
 
   // 카운트다운 타이머
   useEffect(() => {
