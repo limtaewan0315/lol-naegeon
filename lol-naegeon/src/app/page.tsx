@@ -60,13 +60,12 @@ function tierDown(tier: string): string {
 }
 
 function isDia1OrAbove(tier: string): boolean {
-  const dia1Tiers = ['다이아1', '마/그/챌 0~99', '마/그/챌 100~199', '마/그/챌 200~299', '마/그/챌 300~399', '마/그/챌 400~499', '마/그/챌 500~599', '마/그/챌 600~699', '마/그/챌 700~799', '마/그/챌 800~899', '마/그/챌 900~999', '마/그/챌 1000~1099', '마/그/챌 1100~1199', '마/그/챌 1200~1299', '마/그/챌 1300~1399', '마/그/챌 1400~1499', '마/그/챌 1500~1599', '마/그/챌 1600~1699', '마/그/챌 1700~1799', '마/그/챌 1800이상']
+  const dia1Tiers = ['다이아1', '마스터0층', '마스터1층', '마스터2층', '마스터3층', '마스터4층', '마스터5층', '마스터6층', '마스터7층', '그랜드마스터8층', '그랜드마스터9층', '그랜드마스터10층', '그랜드마스터11층', '그랜드마스터12층', '그랜드마스터13층', '그랜드마스터14층', '챌린저15층', '챌린저16층', '챌린저17층', '리그오브레전드']
   return dia1Tiers.includes(tier)
 }
 
 function isSilver3OrBelowGlobal(tier: string): boolean {
-  const tiers = ['실버3 이하', '실버2', '실버1']
-  return tiers.includes(tier)
+  return ['실버3 이하', '실버2', '실버1'].includes(tier)
 }
 
 function getConsecutiveLineWins(playerName: string, line: string, records: GameRecord[], n = 2): number {
@@ -1194,6 +1193,12 @@ function StatsTab({ records, summoners, tierHistory }: {
     '플래티넘4': 8, '플래티넘3': 9, '플래티넘2': 10, '플래티넘1': 11,
     '에메랄드4': 12, '에메랄드3': 13, '에메랄드2': 14, '에메랄드1': 15,
     '다이아4': 16, '다이아3': 17, '다이아2': 18, '다이아1': 19,
+    '마스터 0층': 20, '마스터 1층': 21, '마스터 2층': 22, '마스터 3층': 23,
+    '마스터 4층': 24, '마스터 5층': 25, '마스터 6층': 26, '마스터 7층': 27,
+    '그랜드마스터 8층': 28, '그랜드마스터 9층': 29, '그랜드마스터 10층': 30,
+    '그랜드마스터 11층': 31, '그랜드마스터 12층': 32, '그랜드마스터 13층': 33,
+    '그랜드마스터 14층': 34, '챌린저 15층': 35, '챌린저 16층': 36,
+    '챌린저 17층': 37, '리그오브레전드': 38,
   }
 
   const OX = ({ results }: { results: boolean[] }) => (
@@ -1866,7 +1871,7 @@ export default function Home() {
           style={{
             height: '90vh', maxHeight: 750, objectFit: 'cover', objectPosition: '30% top',
             opacity: 0.5,
-            transform: 'translateX(-52%)',
+            transform: 'translateX(-55%)',
             WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
             WebkitMaskComposite: 'destination-in',
             maskImage: 'linear-gradient(to right, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
@@ -1885,7 +1890,7 @@ export default function Home() {
           style={{
             height: '90vh', maxHeight: 750, objectFit: 'cover', objectPosition: '70% top',
             opacity: 0.5,
-            transform: 'translateX(26%)',
+            transform: 'translateX(40%)',
             WebkitMaskImage: 'linear-gradient(to left, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
             WebkitMaskComposite: 'destination-in',
             maskImage: 'linear-gradient(to left, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
