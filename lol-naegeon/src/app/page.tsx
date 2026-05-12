@@ -1571,6 +1571,9 @@ function MatchupTab({ records }: { records: GameRecord[] }) {
 
 // ── 전체 랭킹 탭 ──────────────────────────────────────────────
 function RankingTab({ records }: { records: GameRecord[] }) {
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 10
+
   const playerMap: Record<string, { win: number; lose: number }> = {}
   records.forEach(r => {
     const winners = r.winner === 'blue' ? r.blue : r.red
@@ -1580,7 +1583,6 @@ function RankingTab({ records }: { records: GameRecord[] }) {
     losers.forEach(p => playerMap[p.name].lose++)
   })
 
-  // 10판 이상인 소환사만, 승률 내림차순 정렬
   const entries = Object.entries(playerMap)
     .filter(([, s]) => s.win + s.lose >= 30)
     .sort((a, b) => {
@@ -1589,6 +1591,8 @@ function RankingTab({ records }: { records: GameRecord[] }) {
       return wB - wA
     })
 
+  const totalPages = Math.ceil(entries.length / PAGE_SIZE)
+  const pagedEntries = entries.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
   const medals = ['🥇', '🥈', '🥉']
 
   return (
@@ -1599,61 +1603,77 @@ function RankingTab({ records }: { records: GameRecord[] }) {
       </div>
       {entries.length === 0
         ? <div className="empty">30판 이상 참가한 소환사가 없어요. 경기를 더 쌓아보세요!</div>
-        : entries.map(([name, s], i) => {
+        : pagedEntries.map(([name, s], i) => {
+          const globalIdx = (page - 1) * PAGE_SIZE + i
           const total = s.win + s.lose
           const wr = Math.round(s.win / total * 100)
-          const medal = medals[i] ?? null
-          const isTop3 = i < 3
+          const medal = medals[globalIdx] ?? null
+          const isTop3 = globalIdx < 3
 
           return (
             <div key={name} style={{
               display: 'flex', alignItems: 'center', gap: 10,
               padding: '12px 14px', marginBottom: 8,
               background: isTop3 ? (
-                i === 0 ? 'rgba(255,215,0,0.07)' :
-                i === 1 ? 'rgba(192,192,192,0.07)' :
+                globalIdx === 0 ? 'rgba(255,215,0,0.07)' :
+                globalIdx === 1 ? 'rgba(192,192,192,0.07)' :
                 'rgba(205,127,50,0.07)'
               ) : 'var(--bg3)',
               borderRadius: 'var(--radius)',
               border: '0.5px solid ' + (isTop3 ? (
-                i === 0 ? 'rgba(255,215,0,0.3)' :
-                i === 1 ? 'rgba(192,192,192,0.3)' :
+                globalIdx === 0 ? 'rgba(255,215,0,0.3)' :
+                globalIdx === 1 ? 'rgba(192,192,192,0.3)' :
                 'rgba(205,127,50,0.3)'
               ) : 'var(--border)'),
             }}>
-              {/* 순위 */}
               <div style={{ width: 32, textAlign: 'center', flexShrink: 0 }}>
                 {medal
                   ? <span style={{ fontSize: 22 }}>{medal}</span>
-                  : <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text3)' }}>{i + 1}</span>
+                  : <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text3)' }}>{globalIdx + 1}</span>
                 }
               </div>
-
-              {/* 소환사명 */}
               <span style={{ fontWeight: 700, fontSize: 14, flex: '0 0 90px' }}>{name}</span>
-
-              {/* 승/패 */}
               <span className="badge b-win">{s.win}승</span>
               <span className="badge b-lose">{s.lose}패</span>
               <span style={{ fontSize: 12, color: 'var(--text2)' }}>{total}판</span>
-
-              {/* 승률 바 */}
               <div className="wr-bar-bg" style={{ flex: 1, marginLeft: 4 }}>
                 <div className="wr-bar" style={{
                   width: `${wr}%`,
-                  background: i === 0 ? '#FFD700' : i === 1 ? '#C0C0C0' : i === 2 ? '#CD7F32' : 'var(--blue)'
+                  background: globalIdx === 0 ? '#FFD700' : globalIdx === 1 ? '#C0C0C0' : globalIdx === 2 ? '#CD7F32' : 'var(--blue)'
                 }} />
               </div>
-
-              {/* 승률 % */}
               <span style={{
                 fontSize: 15, fontWeight: 700, minWidth: 40, textAlign: 'right',
-                color: i === 0 ? '#FFD700' : i === 1 ? '#C0C0C0' : i === 2 ? '#CD7F32' : 'var(--text)'
+                color: globalIdx === 0 ? '#FFD700' : globalIdx === 1 ? '#C0C0C0' : globalIdx === 2 ? '#CD7F32' : 'var(--text)'
               }}>{wr}%</span>
             </div>
           )
         })
       }
+      {totalPages > 1 && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 }}>
+          <button className="btn btn-sm" onClick={() => setPage(1)} disabled={page === 1}>{'<<'}</button>
+          <button className="btn btn-sm" onClick={() => setPage(p => Math.max(1, p-1))} disabled={page === 1}>{'<'}</button>
+          {Array.from({ length: totalPages }, (_, i) => i + 1)
+            .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+            .reduce((acc: (number|string)[], p, idx, arr) => {
+              if (idx > 0 && (p as number) - (arr[idx-1] as number) > 1) acc.push('...')
+              acc.push(p)
+              return acc
+            }, [])
+            .map((p, idx) => typeof p === 'string'
+              ? <span key={idx} style={{ fontSize: 12, color: 'var(--text3)' }}>...</span>
+              : <button key={idx} className="btn btn-sm" onClick={() => setPage(p as number)}
+                  style={{ background: page === p ? 'var(--blue2)' : undefined, color: page === p ? '#fff' : undefined }}>
+                  {p}
+                </button>
+            )
+          }
+          <button className="btn btn-sm" onClick={() => setPage(p => Math.min(totalPages, p+1))} disabled={page === totalPages}>{'>'}</button>
+          <button className="btn btn-sm" onClick={() => setPage(totalPages)} disabled={page === totalPages}>{'>>'}</button>
+          <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 4 }}>{page}/{totalPages}페이지</span>
+        </div>
+      )}
     </div>
   )
 }
