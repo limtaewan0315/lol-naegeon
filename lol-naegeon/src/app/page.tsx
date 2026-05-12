@@ -629,11 +629,10 @@ function TeamTab({
       {result && countdown === null && (
         <>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-            <button className="btn btn-danger" onClick={() => {
+            <button className="btn btn-danger" onClick={async () => {
               setResult(null)
               setPendingResult(null)
-              onSessionUpdate(players, null)
-              supabase.from('session').update({ balance_started_at: null, pending_result: null }).eq('id', 1)
+              await supabase.from('session').update({ result: null, balance_started_at: null, pending_result: null, updated_at: new Date().toISOString() }).eq('id', 1)
             }}>🚪 탈주하기</button>
           </div>
           <div className="teams-grid">
