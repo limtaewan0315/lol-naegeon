@@ -217,6 +217,7 @@ function TeamTab({
   const [error, setError] = useState('')
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [countdown, setCountdown] = useState<number | null>(null)
+  const [pendingResult, setPendingResult] = useState<BalanceResult | null>(null)
 
 
   // 소환사의 등록된 라인 목록 (LINE_ORDER 순)
@@ -378,6 +379,7 @@ function TeamTab({
     }
 
     if (best) {
+      setPendingResult(best)
       onSessionUpdate(players, best)
       setCountdown(10)
     }
@@ -417,11 +419,15 @@ function TeamTab({
     if (countdown === null) return
     if (countdown <= 0) {
       setCountdown(null)
+      if (pendingResult) {
+        setResult(pendingResult)
+        setPendingResult(null)
+      }
       return
     }
     const timer = setTimeout(() => setCountdown(c => c !== null ? c - 1 : null), 1000)
     return () => clearTimeout(timer)
-  }, [countdown])
+  }, [countdown, pendingResult])
 
   // 실버3 이하 여부 체크
   const isSilver3OrBelow = (tier: string) => isSilver3OrBelowGlobal(tier)
@@ -603,7 +609,7 @@ function TeamTab({
 
         <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
           <button className="btn btn-gold" onClick={balance} disabled={!!result || countdown !== null}>팀 균형 맞추기</button>
-          <button className="btn" onClick={() => { setPlayers([]); setResult(null); setCountdown(null); setError(''); onSessionUpdate([], null) }}>초기화</button>
+          <button className="btn" onClick={() => { setPlayers([]); setResult(null); setCountdown(null); setPendingResult(null); setError(''); onSessionUpdate([], null) }}>초기화</button>
         </div>
       </div>
 
@@ -624,6 +630,7 @@ function TeamTab({
             <button className="btn btn-danger" onClick={() => {
               setResult(null)
               setCountdown(null)
+              setPendingResult(null)
               onSessionUpdate(players, null)
             }}>🚪 탈주하기</button>
           </div>
