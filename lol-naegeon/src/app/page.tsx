@@ -60,7 +60,7 @@ function tierDown(tier: string): string {
 }
 
 function isDia1OrAbove(tier: string): boolean {
-  const dia1Tiers = ['다이아1', '마스터0층', '마스터1층', '마스터2층', '마스터3층', '마스터4층', '마스터5층', '마스터6층', '마스터7층', '그랜드마스터8층', '그랜드마스터9층', '그랜드마스터10층', '그랜드마스터11층', '그랜드마스터12층', '그랜드마스터13층', '그랜드마스터14층', '챌린저15층', '챌린저16층', '챌린저17층', '리그오브레전드']
+  const dia1Tiers = ['다이아1', '마스터 0층', '마스터 1층', '마스터 2층', '마스터 3층', '마스터 4층', '마스터 5층', '마스터 6층', '마스터 7층', '그랜드마스터 8층', '그랜드마스터 9층', '그랜드마스터 10층', '그랜드마스터 11층', '그랜드마스터 12층', '그랜드마스터 13층', '그랜드마스터 14층', '챌린저 15층', '챌린저 16층', '챌린저 17층', '리그오브레전드']
   return dia1Tiers.includes(tier)
 }
 
@@ -441,7 +441,17 @@ function TeamTab({
         }).join(', ')
         setError(`팀 구성 실패. 다음 라인 인원이 부족해요: ${msg}`)
       } else {
-        setError('팀 구성 실패. 모스트 라인을 다양하게 설정해보세요.')
+        // 실제 배정 가능한 라인 조합 분석
+        const lineOptions = players.map(p => ({
+          name: p.name,
+          options: getOptions(p)
+        }))
+        const problematic = lineOptions.filter(p => p.options.length === 0)
+        if (problematic.length > 0) {
+          setError(`팀 구성 실패. ${problematic.map(p => p.name).join(', ')}의 라인 설정을 확인해주세요.`)
+        } else {
+          setError('팀 구성 실패. 라인 조합이 너무 치우쳐 있어요. M1/M2를 다양하게 설정해보세요.')
+        }
       }
       return
     }
