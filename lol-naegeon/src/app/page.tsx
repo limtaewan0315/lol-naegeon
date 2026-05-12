@@ -206,6 +206,8 @@ function TeamTab({
   pendingResult,
   setPendingResult,
   countdown,
+  setCountdown,
+  setBalanceStartedAt,
 }: {
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
   summoners: SummonerMap
@@ -220,6 +222,8 @@ function TeamTab({
   pendingResult: BalanceResult | null
   setPendingResult: React.Dispatch<React.SetStateAction<BalanceResult | null>>
   countdown: number | null
+  setCountdown: React.Dispatch<React.SetStateAction<number | null>>
+  setBalanceStartedAt: React.Dispatch<React.SetStateAction<string | null>>
 }) {
   const [name, setName] = useState('')
   const [error, setError] = useState('')
@@ -386,9 +390,13 @@ function TeamTab({
     }
 
     if (best) {
-      setPendingResult(best)
       const startedAt = new Date().toISOString()
+      // 세션 저장
       supabase.from('session').update({ balance_started_at: startedAt, pending_result: best }).eq('id', 1)
+      // 로컬 상태 즉시 업데이트 (실시간 구독 기다리지 않음)
+      setPendingResult(best)
+      setBalanceStartedAt(startedAt)
+      setCountdown(10)
     }
     if (!best) {
       // 어떤 라인이 부족한지 분석
@@ -1743,7 +1751,7 @@ export default function Home() {
         <div className="empty">불러오는 중...</div>
       ) : (
         <>
-          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} countdown={countdown} />}
+          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} countdown={countdown} setCountdown={setCountdown} setBalanceStartedAt={setBalanceStartedAt} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} tierHistory={tierHistory} />}
