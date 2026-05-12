@@ -1842,7 +1842,7 @@ export default function Home() {
     <div className="layout">
       {/* 양옆 캐릭터 이미지 */}
       <div style={{
-        position: 'fixed', left: 0, top: 0, bottom: 0, width: 220,
+        position: 'fixed', left: 0, top: 0, bottom: 0, width: 280,
         display: 'flex', alignItems: 'flex-end', pointerEvents: 'none', zIndex: 0,
         overflow: 'hidden',
       }}>
@@ -1850,17 +1850,18 @@ export default function Home() {
           src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/LeeSin_0.jpg"
           alt="리신"
           style={{
-            height: '90vh', maxHeight: 750, objectFit: 'cover', objectPosition: '80% top',
-            opacity: 0.45,
-            WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 40%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
+            height: '90vh', maxHeight: 750, objectFit: 'cover', objectPosition: '30% top',
+            opacity: 0.5,
+            transform: 'translateX(-40%)',
+            WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
             WebkitMaskComposite: 'destination-in',
-            maskImage: 'linear-gradient(to right, transparent 0%, black 40%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
+            maskImage: 'linear-gradient(to right, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
             maskComposite: 'intersect',
           }}
         />
       </div>
       <div style={{
-        position: 'fixed', right: 0, top: 0, bottom: 0, width: 220,
+        position: 'fixed', right: 0, top: 0, bottom: 0, width: 280,
         display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', pointerEvents: 'none', zIndex: 0,
         overflow: 'hidden',
       }}>
@@ -1868,17 +1869,18 @@ export default function Home() {
           src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ahri_0.jpg"
           alt="아리"
           style={{
-            height: '90vh', maxHeight: 750, objectFit: 'cover', objectPosition: '20% top',
-            opacity: 0.45,
-            WebkitMaskImage: 'linear-gradient(to left, transparent 0%, black 40%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
+            height: '90vh', maxHeight: 750, objectFit: 'cover', objectPosition: '70% top',
+            opacity: 0.5,
+            transform: 'translateX(40%)',
+            WebkitMaskImage: 'linear-gradient(to left, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
             WebkitMaskComposite: 'destination-in',
-            maskImage: 'linear-gradient(to left, transparent 0%, black 40%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
+            maskImage: 'linear-gradient(to left, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
             maskComposite: 'intersect',
           }}
         />
       </div>
 
-      <div className="header">
+      <div className="header" style={{ background: 'transparent', backdropFilter: 'none' }}>
         <div className="header-title">⚔ 내전 매니저</div>
         <div className="header-sub">티어·라인 기반 팀 균형 매칭 + 전적 기록</div>
       </div>
