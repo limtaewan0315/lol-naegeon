@@ -205,6 +205,7 @@ function TeamTab({
   balanceStartedAt,
   pendingResult,
   setPendingResult,
+  countdown,
 }: {
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
   summoners: SummonerMap
@@ -218,11 +219,12 @@ function TeamTab({
   balanceStartedAt: string | null
   pendingResult: BalanceResult | null
   setPendingResult: React.Dispatch<React.SetStateAction<BalanceResult | null>>
+  countdown: number | null
 }) {
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [suggestions, setSuggestions] = useState<string[]>([])
-  const [countdown, setCountdown] = useState<number | null>(null)
+
 
 
   // 소환사의 등록된 라인 목록 (LINE_ORDER 순)
@@ -387,7 +389,6 @@ function TeamTab({
       setPendingResult(best)
       const startedAt = new Date().toISOString()
       supabase.from('session').update({ balance_started_at: startedAt, pending_result: best }).eq('id', 1)
-      setCountdown(10)
     }
     if (!best) {
       // 어떤 라인이 부족한지 분석
@@ -420,38 +421,7 @@ function TeamTab({
     }
   }, [players, summoners])
 
-  // balanceStartedAt + pendingResult 둘 다 있을 때 카운트다운 시작
-  useEffect(() => {
-    if (!balanceStartedAt || !pendingResult) return
-    const elapsed = Math.floor((Date.now() - new Date(balanceStartedAt).getTime()) / 1000)
-    const remaining = 10 - elapsed
-    if (remaining > 0) {
-      setCountdown(remaining)
-    } else {
-      // 이미 10초 지남 → 바로 결과 표시
-      setResult(pendingResult)
-      onSessionUpdate(players, pendingResult)
-      setPendingResult(null)
-      supabase.from('session').update({ balance_started_at: null, pending_result: null, result: pendingResult }).eq('id', 1)
-    }
-  }, [balanceStartedAt, pendingResult])
 
-  // 카운트다운 타이머
-  useEffect(() => {
-    if (countdown === null) return
-    if (countdown <= 0) {
-      setCountdown(null)
-      if (pendingResult) {
-        setResult(pendingResult)
-        onSessionUpdate(players, pendingResult)
-        setPendingResult(null)
-        supabase.from('session').update({ balance_started_at: null, pending_result: null }).eq('id', 1)
-      }
-      return
-    }
-    const timer = setTimeout(() => setCountdown(c => c !== null ? c - 1 : null), 1000)
-    return () => clearTimeout(timer)
-  }, [countdown, pendingResult])
 
   // 실버3 이하 여부 체크
   const isSilver3OrBelow = (tier: string) => isSilver3OrBelowGlobal(tier)
@@ -633,7 +603,7 @@ function TeamTab({
 
         <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
           <button className="btn btn-gold" onClick={balance} disabled={!!result || countdown !== null}>팀 균형 맞추기</button>
-          <button className="btn" onClick={() => { setPlayers([]); setResult(null); setCountdown(null); setPendingResult(null); setError(''); onSessionUpdate([], null) }}>초기화</button>
+          <button className="btn" onClick={() => { setPlayers([]); setResult(null); setPendingResult(null); setError(''); onSessionUpdate([], null); supabase.from('session').update({ balance_started_at: null, pending_result: null }).eq('id', 1) }}>초기화</button>
         </div>
       </div>
 
@@ -653,7 +623,6 @@ function TeamTab({
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
             <button className="btn btn-danger" onClick={() => {
               setResult(null)
-              setCountdown(null)
               setPendingResult(null)
               onSessionUpdate(players, null)
               supabase.from('session').update({ balance_started_at: null, pending_result: null }).eq('id', 1)
@@ -1612,6 +1581,7 @@ export default function Home() {
   const [teamResult, setTeamResult] = useState<BalanceResult | null>(null)
   const [balanceStartedAt, setBalanceStartedAt] = useState<string | null>(null)
   const [pendingResult, setPendingResult] = useState<BalanceResult | null>(null)
+  const [countdown, setCountdown] = useState<number | null>(null)
 
   const fetchAll = useCallback(async () => {
     const [{ data: recs }, { data: sums }, { data: sess }, { data: hist }] = await Promise.all([
@@ -1637,12 +1607,13 @@ export default function Home() {
       if (sess.balance_started_at && !sess.result) {
         const elapsed = Math.floor((Date.now() - new Date(sess.balance_started_at).getTime()) / 1000)
         const remaining = 10 - elapsed
+        if (sess.pending_result) setPendingResult(sess.pending_result)
         if (remaining > 0) {
           setBalanceStartedAt(sess.balance_started_at)
-          if (sess.pending_result) setPendingResult(sess.pending_result)
+          setCountdown(remaining)
         } else {
-          // 10초 지났으면 바로 결과 표시
           setBalanceStartedAt(null)
+          setCountdown(null)
           if (sess.pending_result) {
             setTeamResult(sess.pending_result)
             supabase.from('session').update({ result: sess.pending_result, balance_started_at: null, pending_result: null }).eq('id', 1)
@@ -1650,6 +1621,7 @@ export default function Home() {
         }
       } else {
         setBalanceStartedAt(null)
+        setCountdown(null)
       }
     }
     setLoading(false)
@@ -1668,20 +1640,39 @@ export default function Home() {
           setTeamResult(sess.result ?? null)
           if (sess.balance_started_at && !sess.result) {
             const elapsed = Math.floor((Date.now() - new Date(sess.balance_started_at).getTime()) / 1000)
-            if (10 - elapsed > 0) {
+            const remaining = 10 - elapsed
+            if (sess.pending_result) setPendingResult(sess.pending_result)
+            if (remaining > 0) {
               setBalanceStartedAt(sess.balance_started_at)
-              if (sess.pending_result) setPendingResult(sess.pending_result)
+              setCountdown(remaining)
             } else {
               setBalanceStartedAt(null)
+              setCountdown(null)
             }
           } else {
             setBalanceStartedAt(null)
+            setCountdown(null)
           }
         }
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [])
+
+  // 카운트다운 타이머 (Home에서 관리)
+  useEffect(() => {
+    if (countdown === null || !pendingResult) return
+    if (countdown <= 0) {
+      setCountdown(null)
+      setBalanceStartedAt(null)
+      setTeamResult(pendingResult)
+      setPendingResult(null)
+      supabase.from('session').update({ result: pendingResult, balance_started_at: null, pending_result: null }).eq('id', 1)
+      return
+    }
+    const timer = setTimeout(() => setCountdown(c => c !== null ? c - 1 : null), 1000)
+    return () => clearTimeout(timer)
+  }, [countdown, pendingResult])
 
   // 세션 업데이트 함수 (팀편성 관련만 업데이트, 투표 상태 유지)
   const updateSession = async (players: PlayerEntry[], result: BalanceResult | null) => {
@@ -1752,7 +1743,7 @@ export default function Home() {
         <div className="empty">불러오는 중...</div>
       ) : (
         <>
-          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} />}
+          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} countdown={countdown} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} tierHistory={tierHistory} />}
