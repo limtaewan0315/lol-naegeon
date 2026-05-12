@@ -290,7 +290,7 @@ function TeamTab({
   }
 
   // 팀 균형 맞추기: 각 플레이어마다 most1/most2 중 랜덤 라인 선택 후 밸런싱
-  const balance = useCallback(() => {
+  const balance = useCallback(async () => {
     setError('')
     if (players.length !== 10) { setError(`정확히 10명이 필요해요. (현재 ${players.length}명)`); return }
 
@@ -392,7 +392,7 @@ function TeamTab({
     if (best) {
       const startedAt = new Date().toISOString()
       // 세션 저장
-      supabase.from('session').update({ balance_started_at: startedAt, pending_result: best }).eq('id', 1)
+      await supabase.from('session').update({ balance_started_at: startedAt, pending_result: best }).eq('id', 1)
       // 로컬 상태 즉시 업데이트 (실시간 구독 기다리지 않음)
       setPendingResult(best)
       setBalanceStartedAt(startedAt)
