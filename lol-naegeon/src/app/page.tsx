@@ -1852,7 +1852,7 @@ export default function Home() {
           style={{
             height: '90vh', maxHeight: 750, objectFit: 'cover', objectPosition: '30% top',
             opacity: 0.5,
-            transform: 'translateX(-40%)',
+            transform: 'translateX(-65%)',
             WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
             WebkitMaskComposite: 'destination-in',
             maskImage: 'linear-gradient(to right, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
@@ -1871,7 +1871,7 @@ export default function Home() {
           style={{
             height: '90vh', maxHeight: 750, objectFit: 'cover', objectPosition: '70% top',
             opacity: 0.5,
-            transform: 'translateX(40%)',
+            transform: 'translateX(65%)',
             WebkitMaskImage: 'linear-gradient(to left, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
             WebkitMaskComposite: 'destination-in',
             maskImage: 'linear-gradient(to left, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
@@ -1885,7 +1885,7 @@ export default function Home() {
         <div className="header-sub">티어·라인 기반 팀 균형 매칭 + 전적 기록</div>
       </div>
 
-      <div className="tabs">
+      <div className="tabs" style={{ background: 'rgba(6,17,31,0.75)' }}>
         {(['team', 'record', 'ranking', 'stats', 'matchup', 'summoners'] as const).map((t, i) => (
           <button key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
             {['팀 뽑기', '전적 기록', '전체 랭킹', '개인 통계', '상대 전적', '소환사 관리'][i]}
