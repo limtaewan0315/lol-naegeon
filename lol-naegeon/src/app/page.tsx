@@ -739,39 +739,10 @@ function TeamTab({
             ))}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 8 }}>
+          <div style={{ textAlign: 'center', marginBottom: 8 }}>
             <span style={{ fontSize: 13, color: 'var(--text2)' }}>
               점수 차이: <strong style={{ color: 'var(--gold)' }}>{Math.abs(result.s1 - result.s2).toFixed(1)}점</strong>
             </span>
-            <button className="btn" onClick={async () => {
-              const now = new Date()
-              const dateStr = `${now.getFullYear()}년 ${now.getMonth()+1}월 ${now.getDate()}일`
-              const sortByLineLocal = (team: typeof result.team1) => [...team].sort((a,b) => LINE_ORDER[a.line] - LINE_ORDER[b.line])
-              const blueLines = sortByLineLocal(result.team1).map(p => `\`${p.line}\` ${p.name}`).join('\n')
-              const redLines = sortByLineLocal(result.team2).map(p => `\`${p.line}\` ${p.name}`).join('\n')
-              const payload = {
-                username: '내전 매니저',
-                avatar_url: 'https://cdn.discordapp.com/embed/avatars/0.png',
-                embeds: [{
-                  title: '⚔ 내전 팀 편성 결과',
-                  color: 0xc89b3c,
-                  fields: [
-                    { name: `🔵 블루팀 · ${result.s1.toFixed(1)}점`, value: blueLines, inline: true },
-                    { name: `🔴 레드팀 · ${result.s2.toFixed(1)}점`, value: redLines, inline: true },
-                  ],
-                  footer: { text: `📊 점수 차이: ${Math.abs(result.s1 - result.s2).toFixed(1)}점  ·  lol-naegeon.vercel.app  ·  ${dateStr}` }
-                }]
-              }
-              const res = await fetch(DISCORD_WEBHOOK_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-              })
-              if (res.ok) alert('디스코드에 공유했어요! 🎉')
-              else alert('공유 실패. 다시 시도해주세요.')
-            }} style={{ fontSize: 11, color: '#5865f2', borderColor: 'rgba(88,101,242,0.4)', background: 'rgba(88,101,242,0.06)' }}>
-              💬 디스코드 공유
-            </button>
           </div>
 
           {/* 예상 승률 */}
