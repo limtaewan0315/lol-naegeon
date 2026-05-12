@@ -325,8 +325,12 @@ function TeamTab({
         return (inBlue && r.winner === 'blue') || (!inBlue && r.winner === 'red')
       }).length
       const wr = wins / total
-      // 티어 50% + 승률 50% 반영
-      return baseScore * (0.5 + 0.5 * (wr / 0.5))
+      // 티어 50% + 승률 50% 반영 (지수 1.5 비선형, 50% 기준 대칭)
+      const ratio = wr / 0.5
+      const weighted = ratio >= 1
+        ? Math.pow(ratio, 1.5)
+        : 2 - Math.pow(2 - ratio, 1.5)
+      return baseScore * (0.5 + 0.5 * weighted)
     }
 
     let best: BalanceResult | null = null
