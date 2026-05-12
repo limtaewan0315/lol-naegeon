@@ -47,6 +47,31 @@ function tierDown(tier: string): string {
   return TIERS[idx + 1]
 }
 
+function isDia1OrAbove(tier: string): boolean {
+  const dia1Tiers = ['다이아1', '마/그/챌 0~99', '마/그/챌 100~199', '마/그/챌 200~299', '마/그/챌 300~399', '마/그/챌 400~499', '마/그/챌 500~599', '마/그/챌 600~699', '마/그/챌 700~799', '마/그/챌 800~899', '마/그/챌 900~999', '마/그/챌 1000~1099', '마/그/챌 1100~1199', '마/그/챌 1200~1299', '마/그/챌 1300~1399', '마/그/챌 1400~1499', '마/그/챌 1500~1599', '마/그/챌 1600~1699', '마/그/챌 1700~1799', '마/그/챌 1800이상']
+  return dia1Tiers.includes(tier)
+}
+
+function isSilver3OrBelowGlobal(tier: string): boolean {
+  const tiers = ['실버3 이하', '실버2', '실버1']
+  return tiers.includes(tier)
+}
+
+function getConsecutiveLineWins(playerName: string, line: string, records: GameRecord[], n = 2): number {
+  const lineRecs = records.filter(r =>
+    r.blue.some(p => p.name === playerName && p.line === line) ||
+    r.red.some(p => p.name === playerName && p.line === line)
+  )
+  let streak = 0
+  for (const r of lineRecs) {
+    const inBlue = r.blue.some(p => p.name === playerName && p.line === line)
+    const isWin = (inBlue && r.winner === 'blue') || (!inBlue && r.winner === 'red')
+    if (isWin) streak++
+    else break
+  }
+  return streak
+}
+
 // ── 소환사 관리 탭 ──────────────────────────────────────────────
 function SummonerTab({ summoners, onRefresh }: { summoners: SummonerMap; onRefresh: () => void }) {
   const [name, setName] = useState('')
@@ -355,13 +380,8 @@ function TeamTab({
   }, [players, summoners])
 
   // 실버3 이하 여부 체크
-  const isSilver3OrBelow = (tier: string) => {
-    const silver3Idx = TIERS.indexOf('실버3 이하')
-    const tierIdx = TIERS.indexOf(tier)
-    return tierIdx >= silver3Idx
-  }
+  const isSilver3OrBelow = (tier: string) => isSilver3OrBelowGlobal(tier)
 
-  const isDia1OrAboveLocal = (tier: string) => isDia1OrAbove(tier)
 
   // 특정 플레이어의 최근 N판 승률 계산 (N판 미만이면 null 반환)
   // 라인별 최근 N판 승률 계산
