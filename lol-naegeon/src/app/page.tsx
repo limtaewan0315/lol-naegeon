@@ -15,6 +15,8 @@ interface GameRecord {
   time: string
 }
 
+const ADMIN_PASSWORD = 'daumathematics'
+
 const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1503643794166517860/TE94_3riqrE1_LlEanUn8SeEdkMlbaqOH227MimpWR9A4dErgm5oBQOMfte6zJPwcLZe'
 
 const supabase = createClient(
@@ -36,6 +38,14 @@ interface PlayerEntry {
   // 매칭 결정 후 확정 라인/점수
   assignedLine?: Line
   assignedScore?: number
+}
+
+function checkPassword(): boolean {
+  const input = prompt('보안 코드를 입력해주세요')
+  if (input === null) return false
+  if (input === ADMIN_PASSWORD) return true
+  alert('보안 코드가 올바르지 않아요.')
+  return false
 }
 
 function tierUp(tier: string): string {
@@ -88,6 +98,7 @@ function SummonerTab({ summoners, onRefresh }: { summoners: SummonerMap; onRefre
   const add = async () => {
     const n = name.trim()
     if (!n) { setError('소환사명을 입력해주세요.'); return }
+    if (!checkPassword()) return
     setError('')
     await supabase.from('summoners').upsert({ name: n, line, tier }, { onConflict: 'name,line' })
     setName('')
@@ -95,6 +106,7 @@ function SummonerTab({ summoners, onRefresh }: { summoners: SummonerMap; onRefre
   }
 
   const remove = async (n: string, l: Line) => {
+    if (!checkPassword()) return
     await supabase.from('summoners').delete().eq('name', n).eq('line', l)
     onRefresh()
   }
@@ -106,6 +118,7 @@ function SummonerTab({ summoners, onRefresh }: { summoners: SummonerMap; onRefre
 
   const saveEdit = async () => {
     if (!editing) return
+    if (!checkPassword()) return
     await supabase.from('summoners').update({ tier: editTier }).eq('name', editing.name).eq('line', editing.line)
     setEditing(null)
     onRefresh()
@@ -113,6 +126,7 @@ function SummonerTab({ summoners, onRefresh }: { summoners: SummonerMap; onRefre
 
   // 소환사 전체 삭제
   const removeSummoner = async (n: string) => {
+    if (!checkPassword()) return
     await supabase.from('summoners').delete().eq('name', n)
     onRefresh()
   }
@@ -998,7 +1012,7 @@ function RecordTab({ records, onDelete, onClear }: {
                 </span>
 
                 <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text3)' }}>{r.time}</span>
-                <button className="btn btn-danger btn-sm" onClick={() => onDelete(r.id)}>삭제</button>
+                <button className="btn btn-danger btn-sm" onClick={() => { if (checkPassword()) onDelete(r.id) }}>삭제</button>
               </div>
               {/* 블루팀 */}
               <div style={{ padding: '6px 12px', borderBottom: '0.5px solid var(--border)' }}>
@@ -1047,7 +1061,7 @@ function RecordTab({ records, onDelete, onClear }: {
 
         {records.length > 0 && (
           <div style={{ marginTop: 12 }}>
-            <button className="btn btn-danger" onClick={onClear}>전체 기록 삭제</button>
+            <button className="btn btn-danger" onClick={() => { if (checkPassword()) onClear() }}>전체 기록 삭제</button>
           </div>
         )}
       </div>
@@ -1871,7 +1885,7 @@ export default function Home() {
           style={{
             height: '90vh', maxHeight: 750, objectFit: 'cover', objectPosition: '70% top',
             opacity: 0.5,
-            transform: 'translateX(32%)',
+            transform: 'translateX(40%)',
             WebkitMaskImage: 'linear-gradient(to left, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
             WebkitMaskComposite: 'destination-in',
             maskImage: 'linear-gradient(to left, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
