@@ -1852,7 +1852,7 @@ export default function Home() {
           style={{
             height: '90vh', maxHeight: 750, objectFit: 'cover', objectPosition: '30% top',
             opacity: 0.5,
-            transform: 'translateX(-65%)',
+            transform: 'translateX(-55%)',
             WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
             WebkitMaskComposite: 'destination-in',
             maskImage: 'linear-gradient(to right, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
@@ -1871,7 +1871,7 @@ export default function Home() {
           style={{
             height: '90vh', maxHeight: 750, objectFit: 'cover', objectPosition: '70% top',
             opacity: 0.5,
-            transform: 'translateX(65%)',
+            transform: 'translateX(40%)',
             WebkitMaskImage: 'linear-gradient(to left, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
             WebkitMaskComposite: 'destination-in',
             maskImage: 'linear-gradient(to left, transparent 0%, black 55%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
