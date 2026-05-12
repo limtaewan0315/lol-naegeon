@@ -75,7 +75,7 @@ body::before {
 .tabs {
   display: flex;
   gap: 4px;
-  background: rgba(6,17,31,0.7);
+  background: var(--bg2);
   border: 0.5px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 4px;
