@@ -1850,7 +1850,7 @@ export default function Home() {
           src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/LeeSin_0.jpg"
           alt="리신"
           style={{
-            height: '85vh', maxHeight: 700, objectFit: 'cover', objectPosition: 'top center',
+            height: '90vh', maxHeight: 750, objectFit: 'cover', objectPosition: '30% top',
             opacity: 0.45,
             WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 40%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
             WebkitMaskComposite: 'destination-in',
@@ -1868,7 +1868,7 @@ export default function Home() {
           src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ahri_0.jpg"
           alt="아리"
           style={{
-            height: '85vh', maxHeight: 700, objectFit: 'cover', objectPosition: 'top center',
+            height: '90vh', maxHeight: 750, objectFit: 'cover', objectPosition: '70% top',
             opacity: 0.45,
             WebkitMaskImage: 'linear-gradient(to left, transparent 0%, black 40%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
             WebkitMaskComposite: 'destination-in',
