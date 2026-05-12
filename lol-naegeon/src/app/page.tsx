@@ -216,6 +216,7 @@ function TeamTab({
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [suggestions, setSuggestions] = useState<string[]>([])
+  const [countdown, setCountdown] = useState<number | null>(null)
 
 
   // 소환사의 등록된 라인 목록 (LINE_ORDER 순)
@@ -376,7 +377,10 @@ function TeamTab({
       if (diff === 0) break
     }
 
-    if (best) onSessionUpdate(players, best)
+    if (best) {
+      onSessionUpdate(players, best)
+      setCountdown(10)
+    }
     if (!best) {
       // 어떤 라인이 부족한지 분석
       const linePossible: Record<string, number> = {}
@@ -406,8 +410,18 @@ function TeamTab({
       }
       return
     }
-    setResult(best)
   }, [players, summoners])
+
+  // 카운트다운 타이머
+  useEffect(() => {
+    if (countdown === null) return
+    if (countdown <= 0) {
+      setCountdown(null)
+      return
+    }
+    const timer = setTimeout(() => setCountdown(c => c !== null ? c - 1 : null), 1000)
+    return () => clearTimeout(timer)
+  }, [countdown])
 
   // 실버3 이하 여부 체크
   const isSilver3OrBelow = (tier: string) => isSilver3OrBelowGlobal(tier)
@@ -588,13 +602,31 @@ function TeamTab({
         }
 
         <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-          <button className="btn btn-gold" onClick={balance}>팀 균형 맞추기</button>
-          <button className="btn" onClick={() => { setPlayers([]); setResult(null); setError(''); onSessionUpdate([], null) }}>초기화</button>
+          <button className="btn btn-gold" onClick={balance} disabled={!!result || countdown !== null}>팀 균형 맞추기</button>
+          <button className="btn" onClick={() => { setPlayers([]); setResult(null); setCountdown(null); setError(''); onSessionUpdate([], null) }}>초기화</button>
         </div>
       </div>
 
-      {result && (
+      {/* 카운트다운 화면 */}
+      {countdown !== null && (
+        <div className="card" style={{ textAlign: 'center', padding: '28px 20px' }}>
+          <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12, letterSpacing: '0.05em' }}>초 후 팀이 공개돼요</div>
+          <div style={{ fontSize: 64, fontWeight: 700, color: 'var(--blue)', lineHeight: 1, marginBottom: 16 }}>{countdown}</div>
+          <div style={{ height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden', maxWidth: 200, margin: '0 auto' }}>
+            <div style={{ height: '100%', width: `${(10 - countdown) / 10 * 100}%`, background: 'var(--blue)', borderRadius: 2, transition: 'width 0.9s linear' }} />
+          </div>
+        </div>
+      )}
+
+      {result && countdown === null && (
         <>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+            <button className="btn btn-danger" onClick={() => {
+              setResult(null)
+              setCountdown(null)
+              onSessionUpdate(players, null)
+            }}>🚪 탈주하기</button>
+          </div>
           <div className="teams-grid">
             {[
               { label: '🔵 블루팀', players: sortByLine(result.team1), score: result.s1, cls: 'blue' },
@@ -619,9 +651,6 @@ function TeamTab({
 
           <div style={{ textAlign: 'center', fontSize: 13, color: 'var(--text2)', marginBottom: 8 }}>
             점수 차이: <strong style={{ color: 'var(--gold)' }}>{Math.abs(result.s1 - result.s2).toFixed(1)}점</strong>
-          </div>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginBottom: 12 }}>
-            <button className="btn" onClick={balance}>다시 섞기</button>
           </div>
 
           {/* 예상 승률 */}
