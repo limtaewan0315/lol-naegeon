@@ -310,8 +310,8 @@ function TeamTab({
         return (inBlue && r.winner === 'blue') || (!inBlue && r.winner === 'red')
       }).length
       const wr = wins / total
-      // 티어 70% + 승률 30% 반영
-      return baseScore * (0.7 + 0.3 * (wr / 0.5))
+      // 티어 50% + 승률 50% 반영
+      return baseScore * (0.5 + 0.5 * (wr / 0.5))
     }
 
     let best: BalanceResult | null = null
@@ -320,10 +320,22 @@ function TeamTab({
     for (let i = 0; i < 5000; i++) {
       // 1) 각 플레이어 랜덤 라인 배정
       const assigned = players.map(p => {
-        const opts = getOptions(p)
-        const line = opts[Math.floor(Math.random() * opts.length)]
+        // M1/M2 가중치 적용 (M1: 70%, M2: 30%)
+        let line: Line
+        let isM2 = false
+        if (p.most1 === 'any') {
+          const allLines = getSummonerLines(p.name)
+          line = allLines[Math.floor(Math.random() * allLines.length)]
+        } else if (!p.most2 || p.most2 === 'any') {
+          line = p.most1 as Line
+        } else {
+          isM2 = Math.random() >= 0.7
+          line = isM2 ? p.most2 as Line : p.most1 as Line
+        }
         const tier = summoners[p.name]?.[line] ?? '골드2'
-        return { name: p.name, line, score: getAdjustedScore(p.name, line, tier) }
+        // M2 배정 시 점수 20% 감소
+        const score = getAdjustedScore(p.name, line, tier) * (isM2 ? 0.8 : 1.0)
+        return { name: p.name, line, score }
       })
 
       // 2) 각 라인에 최소 2명이 있는지 체크
