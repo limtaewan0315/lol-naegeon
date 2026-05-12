@@ -510,7 +510,9 @@ function TeamTab({
     }
 
     onRecord({ winner, blue: blueData, red: redData, skipInsert: true })
-    onSessionUpdate(players, null)
+    // 팀 편성 초기화 (참가자만 유지)
+    setResult(null)
+    await supabase.from('session').update({ result: null, balance_started_at: null, pending_result: null, updated_at: new Date().toISOString() }).eq('id', 1)
 
     // 디스코드 전송
     try {
