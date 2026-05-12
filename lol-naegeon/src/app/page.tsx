@@ -202,6 +202,7 @@ function TeamTab({
   records,
   onSessionUpdate,
   fetchAll,
+  balanceStartedAt,
 }: {
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
   summoners: SummonerMap
@@ -212,6 +213,7 @@ function TeamTab({
   records: GameRecord[]
   onSessionUpdate: (players: PlayerEntry[], result: BalanceResult | null) => void
   fetchAll: () => void
+  balanceStartedAt: string | null
 }) {
   const [name, setName] = useState('')
   const [error, setError] = useState('')
@@ -380,6 +382,8 @@ function TeamTab({
 
     if (best) {
       setPendingResult(best)
+      const startedAt = new Date().toISOString()
+      supabase.from('session').update({ balance_started_at: startedAt }).eq('id', 1)
       setCountdown(10)
     }
     if (!best) {
@@ -413,6 +417,16 @@ function TeamTab({
     }
   }, [players, summoners])
 
+  // balanceStartedAt 변경 시 카운트다운 복원 (새로고침 대응)
+  useEffect(() => {
+    if (!balanceStartedAt) return
+    const elapsed = Math.floor((Date.now() - new Date(balanceStartedAt).getTime()) / 1000)
+    const remaining = 10 - elapsed
+    if (remaining > 0) {
+      setCountdown(remaining)
+    }
+  }, [balanceStartedAt])
+
   // 카운트다운 타이머
   useEffect(() => {
     if (countdown === null) return
@@ -422,6 +436,7 @@ function TeamTab({
         setResult(pendingResult)
         onSessionUpdate(players, pendingResult)
         setPendingResult(null)
+        supabase.from('session').update({ balance_started_at: null }).eq('id', 1)
       }
       return
     }
@@ -1585,6 +1600,7 @@ export default function Home() {
   // 팀뽑기 상태 유지 (탭 이동해도 안 날아감)
   const [teamPlayers, setTeamPlayers] = useState<PlayerEntry[]>([])
   const [teamResult, setTeamResult] = useState<BalanceResult | null>(null)
+  const [balanceStartedAt, setBalanceStartedAt] = useState<string | null>(null)
 
   const fetchAll = useCallback(async () => {
     const [{ data: recs }, { data: sums }, { data: sess }, { data: hist }] = await Promise.all([
@@ -1606,6 +1622,18 @@ export default function Home() {
     if (sess) {
       setTeamPlayers(sess.players ?? [])
       setTeamResult(sess.result ?? null)
+      // 카운트다운 복원
+      if (sess.balance_started_at && !sess.result) {
+        const elapsed = Math.floor((Date.now() - new Date(sess.balance_started_at).getTime()) / 1000)
+        const remaining = 10 - elapsed
+        if (remaining > 0) {
+          setBalanceStartedAt(sess.balance_started_at)
+        } else {
+          setBalanceStartedAt(null)
+        }
+      } else {
+        setBalanceStartedAt(null)
+      }
     }
     setLoading(false)
   }, [])
@@ -1621,7 +1649,13 @@ export default function Home() {
         if (sess) {
           setTeamPlayers(sess.players ?? [])
           setTeamResult(sess.result ?? null)
-    
+          if (sess.balance_started_at && !sess.result) {
+            const elapsed = Math.floor((Date.now() - new Date(sess.balance_started_at).getTime()) / 1000)
+            if (10 - elapsed > 0) setBalanceStartedAt(sess.balance_started_at)
+            else setBalanceStartedAt(null)
+          } else {
+            setBalanceStartedAt(null)
+          }
         }
       })
       .subscribe()
@@ -1697,7 +1731,7 @@ export default function Home() {
         <div className="empty">불러오는 중...</div>
       ) : (
         <>
-          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} />}
+          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} tierHistory={tierHistory} />}
