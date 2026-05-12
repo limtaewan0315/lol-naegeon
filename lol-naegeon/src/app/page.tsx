@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { TIERS, LINES, getScore, shuffle } from '@/lib/data'
 import type { Line } from '@/lib/data'
@@ -880,7 +880,7 @@ function RecordTab({ records, onDelete, onClear }: {
               ? <>
                   <div className="stat-value" style={{ fontSize: 16, marginTop: 2 }}>{topPlayer[0]}</div>
                   <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>
-                    {topPlayer[1].win}승 {topPlayer[1].lose}패 
+                    {topPlayer[1].win}승 {topPlayer[1].lose}패 
                     <span style={{ color: 'var(--gold)', fontWeight: 600 }}>
                       {Math.round(topPlayer[1].win / (topPlayer[1].win + topPlayer[1].lose) * 100)}%
                     </span>
@@ -1154,6 +1154,88 @@ function StatsTab({ records, summoners, tierHistory }: {
                 <OX results={recentAll} />
               </div>
 
+              {/* 티어 히스토리 그래프 - 라인별 버튼으로 통합됨 */}
+              {tierGraph.length > 0 && false && (
+                <div style={{ padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)', marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 10 }}>티어 변동 히스토리</div>
+                  {/* 라인별로 그룹화 */}
+                  {(Array.from(new Set(tierGraph.map(h => h.line))) as string[]).map(line => {
+                    const lineHistory = tierGraph.filter(h => h.line === line)
+                    const currentTier = (selected ? summoners[selected]?.[line as Line] : null) ?? lineHistory[lineHistory.length - 1]?.tier_after ?? ''
+
+                    // 게임 참여 순서대로 포인트 생성
+                    // 시작점: 첫 변동의 tier_before
+                    const pts: { score: number; tier: string; date: string; up: boolean | null }[] = []
+                    if (lineHistory.length > 0) {
+                      pts.push({
+                        score: TIER_SCORE[lineHistory[0].tier_before] ?? 5,
+                        tier: lineHistory[0].tier_before,
+                        date: fmtDate((lineHistory[0] as any).created_at ?? ''),
+                        up: null
+                      })
+                    }
+                    lineHistory.forEach(h => {
+                      const after = TIER_SCORE[h.tier_after] ?? 5
+                      const before = TIER_SCORE[h.tier_before] ?? 5
+                      pts.push({
+                        score: after,
+                        tier: h.tier_after,
+                        date: fmtDate((h as any).created_at ?? ''),
+                        up: after > before
+                      })
+                    })
+
+                    if (pts.length === 0) return null
+                    const minScore = Math.min(...pts.map(p => p.score)) - 1
+                    const maxScore = Math.max(...pts.map(p => p.score)) + 1
+                    const range = maxScore - minScore || 1
+                    const W = Math.max(280, pts.length * 36)
+                    const H = 70
+                    const svgPts = pts.map((p, i) => ({
+                      x: pts.length === 1 ? W/2 : (i / (pts.length - 1)) * W,
+                      y: H - ((p.score - minScore) / range) * H,
+                      p
+                    }))
+                    const pathD = svgPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
+
+                    return (
+                      <div key={line} style={{ marginBottom: 14 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                          <span className="badge b-line" style={{ fontSize: 10 }}>{line}</span>
+                          <span style={{ fontSize: 11, color: 'var(--text2)' }}>현재</span>
+                          <span className="badge b-tier" style={{ fontSize: 10 }}>{currentTier}</span>
+                          <span style={{ fontSize: 10, color: 'var(--text3)', marginLeft: 4 }}>{lineHistory.length}번 변동 · 최근 2주</span>
+                        </div>
+                        <div style={{ overflowX: 'auto', paddingBottom: 4 }}>
+                          <svg width={W} height={H + 34} style={{ overflow: 'visible', display: 'block', minWidth: W }}>
+                            {[0, 0.5, 1].map((t, i) => (
+                              <line key={i} x1={0} y1={H * t} x2={W} y2={H * t}
+                                stroke="rgba(80,130,190,0.08)" strokeWidth={1} />
+                            ))}
+                            <path d={pathD} fill="none" stroke="rgba(11,196,227,0.5)" strokeWidth={2} />
+                            {svgPts.map((sp, i) => {
+                              const isStart = sp.p.up === null
+                              const color = isStart ? 'var(--text3)' : sp.p.up ? 'var(--green)' : 'var(--red)'
+                              return (
+                                <g key={i}>
+                                  <circle cx={sp.x} cy={sp.y} r={isStart ? 3 : 5}
+                                    fill={color} stroke="var(--bg)" strokeWidth={1.5} />
+                                  <text x={sp.x} y={sp.y - 9} textAnchor="middle"
+                                    fontSize={7} fill={color}>
+                                    {sp.p.tier.replace('플래티넘','플').replace('에메랄드','에').replace('실버','실').replace('골드','골').replace(' 이하','↓')}
+                                  </text>
+                                  <text x={sp.x} y={H + 20} textAnchor="middle"
+                                    fontSize={7} fill="var(--text3)">{sp.p.date}</text>
+                                </g>
+                              )
+                            })}
+                          </svg>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
               {/* 라인별 통계 */}
               <div style={{ fontSize: 11, color: 'var(--text3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>라인별 통계</div>
               {sortedLines.map(l => {
@@ -1509,50 +1591,6 @@ export default function Home() {
   const [pendingResult, setPendingResult] = useState<BalanceResult | null>(null)
   const [countdown, setCountdown] = useState<number | null>(null)
 
-  // ── pendingResult ref (카운트다운 useEffect 타이밍 문제 방지) ──
-  const pendingResultRef = useRef<BalanceResult | null>(null)
-  const setPendingResultSafe = useCallback((val: BalanceResult | null) => {
-    pendingResultRef.current = val
-    setPendingResult(val)
-  }, [])
-
-  // ── 세션 상태 적용 공통 함수 ──────────────────────────────
-  const applySessionState = useCallback((sess: any) => {
-    if (!sess) return
-    setTeamPlayers(sess.players ?? [])
-    setTeamResult(sess.result ?? null)
-
-    if (sess.balance_started_at && !sess.result) {
-      const elapsed = Math.floor((Date.now() - new Date(sess.balance_started_at).getTime()) / 1000)
-      const remaining = 10 - elapsed
-
-      if (sess.pending_result) {
-        setPendingResultSafe(sess.pending_result)
-      }
-
-      if (remaining > 0) {
-        setBalanceStartedAt(sess.balance_started_at)
-        setCountdown(remaining)
-      } else {
-        // 이미 10초 지났으면 바로 결과 공개
-        setBalanceStartedAt(null)
-        setCountdown(null)
-        if (sess.pending_result) {
-          setTeamResult(sess.pending_result)
-          setPendingResultSafe(null)
-          supabase.from('session').update({
-            result: sess.pending_result,
-            balance_started_at: null,
-            pending_result: null,
-          }).eq('id', 1)
-        }
-      }
-    } else {
-      setBalanceStartedAt(null)
-      setCountdown(null)
-    }
-  }, [setPendingResultSafe])
-
   const fetchAll = useCallback(async () => {
     const [{ data: recs }, { data: sums }, { data: sess }, { data: hist }] = await Promise.all([
       supabase.from('records').select('*').order('created_at', { ascending: false }),
@@ -1570,9 +1608,32 @@ export default function Home() {
       })
       setSummoners(map)
     }
-    if (sess) applySessionState(sess)
+    if (sess) {
+      setTeamPlayers(sess.players ?? [])
+      setTeamResult(sess.result ?? null)
+      // 카운트다운 복원
+      if (sess.balance_started_at && !sess.result) {
+        const elapsed = Math.floor((Date.now() - new Date(sess.balance_started_at).getTime()) / 1000)
+        const remaining = 10 - elapsed
+        if (sess.pending_result) setPendingResult(sess.pending_result)
+        if (remaining > 0) {
+          setBalanceStartedAt(sess.balance_started_at)
+          setCountdown(remaining)
+        } else {
+          setBalanceStartedAt(null)
+          setCountdown(null)
+          if (sess.pending_result) {
+            setTeamResult(sess.pending_result)
+            supabase.from('session').update({ result: sess.pending_result, balance_started_at: null, pending_result: null }).eq('id', 1)
+          }
+        }
+      } else {
+        setBalanceStartedAt(null)
+        setCountdown(null)
+      }
+    }
     setLoading(false)
-  }, [applySessionState])
+  }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -1581,32 +1642,54 @@ export default function Home() {
     const channel = supabase
       .channel('session-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'session', filter: 'id=eq.1' }, payload => {
-        applySessionState(payload.new)
+        const sess = payload.new as any
+        if (sess) {
+          setTeamPlayers(sess.players ?? [])
+          setTeamResult(sess.result ?? null)
+          if (sess.balance_started_at && !sess.result) {
+            const elapsed = Math.floor((Date.now() - new Date(sess.balance_started_at).getTime()) / 1000)
+            const remaining = 10 - elapsed
+            if (sess.pending_result) setPendingResult(sess.pending_result)
+            if (remaining > 0) {
+              setBalanceStartedAt(sess.balance_started_at)
+              setCountdown(remaining)
+            } else {
+              setBalanceStartedAt(null)
+              setCountdown(null)
+            }
+          } else {
+            setBalanceStartedAt(null)
+            setCountdown(null)
+          }
+        }
       })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [applySessionState])
+  }, [])
 
   // 카운트다운 타이머 (Home에서 관리)
   useEffect(() => {
-    if (countdown === null || !pendingResultRef.current) return
+    if (countdown === null || !pendingResult) return
     if (countdown <= 0) {
-      const result = pendingResultRef.current
       setCountdown(null)
       setBalanceStartedAt(null)
-      setTeamResult(result)
-      setPendingResultSafe(null)
-      supabase.from('session').update({ result, balance_started_at: null, pending_result: null }).eq('id', 1)
+      setTeamResult(pendingResult)
+      setPendingResult(null)
+      supabase.from('session').update({ result: pendingResult, balance_started_at: null, pending_result: null }).eq('id', 1)
       return
     }
     const timer = setTimeout(() => setCountdown(c => c !== null ? c - 1 : null), 1000)
     return () => clearTimeout(timer)
-  }, [countdown, setPendingResultSafe])
+  }, [countdown, pendingResult])
 
   // 세션 업데이트 함수 (팀편성 관련만 업데이트, 투표 상태 유지)
   const updateSession = async (players: PlayerEntry[], result: BalanceResult | null) => {
     await supabase.from('session').update({ players, result, updated_at: new Date().toISOString() }).eq('id', 1)
   }
+
+
+
+
 
   const addRecord = async ({ winner, blue, red, skipInsert }: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => {
     if (!skipInsert) {
@@ -1668,7 +1751,7 @@ export default function Home() {
         <div className="empty">불러오는 중...</div>
       ) : (
         <>
-          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResultSafe} countdown={countdown} setCountdown={setCountdown} setBalanceStartedAt={setBalanceStartedAt} />}
+          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} countdown={countdown} setCountdown={setCountdown} setBalanceStartedAt={setBalanceStartedAt} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} tierHistory={tierHistory} />}
