@@ -203,6 +203,8 @@ function TeamTab({
   onSessionUpdate,
   fetchAll,
   balanceStartedAt,
+  pendingResult,
+  setPendingResult,
 }: {
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
   summoners: SummonerMap
@@ -214,12 +216,13 @@ function TeamTab({
   onSessionUpdate: (players: PlayerEntry[], result: BalanceResult | null) => void
   fetchAll: () => void
   balanceStartedAt: string | null
+  pendingResult: BalanceResult | null
+  setPendingResult: React.Dispatch<React.SetStateAction<BalanceResult | null>>
 }) {
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [countdown, setCountdown] = useState<number | null>(null)
-  const [pendingResult, setPendingResult] = useState<BalanceResult | null>(null)
 
 
   // 소환사의 등록된 라인 목록 (LINE_ORDER 순)
@@ -1602,6 +1605,7 @@ export default function Home() {
   const [teamPlayers, setTeamPlayers] = useState<PlayerEntry[]>([])
   const [teamResult, setTeamResult] = useState<BalanceResult | null>(null)
   const [balanceStartedAt, setBalanceStartedAt] = useState<string | null>(null)
+  const [pendingResult, setPendingResult] = useState<BalanceResult | null>(null)
 
   const fetchAll = useCallback(async () => {
     const [{ data: recs }, { data: sums }, { data: sess }, { data: hist }] = await Promise.all([
@@ -1742,7 +1746,7 @@ export default function Home() {
         <div className="empty">불러오는 중...</div>
       ) : (
         <>
-          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} />}
+          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} tierHistory={tierHistory} />}
