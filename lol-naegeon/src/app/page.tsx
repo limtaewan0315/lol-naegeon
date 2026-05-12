@@ -1840,6 +1840,44 @@ export default function Home() {
 
   return (
     <div className="layout">
+      {/* 양옆 캐릭터 이미지 */}
+      <div style={{
+        position: 'fixed', left: 0, top: 0, bottom: 0, width: 220,
+        display: 'flex', alignItems: 'flex-end', pointerEvents: 'none', zIndex: 0,
+        overflow: 'hidden',
+      }}>
+        <img
+          src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/LeeSin_0.jpg"
+          alt="리신"
+          style={{
+            height: '85vh', maxHeight: 700, objectFit: 'cover', objectPosition: 'top center',
+            opacity: 0.45,
+            WebkitMaskImage: 'linear-gradient(to right, transparent 0%, black 40%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
+            WebkitMaskComposite: 'destination-in',
+            maskImage: 'linear-gradient(to right, transparent 0%, black 40%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
+            maskComposite: 'intersect',
+          }}
+        />
+      </div>
+      <div style={{
+        position: 'fixed', right: 0, top: 0, bottom: 0, width: 220,
+        display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', pointerEvents: 'none', zIndex: 0,
+        overflow: 'hidden',
+      }}>
+        <img
+          src="https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ahri_0.jpg"
+          alt="아리"
+          style={{
+            height: '85vh', maxHeight: 700, objectFit: 'cover', objectPosition: 'top center',
+            opacity: 0.45,
+            WebkitMaskImage: 'linear-gradient(to left, transparent 0%, black 40%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
+            WebkitMaskComposite: 'destination-in',
+            maskImage: 'linear-gradient(to left, transparent 0%, black 40%, black 100%), linear-gradient(to top, transparent 0%, black 20%)',
+            maskComposite: 'intersect',
+          }}
+        />
+      </div>
+
       <div className="header">
         <div className="header-title">⚔ 내전 매니저</div>
         <div className="header-sub">티어·라인 기반 팀 균형 매칭 + 전적 기록</div>
