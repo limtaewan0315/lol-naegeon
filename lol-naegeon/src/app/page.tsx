@@ -383,7 +383,7 @@ function TeamTab({
     if (best) {
       setPendingResult(best)
       const startedAt = new Date().toISOString()
-      supabase.from('session').update({ balance_started_at: startedAt }).eq('id', 1)
+      supabase.from('session').update({ balance_started_at: startedAt, pending_result: best }).eq('id', 1)
       setCountdown(10)
     }
     if (!best) {
@@ -436,7 +436,7 @@ function TeamTab({
         setResult(pendingResult)
         onSessionUpdate(players, pendingResult)
         setPendingResult(null)
-        supabase.from('session').update({ balance_started_at: null }).eq('id', 1)
+        supabase.from('session').update({ balance_started_at: null, pending_result: null }).eq('id', 1)
       }
       return
     }
@@ -647,6 +647,7 @@ function TeamTab({
               setCountdown(null)
               setPendingResult(null)
               onSessionUpdate(players, null)
+              supabase.from('session').update({ balance_started_at: null, pending_result: null }).eq('id', 1)
             }}>🚪 탈주하기</button>
           </div>
           <div className="teams-grid">
@@ -1628,8 +1629,14 @@ export default function Home() {
         const remaining = 10 - elapsed
         if (remaining > 0) {
           setBalanceStartedAt(sess.balance_started_at)
+          if (sess.pending_result) setPendingResult(sess.pending_result)
         } else {
+          // 10초 지났으면 바로 결과 표시
           setBalanceStartedAt(null)
+          if (sess.pending_result) {
+            setTeamResult(sess.pending_result)
+            supabase.from('session').update({ result: sess.pending_result, balance_started_at: null, pending_result: null }).eq('id', 1)
+          }
         }
       } else {
         setBalanceStartedAt(null)
@@ -1651,8 +1658,12 @@ export default function Home() {
           setTeamResult(sess.result ?? null)
           if (sess.balance_started_at && !sess.result) {
             const elapsed = Math.floor((Date.now() - new Date(sess.balance_started_at).getTime()) / 1000)
-            if (10 - elapsed > 0) setBalanceStartedAt(sess.balance_started_at)
-            else setBalanceStartedAt(null)
+            if (10 - elapsed > 0) {
+              setBalanceStartedAt(sess.balance_started_at)
+              if (sess.pending_result) setPendingResult(sess.pending_result)
+            } else {
+              setBalanceStartedAt(null)
+            }
           } else {
             setBalanceStartedAt(null)
           }
