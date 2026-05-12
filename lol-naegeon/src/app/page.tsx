@@ -511,6 +511,60 @@ function TeamTab({
 
     onRecord({ winner, blue: blueData, red: redData, skipInsert: true })
     onSessionUpdate(players, null)
+
+    // 디스코드 전송
+    try {
+      const now2 = new Date()
+      const dateStr = `${now2.getFullYear()}년 ${now2.getMonth()+1}월 ${now2.getDate()}일 ${String(now2.getHours()).padStart(2,'0')}:${String(now2.getMinutes()).padStart(2,'0')}`
+      const sortedWinners = [...winners].sort((a,b) => (LINE_ORDER[a.line]??9)-(LINE_ORDER[b.line]??9))
+      const sortedLosers  = [...losers].sort((a,b) => (LINE_ORDER[a.line]??9)-(LINE_ORDER[b.line]??9))
+
+      const getStreak = (name: string, line: Line, recs: GameRecord[]) => {
+        const lr = recs.filter(r => r.blue.some(p=>p.name===name&&p.line===line)||r.red.some(p=>p.name===name&&p.line===line))
+        if (lr.length < 2) return 0
+        const first = lr[0]
+        const isWin = (first.blue.some(p=>p.name===name&&p.line===line) && first.winner==='blue') ||
+                      (first.red.some(p=>p.name===name&&p.line===line) && first.winner==='red')
+        let s = 0
+        for (const r of lr) {
+          const inBlue = r.blue.some(p=>p.name===name&&p.line===line)
+          const w = (inBlue&&r.winner==='blue')||(!inBlue&&r.winner==='red')
+          if (w===isWin) s++; else break
+        }
+        return isWin ? s : -s
+      }
+
+      const fmtPlayer = (p: TeamPlayer, isWinner: boolean) => {
+        const h = historyEntries.find(e => e.name===p.name && e.line===p.line)
+        const tierChange = h ? `${h.tier_before}→${h.tier_after} ${isWinner?'▲':'▼'}` : ''
+        const streak = getStreak(p.name, p.line, updatedRecords)
+        const abs = Math.abs(streak)
+        const streakStr = abs >= 2 ? (streak > 0 ? ` 🔥${abs}연승` : ` 💧${abs}연패`) : ''
+        return `\`${p.line}\` ${p.name} ${tierChange}${streakStr}`
+      }
+
+      const winLabel = winner === 'blue' ? '🔵 블루팀' : '🔴 레드팀'
+      const loseLabel = winner === 'blue' ? '🔴 레드팀' : '🔵 블루팀'
+
+      const payload = {
+        username: '내전 매니저',
+        embeds: [{
+          title: `🏆 ${winLabel} 승리!`,
+          color: winner === 'blue' ? 0x0bc4e3 : 0xe84057,
+          fields: [
+            { name: `${winLabel} (승)`, value: sortedWinners.map(p => fmtPlayer(p, true)).join('\n'), inline: true },
+            { name: `${loseLabel} (패)`, value: sortedLosers.map(p => fmtPlayer(p, false)).join('\n'), inline: true },
+          ],
+          footer: { text: `lol-naegeon.vercel.app · ${dateStr}` }
+        }]
+      }
+      await fetch(DISCORD_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+    } catch (e) { console.error('Discord webhook error:', e) }
+
     setIsRecording(false)
     fetchAll()
   }
@@ -1092,10 +1146,10 @@ function StatsTab({ records, summoners, tierHistory }: {
     if (Math.abs(streak) < 2) return null
     const isWin = streak > 0
     const abs = Math.abs(streak)
-    const fires = abs >= 5 ? '🔥🔥' : abs >= 3 ? '🔥' : ''
+    const icon = isWin ? '🔥' : '💧'
     return (
-      <span style={{ fontSize: 11, fontWeight: 700, color: isWin ? 'var(--red)' : 'var(--text3)', marginLeft: 4 }}>
-        {fires}{fires ? ' ' : ''}{isWin ? `${abs}연승` : `${abs}연패`}
+      <span style={{ fontSize: 11, fontWeight: 700, color: isWin ? 'var(--red)' : '#5865f2', marginLeft: 4 }}>
+        {icon} {isWin ? `${abs}연승` : `${abs}연패`}
       </span>
     )
   }
