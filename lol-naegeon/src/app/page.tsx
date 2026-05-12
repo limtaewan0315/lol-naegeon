@@ -380,7 +380,6 @@ function TeamTab({
 
     if (best) {
       setPendingResult(best)
-      onSessionUpdate(players, best)
       setCountdown(10)
     }
     if (!best) {
@@ -421,6 +420,7 @@ function TeamTab({
       setCountdown(null)
       if (pendingResult) {
         setResult(pendingResult)
+        onSessionUpdate(players, pendingResult)
         setPendingResult(null)
       }
       return
