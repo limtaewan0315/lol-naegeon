@@ -610,7 +610,7 @@ function TeamTab({
                     <span style={{ width: 36, fontSize: 11, fontWeight: 500, color: 'var(--text2)', flexShrink: 0 }}>{p.line}</span>
                     <span style={{ flex: 1, fontWeight: 500 }}>{p.name}</span>
                     <span className="badge b-tier" style={{ fontSize: 10 }}>{p.tier}</span>
-                    <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 4 }}>{p.score}</span>
+                    <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 4 }}>{p.score.toFixed(1)}</span>
                   </div>
                 ))}
               </div>
