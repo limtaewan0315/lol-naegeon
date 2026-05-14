@@ -1867,28 +1867,6 @@ export default function Home() {
     await fetchAll()
   }
 
-  // 점검 기간 체크
-  const nowDate = new Date()
-  const maintenanceStart = new Date('2026-05-13T00:00:00')
-  const maintenanceEnd = new Date('2026-05-15T23:59:59')
-  if (nowDate >= maintenanceStart && nowDate <= maintenanceEnd) {
-    return (
-      <div style={{
-        minHeight: '100vh', background: '#020914',
-        backgroundImage: 'radial-gradient(ellipse at 50% 0%, rgba(10,50,100,0.5) 0%, transparent 60%)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16,
-        fontFamily: 'Noto Sans KR, sans-serif',
-      }}>
-        <div style={{ fontSize: 32, color: '#c89b3c', fontWeight: 700, letterSpacing: '0.05em' }}>⚔ 내전 매니저</div>
-        <div style={{ fontSize: 16, color: '#c8d8e8', fontWeight: 500 }}>🔧 점검 중입니다</div>
-        <div style={{ fontSize: 13, color: '#7a9ab8', textAlign: 'center', lineHeight: '1.8' }}>
-          사이트 휴식 차원에서 잠시 점검 중이에요.<br />
-          <strong style={{ color: '#c89b3c' }}>2026.05.13 ~ 2026.05.15</strong> 동안 서비스가 중단돼요.<br />
-          롤대남들아 좀 쉬세요
-        </div>
-      </div>
-    )
-  }
 
   return (
     <div className="layout">
