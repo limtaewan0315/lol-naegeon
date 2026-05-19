@@ -1598,6 +1598,89 @@ function MatchupTab({ records }: { records: GameRecord[] }) {
   )
 }
 
+
+// ── 명예의 전당 탭 ──────────────────────────────────────────────
+function HallOfFameTab({ records }: { records: GameRecord[] }) {
+  const totalGames = records.length
+  const minGames = 70 // 전체 70판 이상
+  const minLineGames = 30 // 라인별 30판 이상
+
+  // 라인별 승률 집계
+  const lineMap: Record<string, Record<string, { win: number; lose: number }>> = {}
+  LINES.forEach(l => { lineMap[l] = {} })
+
+  records.forEach(r => {
+    const winners = r.winner === 'blue' ? r.blue : r.red
+    const losers = r.winner === 'blue' ? r.red : r.blue
+    winners.forEach(p => {
+      if (!lineMap[p.line][p.name]) lineMap[p.line][p.name] = { win: 0, lose: 0 }
+      lineMap[p.line][p.name].win++
+    })
+    losers.forEach(p => {
+      if (!lineMap[p.line][p.name]) lineMap[p.line][p.name] = { win: 0, lose: 0 }
+      lineMap[p.line][p.name].lose++
+    })
+  })
+
+  const medals = ['🥇', '🥈', '🥉']
+  const medalColors = ['#FFD700', '#C0C0C0', '#CD7F32']
+  const medalBg = ['rgba(255,215,0,0.07)', 'rgba(192,192,192,0.05)', 'rgba(205,127,50,0.05)']
+  const medalBorder = ['rgba(255,215,0,0.25)', 'rgba(192,192,192,0.2)', 'rgba(205,127,50,0.18)']
+
+  const getLineTop3 = (line: Line) => {
+    return Object.entries(lineMap[line])
+      .filter(([, s]) => s.win + s.lose >= minLineGames)
+      .sort((a, b) => {
+        const wA = a[1].win / (a[1].win + a[1].lose)
+        const wB = b[1].win / (b[1].win + b[1].lose)
+        return wB - wA
+      })
+      .slice(0, 3)
+  }
+
+  return (
+    <div className="card">
+      <div className="card-title">🏛 명예의 전당</div>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 14 }}>
+        라인별 30판 이상 참여한 소환사 기준 · 승률 순위
+      </div>
+
+      {LINES.map(line => {
+        const top3 = getLineTop3(line)
+        return (
+          <div key={line} style={{ marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+              <span className="badge b-line">{line}</span>
+            </div>
+            {top3.length === 0
+              ? <div style={{ fontSize: 12, color: 'var(--text3)', padding: '6px 10px' }}>집계 인원 부족</div>
+              : top3.map(([name, s], i) => {
+                const total = s.win + s.lose
+                const wr = Math.round(s.win / total * 100)
+                const loseRate = Math.round(s.lose / total * 100)
+                return (
+                  <div key={name} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '6px 10px', borderRadius: 'var(--radius)',
+                    marginBottom: 4,
+                    background: medalBg[i],
+                    border: `1px solid ${medalBorder[i]}`,
+                  }}>
+                    <span style={{ fontSize: 16, width: 22, flexShrink: 0 }}>{medals[i]}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#c8d8e8', flex: 1 }}>{name}</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: medalColors[i] }}>{wr}%</span>
+                    <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 4 }}>{s.win}승 {s.lose}패</span>
+                  </div>
+                )
+              })
+            }
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── 전체 랭킹 탭 ──────────────────────────────────────────────
 function RankingTab({ records }: { records: GameRecord[] }) {
   const [page, setPage] = useState(1)
@@ -1613,7 +1696,7 @@ function RankingTab({ records }: { records: GameRecord[] }) {
   })
 
   const entries = Object.entries(playerMap)
-    .filter(([, s]) => s.win + s.lose >= 30)
+    .filter(([, s]) => s.win + s.lose >= 50)
     .sort((a, b) => {
       const wA = a[1].win / (a[1].win + a[1].lose)
       const wB = b[1].win / (b[1].win + b[1].lose)
@@ -1628,10 +1711,10 @@ function RankingTab({ records }: { records: GameRecord[] }) {
     <div className="card">
       <div className="card-title">전체 랭킹</div>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
-        🏆 30판 이상 참가한 소환사만 집계돼요
+        🏆 50판 이상 참가한 소환사만 집계돼요
       </div>
       {entries.length === 0
-        ? <div className="empty">30판 이상 참가한 소환사가 없어요. 경기를 더 쌓아보세요!</div>
+        ? <div className="empty">50판 이상 참가한 소환사가 없어요. 경기를 더 쌓아보세요!</div>
         : pagedEntries.map(([name, s], i) => {
           const globalIdx = (page - 1) * PAGE_SIZE + i
           const total = s.win + s.lose
@@ -1664,7 +1747,7 @@ function RankingTab({ records }: { records: GameRecord[] }) {
               <span style={{ fontWeight: 700, fontSize: 14, flex: '0 0 90px' }}>{name}</span>
               <span className="badge b-win">{s.win}승</span>
               <span className="badge b-lose">{s.lose}패</span>
-              <span style={{ fontSize: 12, color: 'var(--text2)' }}>{total}판</span>
+              <span style={{ fontSize: 12, color: 'var(--text2)' }}>{s.win}승 {s.lose}패</span>
               <div className="wr-bar-bg" style={{ flex: 1, marginLeft: 4 }}>
                 <div className="wr-bar" style={{
                   width: `${wr}%`,
@@ -1709,7 +1792,7 @@ function RankingTab({ records }: { records: GameRecord[] }) {
 
 // ── 메인 페이지 ──────────────────────────────────────────────
 export default function Home() {
-  const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'stats' | 'matchup' | 'summoners'>('team')
+  const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'hall' | 'stats' | 'matchup' | 'summoners'>('team')
   const [records, setRecords] = useState<GameRecord[]>([])
   const [summoners, setSummoners] = useState<SummonerMap>({})
 
@@ -1912,9 +1995,9 @@ export default function Home() {
       </div>
 
       <div className="tabs" style={{ background: 'rgba(6,17,31,0.75)' }}>
-        {(['team', 'record', 'ranking', 'stats', 'matchup', 'summoners'] as const).map((t, i) => (
+        {(['team', 'record', 'ranking', 'hall', 'stats', 'matchup', 'summoners'] as const).map((t, i) => (
           <button key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-            {['팀 뽑기', '전적 기록', '전체 랭킹', '개인 통계', '상대 전적', '소환사 관리'][i]}
+            {['팀 뽑기', '전적 기록', '전체 랭킹', '명예의 전당', '개인 통계', '상대 전적', '소환사 관리'][i]}
           </button>
         ))}
       </div>
@@ -1926,6 +2009,7 @@ export default function Home() {
           {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} countdown={countdown} setCountdown={setCountdown} setBalanceStartedAt={setBalanceStartedAt} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
           {tab === 'ranking' && <RankingTab records={records} />}
+          {tab === 'hall' && <HallOfFameTab records={records} />}
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} tierHistory={tierHistory} />}
           {tab === 'matchup' && <MatchupTab records={records} />}
           {tab === 'summoners' && <SummonerTab summoners={summoners} onRefresh={fetchAll} />}
