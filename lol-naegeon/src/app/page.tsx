@@ -73,6 +73,7 @@ function getConsecutiveLineWins(playerName: string, line: string, records: GameR
     r.blue.some(p => p.name === playerName && p.line === line) ||
     r.red.some(p => p.name === playerName && p.line === line)
   )
+  // 최근 게임부터 확인하여 연속 승리 수 계산
   let streak = 0
   for (const r of lineRecs) {
     const inBlue = r.blue.some(p => p.name === playerName && p.line === line)
@@ -81,6 +82,53 @@ function getConsecutiveLineWins(playerName: string, line: string, records: GameR
     else break
   }
   return streak
+}
+
+// 다이아1 이상: 마지막 티어UP 이후 연승 계산
+function getWinsSinceLastTierUp(playerName: string, line: string, records: GameRecord[], tierHistory: { record_id: number; name: string; line: string; tier_before: string; tier_after: string }[]): number {
+  // 해당 라인의 마지막 티어UP 기록 찾기
+  const lineUps = tierHistory.filter(h =>
+    h.name === playerName && h.line === line &&
+    isDia1OrAbove(h.tier_before) &&
+    (TIER_SCORES[h.tier_after] ?? 0) > (TIER_SCORES[h.tier_before] ?? 0)
+  )
+
+  const lineRecs = records.filter(r =>
+    r.blue.some(p => p.name === playerName && p.line === line) ||
+    r.red.some(p => p.name === playerName && p.line === line)
+  )
+
+  // 마지막 티어UP이 있으면 그 이후 기록만 확인
+  let recsToCheck = lineRecs
+  if (lineUps.length > 0) {
+    const lastUpRecordId = lineUps[lineUps.length - 1].record_id
+    const lastUpIdx = lineRecs.findIndex(r => r.id === lastUpRecordId)
+    if (lastUpIdx >= 0) {
+      recsToCheck = lineRecs.slice(0, lastUpIdx) // records는 최신순이므로
+    }
+  }
+
+  // 마지막 티어UP 이후 연승 계산
+  let streak = 0
+  for (const r of recsToCheck) {
+    const inBlue = r.blue.some(p => p.name === playerName && p.line === line)
+    const isWin = (inBlue && r.winner === 'blue') || (!inBlue && r.winner === 'red')
+    if (isWin) streak++
+    else break
+  }
+  return streak
+}
+
+const TIER_SCORES: Record<string, number> = {
+  '실버3 이하': 12, '실버2': 13, '실버1': 14, '골드4': 14, '골드3': 15, '골드2': 16, '골드1': 18,
+  '플래티넘4': 19, '플래티넘3': 20, '플래티넘2': 21, '플래티넘1': 23,
+  '에메랄드4': 24, '에메랄드3': 26, '에메랄드2': 27, '에메랄드1': 29,
+  '다이아4': 31, '다이아3': 33, '다이아2': 35, '다이아1': 36,
+  '마스터 0층': 38, '마스터 1층': 39, '마스터 2층': 40, '마스터 3층': 42,
+  '마스터 4층': 44, '마스터 5층': 46, '마스터 6층': 48, '마스터 7층': 51,
+  '그랜드마스터 8층': 54, '그랜드마스터 9층': 56, '그랜드마스터 10층': 57,
+  '그랜드마스터 11층': 58, '그랜드마스터 12층': 59, '그랜드마스터 13층': 60, '그랜드마스터 14층': 60,
+  '챌린저 15층': 61, '챌린저 16층': 61, '챌린저 17층': 62, '리그오브레전드': 62,
 }
 
 // ── 소환사 관리 탭 ──────────────────────────────────────────────
@@ -512,7 +560,10 @@ function TeamTab({
         const wr = getRecentLineWinRate(p.name, p.line, updatedRecords, 5)
         if (wr !== null && wr >= 0.6) newTier = tierUp(currentTier)
       } else if (isDia1OrAbove(currentTier)) {
-        const streak = getConsecutiveLineWins(p.name, p.line, updatedRecords, 2)
+        // 마지막 티어UP 이후 2연승 해야 UP (패하면 streak 리셋)
+        const { data: hist } = await supabase.from('tier_history').select('*').order('id', { ascending: true })
+        const tierHist = (hist ?? []) as { record_id: number; name: string; line: string; tier_before: string; tier_after: string }[]
+        const streak = getWinsSinceLastTierUp(p.name, p.line, updatedRecords, tierHist)
         if (streak >= 2) newTier = tierUp(currentTier)
       } else {
         newTier = tierUp(currentTier)
