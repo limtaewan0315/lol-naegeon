@@ -386,12 +386,9 @@ function TeamTab({
         return (inBlue && r.winner === 'blue') || (!inBlue && r.winner === 'red')
       }).length
       const wr = wins / total
-      // 티어 50% + 승률 50% 반영 (지수 1.5 비선형, 50% 기준 대칭)
+      // 티어 70% + 승률 30% 반영 (지수 1.0 선형, 50% 기준 대칭)
       const ratio = wr / 0.5
-      const weighted = ratio >= 1
-        ? Math.pow(ratio, 1.5)
-        : 2 - Math.pow(2 - ratio, 1.5)
-      return baseScore * (0.5 + 0.5 * weighted)
+      return baseScore * (0.7 + 0.3 * ratio)
     }
 
     let best: BalanceResult | null = null
@@ -560,16 +557,7 @@ function TeamTab({
         const wr = getRecentLineWinRate(p.name, p.line, updatedRecords, 5)
         if (wr !== null && wr >= 0.6) newTier = tierUp(currentTier)
       } else if (isDia1OrAbove(currentTier)) {
-        // 포인트 방식: +1점(승), 2점=UP / -1점(패), -2점=DOWN
-        const currentPoints = summoners[p.name]?._points?.[p.line] ?? 0
-        const newPoints = currentPoints + 1
-        if (newPoints >= 2) {
-          newTier = tierUp(currentTier)
-          await supabase.from('summoners').update({ dia_points: 0 }).eq('name', p.name).eq('line', p.line)
-        } else {
-          await supabase.from('summoners').update({ dia_points: newPoints }).eq('name', p.name).eq('line', p.line)
-          newTier = null // 포인트만 변경, 티어 변동 없음
-        }
+        newTier = tierUp(currentTier)
       } else {
         newTier = tierUp(currentTier)
       }
@@ -581,25 +569,10 @@ function TeamTab({
     for (const p of losers) {
       if (!summoners[p.name]?.[p.line]) continue
       const currentTier = summoners[p.name][p.line]
-      if (isDia1OrAbove(currentTier)) {
-        // 포인트 방식: -1점, -2점=DOWN
-        const currentPoints = summoners[p.name]?._points?.[p.line] ?? 0
-        const newPoints = currentPoints - 1
-        if (newPoints <= -2) {
-          const newTier = tierDown(currentTier)
-          if (newTier !== currentTier) {
-            await supabase.from('summoners').update({ tier: newTier, dia_points: 0 }).eq('name', p.name).eq('line', p.line)
-            if (recId) historyEntries.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
-          }
-        } else {
-          await supabase.from('summoners').update({ dia_points: newPoints }).eq('name', p.name).eq('line', p.line)
-        }
-      } else {
-        const newTier = tierDown(currentTier)
-        if (newTier !== currentTier) {
-          await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
-          if (recId) historyEntries.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
-        }
+      const newTier = tierDown(currentTier)
+      if (newTier !== currentTier) {
+        await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
+        if (recId) historyEntries.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
       }
     }
     if (historyEntries.length > 0) {
