@@ -1084,6 +1084,9 @@ function StatsTab({ records, summoners, tierHistory }: {
   const [selected, setSelected] = useState<string | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [openGraphLine, setOpenGraphLine] = useState<string | null>(null)
+  const [oppSearch, setOppSearch] = useState('')
+  const [oppSelected, setOppSelected] = useState<string | null>(null)
+  const [oppSuggestions, setOppSuggestions] = useState<string[]>([])
 
   // 전체 플레이어 목록 (records 기반)
   const allNames = Array.from(new Set(records.flatMap(r => [...r.blue, ...r.red].map(p => p.name)))).sort()
@@ -1099,9 +1102,29 @@ function StatsTab({ records, summoners, tierHistory }: {
     setSelected(name)
     setSearch(name)
     setSuggestions([])
+    setOppSelected(null)
+    setOppSearch('')
   }
 
   // 선택된 소환사 통계 계산
+  // 상대전적 계산 (MatchupTab 로직 통합)
+  const getMatchup = (nameA: string, nameB: string) => {
+    const matched = records.filter(r => {
+      const allP = [...r.blue, ...r.red].map(p => p.name)
+      return allP.includes(nameA) && allP.includes(nameB)
+    })
+    if (matched.length === 0) return { total: 0, aWin: 0, bWin: 0, sameTeam: 0, oppose: 0, sameWin: 0 }
+    let aWin = 0, bWin = 0, sameTeam = 0, oppose = 0, sameWin = 0
+    matched.forEach(r => {
+      const aInBlue = r.blue.some(p => p.name === nameA)
+      const bInBlue = r.blue.some(p => p.name === nameB)
+      const aWins = (aInBlue && r.winner === 'blue') || (!aInBlue && r.winner === 'red')
+      if (aInBlue === bInBlue) { sameTeam++; if (aWins) sameWin++ }
+      else { oppose++; if (aWins) aWin++; else bWin++ }
+    })
+    return { total: matched.length, aWin, bWin, sameTeam, oppose, sameWin }
+  }
+
   const getStats = (name: string) => {
     let win = 0, lose = 0
     const lines: Record<string, { win: number; lose: number; recent: boolean[] }> = {}
@@ -1228,7 +1251,7 @@ function StatsTab({ records, summoners, tierHistory }: {
         <div style={{ position: 'relative', marginBottom: 10 }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <input value={search} onChange={e => handleSearch(e.target.value)} placeholder="소환사명 검색" autoComplete="off" style={{ flex: 1 }} />
-            {selected && <button className="btn btn-sm" onClick={() => { setSearch(''); setSelected(null); setSuggestions([]) }}>초기화</button>}
+            {selected && <button className="btn btn-sm" onClick={() => { setSearch(''); setSelected(null); setSuggestions([]); setOppSearch(''); setOppSelected(null); setOppSuggestions([]) }}>초기화</button>}
           </div>
           {suggestions.length > 0 && (
             <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--bg3)', border: '0.5px solid var(--border2)', borderRadius: 'var(--radius)', marginTop: 2, overflow: 'hidden' }}>
@@ -1440,6 +1463,82 @@ function StatsTab({ records, summoners, tierHistory }: {
                   </div>
                 )
               })}
+
+              {/* 상대 전적 검색 */}
+              <div style={{ marginTop: 14, padding: '12px 14px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
+                <div style={{ fontSize: 11, color: 'var(--text3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>상대 전적 검색</div>
+                <div style={{ position: 'relative', marginBottom: 10 }}>
+                  <input value={oppSearch} onChange={e => {
+                    setOppSearch(e.target.value)
+                    setOppSelected(null)
+                    const v = e.target.value.trim()
+                    setOppSuggestions(v ? allNames.filter(n => n.includes(v) && n !== selected).slice(0, 5) : [])
+                  }} placeholder="상대 소환사 검색" autoComplete="off" style={{ width: '100%' }} />
+                  {oppSuggestions.length > 0 && (
+                    <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--bg3)', border: '0.5px solid var(--border2)', borderRadius: 'var(--radius)', marginTop: 2, overflow: 'hidden' }}>
+                      {oppSuggestions.map(s => (
+                        <div key={s} onClick={() => { setOppSelected(s); setOppSearch(s); setOppSuggestions([]) }}
+                          style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}
+                          onMouseEnter={e2 => (e2.currentTarget.style.background = 'var(--bg2)')}
+                          onMouseLeave={e2 => (e2.currentTarget.style.background = 'transparent')}>{s}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {!oppSearch.trim() && <div style={{ fontSize: 12, color: 'var(--text3)' }}>상대 소환사를 검색해보세요</div>}
+                {oppSelected && (() => {
+                  const m = getMatchup(selected!, oppSelected)
+                  if (m.total === 0) return <div className="empty">함께한 게임이 없어요.</div>
+                  return (
+                    <div>
+                      {m.oppose > 0 && (
+                        <div style={{ marginBottom: 10 }}>
+                          <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 6 }}>맞대결</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--bg)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
+                            <div style={{ flex: 1, textAlign: 'right' }}>
+                              <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--blue)' }}>{selected}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text2)' }}>{m.aWin}승</div>
+                            </div>
+                            <div style={{ textAlign: 'center', minWidth: 90 }}>
+                              <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 4 }}>
+                                <span style={{ color: 'var(--blue)', fontWeight: 600 }}>{m.aWin}</span>
+                                <span style={{ margin: '0 4px', color: 'var(--text3)' }}>-</span>
+                                <span style={{ color: 'var(--red)', fontWeight: 600 }}>{m.bWin}</span>
+                                <span style={{ color: 'var(--text3)', fontSize: 10, marginLeft: 4 }}>({m.oppose}판)</span>
+                              </div>
+                              <div style={{ height: 4, background: 'var(--bg3)', borderRadius: 2, overflow: 'hidden', display: 'flex' }}>
+                                <div style={{ height: '100%', width: `${Math.round(m.aWin/m.oppose*100)}%`, background: 'var(--blue)' }} />
+                                <div style={{ height: '100%', flex: 1, background: 'var(--red)' }} />
+                              </div>
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--red)' }}>{oppSelected}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text2)' }}>{m.bWin}승</div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      {m.sameTeam > 0 && (
+                        <div>
+                          <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 6 }}>같은 팀</div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'var(--bg)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
+                            <span style={{ fontSize: 12, flex: 1 }}>
+                              <span style={{ color: 'var(--blue)', fontWeight: 600 }}>{selected}</span>
+                              <span style={{ color: 'var(--text3)' }}> + </span>
+                              <span style={{ color: 'var(--red)', fontWeight: 600 }}>{oppSelected}</span>
+                            </span>
+                            <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>{m.sameWin}승</span>
+                            <span style={{ fontSize: 11, color: 'var(--red)', marginLeft: 6 }}>{m.sameTeam - m.sameWin}패</span>
+                            <span style={{ fontSize: 13, fontWeight: 700, marginLeft: 8, color: Math.round(m.sameWin/m.sameTeam*100) >= 50 ? 'var(--green)' : 'var(--red)' }}>
+                              {Math.round(m.sameWin/m.sameTeam*100)}%
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
+              </div>
             </div>
           )
         })()}
@@ -1792,7 +1891,7 @@ function RankingTab({ records }: { records: GameRecord[] }) {
 
 // ── 메인 페이지 ──────────────────────────────────────────────
 export default function Home() {
-  const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'hall' | 'stats' | 'matchup' | 'summoners'>('team')
+  const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'hall' | 'stats' | 'summoners'>('team')
   const [records, setRecords] = useState<GameRecord[]>([])
   const [summoners, setSummoners] = useState<SummonerMap>({})
 
@@ -1995,9 +2094,9 @@ export default function Home() {
       </div>
 
       <div className="tabs" style={{ background: 'rgba(6,17,31,0.75)' }}>
-        {(['team', 'record', 'ranking', 'hall', 'stats', 'matchup', 'summoners'] as const).map((t, i) => (
+        {(['team', 'record', 'ranking', 'hall', 'stats', 'summoners'] as const).map((t, i) => (
           <button key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-            {['팀 뽑기', '전적 기록', '전체 랭킹', '명예의 전당', '개인 통계', '상대 전적', '소환사 관리'][i]}
+            {['팀 뽑기', '전적 기록', '전체 랭킹', '명예의 전당', '개인 통계', '소환사 관리'][i]}
           </button>
         ))}
       </div>
@@ -2011,7 +2110,7 @@ export default function Home() {
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'hall' && <HallOfFameTab records={records} />}
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} tierHistory={tierHistory} />}
-          {tab === 'matchup' && <MatchupTab records={records} />}
+
           {tab === 'summoners' && <SummonerTab summoners={summoners} onRefresh={fetchAll} />}
         </>
       )}
