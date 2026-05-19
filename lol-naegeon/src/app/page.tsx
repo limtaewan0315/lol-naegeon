@@ -374,21 +374,7 @@ function TeamTab({
 
     // 라인별 승률 기반 점수 보정 (15판 이상일 때만)
     const getAdjustedScore = (name: string, line: Line, tier: string): number => {
-      const baseScore = getScore(tier, line)
-      const lineRecs = records.filter(r =>
-        r.blue.some(p => p.name === name && p.line === line) ||
-        r.red.some(p => p.name === name && p.line === line)
-      )
-      const total = lineRecs.length
-      if (total < 15) return baseScore // 15판 미만이면 티어점수만 사용
-      const wins = lineRecs.filter(r => {
-        const inBlue = r.blue.some(p => p.name === name && p.line === line)
-        return (inBlue && r.winner === 'blue') || (!inBlue && r.winner === 'red')
-      }).length
-      const wr = wins / total
-      // 티어 70% + 승률 30% 반영 (지수 1.0 선형, 50% 기준 대칭)
-      const ratio = wr / 0.5
-      return baseScore * (0.7 + 0.3 * ratio)
+      return getScore(tier, line)
     }
 
     let best: BalanceResult | null = null
