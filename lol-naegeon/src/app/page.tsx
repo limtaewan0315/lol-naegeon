@@ -1068,11 +1068,7 @@ function RecordTab({ records, onDelete, onClear }: {
           </div>
         )}
 
-        {records.length > 0 && (
-          <div style={{ marginTop: 12 }}>
-            <button className="btn btn-danger" onClick={() => { if (checkPassword()) onClear() }}>전체 기록 삭제</button>
-          </div>
-        )}
+
       </div>
     </div>
   )
