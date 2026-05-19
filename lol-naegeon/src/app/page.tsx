@@ -1521,7 +1521,7 @@ function StatsTab({ records, summoners, tierHistory }: {
                       {m.sameTeam > 0 && (
                         <div>
                           <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 6 }}>같은 팀</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'var(--bg)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
                             <span style={{ fontSize: 12, flex: 1 }}>
                               <span style={{ color: 'var(--blue)', fontWeight: 600 }}>{selected}</span>
                               <span style={{ color: 'var(--text3)' }}> + </span>
