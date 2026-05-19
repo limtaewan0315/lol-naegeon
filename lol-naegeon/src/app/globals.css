@@ -295,3 +295,10 @@ select option { background: var(--bg3); }
   .teams-grid { grid-template-columns: 1fr; }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* 모바일에서 캐릭터 이미지 숨김 */
+@media (max-width: 1024px) {
+  .char-side {
+    display: none !important;
+  }
+}
