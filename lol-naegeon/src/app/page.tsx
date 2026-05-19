@@ -1494,7 +1494,7 @@ function StatsTab({ records, summoners, tierHistory }: {
                       {m.oppose > 0 && (
                         <div style={{ marginBottom: 10 }}>
                           <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 6 }}>맞대결</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--bg)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
                             <div style={{ flex: 1, textAlign: 'right' }}>
                               <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--blue)' }}>{selected}</div>
                               <div style={{ fontSize: 11, color: 'var(--text2)' }}>{m.aWin}승</div>
