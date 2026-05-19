@@ -28,7 +28,7 @@ const LINE_ORDER: Record<string, number> = { 탑: 0, 정글: 1, 미드: 2, 원�
 
 // summoners 테이블: { name, line, tier } (name+line 복합키)
 // SummonerMap: name -> { line -> tier }
-type SummonerMap = Record<string, Record<Line, string> & { _points?: Record<string, number> }>
+type SummonerMap = Record<string, Record<Line, string>>
 
 // 팀 뽑기용 플레이어 (모스트1/2 포함)
 interface PlayerEntry {
@@ -1959,11 +1959,9 @@ export default function Home() {
     if (hist) setTierHistory(hist)
     if (sums) {
       const map: SummonerMap = {}
-      sums.forEach((s: { name: string; tier: string; line: Line; dia_points?: number }) => {
+      sums.forEach((s: { name: string; tier: string; line: Line }) => {
         if (!map[s.name]) map[s.name] = {} as Record<Line, string>
         map[s.name][s.line] = s.tier
-        if (!map[s.name]._points) map[s.name]._points = {}
-        map[s.name]._points![s.line] = s.dia_points ?? 0
       })
       setSummoners(map)
     }
