@@ -28,7 +28,7 @@ const LINE_ORDER: Record<string, number> = { 탑: 0, 정글: 1, 미드: 2, 원�
 
 // summoners 테이블: { name, line, tier } (name+line 복합키)
 // SummonerMap: name -> { line -> tier }
-type SummonerMap = Record<string, Record<Line, string>>
+type SummonerMap = Record<string, Record<Line, string> & { _points?: Record<string, number> }>
 
 // 팀 뽑기용 플레이어 (모스트1/2 포함)
 interface PlayerEntry {
@@ -560,11 +560,16 @@ function TeamTab({
         const wr = getRecentLineWinRate(p.name, p.line, updatedRecords, 5)
         if (wr !== null && wr >= 0.6) newTier = tierUp(currentTier)
       } else if (isDia1OrAbove(currentTier)) {
-        // 마지막 티어UP 이후 2연승 해야 UP (패하면 streak 리셋)
-        const { data: hist } = await supabase.from('tier_history').select('*').order('id', { ascending: true })
-        const tierHist = (hist ?? []) as { record_id: number; name: string; line: string; tier_before: string; tier_after: string }[]
-        const streak = getWinsSinceLastTierUp(p.name, p.line, updatedRecords, tierHist)
-        if (streak >= 2) newTier = tierUp(currentTier)
+        // 포인트 방식: +1점(승), 2점=UP / -1점(패), -2점=DOWN
+        const currentPoints = summoners[p.name]?._points?.[p.line] ?? 0
+        const newPoints = currentPoints + 1
+        if (newPoints >= 2) {
+          newTier = tierUp(currentTier)
+          await supabase.from('summoners').update({ dia_points: 0 }).eq('name', p.name).eq('line', p.line)
+        } else {
+          await supabase.from('summoners').update({ dia_points: newPoints }).eq('name', p.name).eq('line', p.line)
+          newTier = null // 포인트만 변경, 티어 변동 없음
+        }
       } else {
         newTier = tierUp(currentTier)
       }
@@ -576,10 +581,25 @@ function TeamTab({
     for (const p of losers) {
       if (!summoners[p.name]?.[p.line]) continue
       const currentTier = summoners[p.name][p.line]
-      const newTier = tierDown(currentTier)
-      if (newTier !== currentTier) {
-        await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
-        if (recId) historyEntries.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
+      if (isDia1OrAbove(currentTier)) {
+        // 포인트 방식: -1점, -2점=DOWN
+        const currentPoints = summoners[p.name]?._points?.[p.line] ?? 0
+        const newPoints = currentPoints - 1
+        if (newPoints <= -2) {
+          const newTier = tierDown(currentTier)
+          if (newTier !== currentTier) {
+            await supabase.from('summoners').update({ tier: newTier, dia_points: 0 }).eq('name', p.name).eq('line', p.line)
+            if (recId) historyEntries.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
+          }
+        } else {
+          await supabase.from('summoners').update({ dia_points: newPoints }).eq('name', p.name).eq('line', p.line)
+        }
+      } else {
+        const newTier = tierDown(currentTier)
+        if (newTier !== currentTier) {
+          await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
+          if (recId) historyEntries.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
+        }
       }
     }
     if (historyEntries.length > 0) {
@@ -1966,9 +1986,11 @@ export default function Home() {
     if (hist) setTierHistory(hist)
     if (sums) {
       const map: SummonerMap = {}
-      sums.forEach((s: { name: string; tier: string; line: Line }) => {
+      sums.forEach((s: { name: string; tier: string; line: Line; dia_points?: number }) => {
         if (!map[s.name]) map[s.name] = {} as Record<Line, string>
         map[s.name][s.line] = s.tier
+        if (!map[s.name]._points) map[s.name]._points = {}
+        map[s.name]._points![s.line] = s.dia_points ?? 0
       })
       setSummoners(map)
     }
@@ -2070,8 +2092,8 @@ export default function Home() {
     const { data: history } = await supabase.from('tier_history').select('*').eq('record_id', id)
     if (history && history.length > 0) {
       for (const h of history) {
-        // tier_before로 되돌리기
-        await supabase.from('summoners').update({ tier: h.tier_before }).eq('name', h.name).eq('line', h.line)
+        // tier_before로 되돌리기 + dia_points 리셋
+        await supabase.from('summoners').update({ tier: h.tier_before, dia_points: 0 }).eq('name', h.name).eq('line', h.line)
       }
       await supabase.from('tier_history').delete().eq('record_id', id)
     }
@@ -2087,7 +2109,7 @@ export default function Home() {
     if (allHistory && allHistory.length > 0) {
       // 최신 이력부터 역순으로 롤백
       for (const h of allHistory) {
-        await supabase.from('summoners').update({ tier: h.tier_before }).eq('name', h.name).eq('line', h.line)
+        await supabase.from('summoners').update({ tier: h.tier_before, dia_points: 0 }).eq('name', h.name).eq('line', h.line)
       }
       await supabase.from('tier_history').delete().neq('id', 0)
     }
