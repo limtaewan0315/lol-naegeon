@@ -65,7 +65,7 @@ function isDia1OrAbove(tier: string): boolean {
 }
 
 function isSilver3OrBelowGlobal(tier: string): boolean {
-  return ['실버3 이하', '실버2', '실버1'].includes(tier)
+  return ['실버3 이하'].includes(tier)
 }
 
 function getConsecutiveLineWins(playerName: string, line: string, records: GameRecord[], n = 2): number {
