@@ -438,6 +438,10 @@ function TeamTab({
       if (diff === 0) break
     }
 
+    if (best && Math.abs(best.s1 - best.s2) > 15) {
+      setError(`팀 편성이 불가능해요. 최선의 조합도 ${Math.abs(best.s1 - best.s2).toFixed(1)}점 차이가 나요. 참가자 구성을 변경해주세요.`)
+      best = null
+    }
     if (best) {
       const startedAt = new Date().toISOString()
       // 세션 저장
@@ -724,6 +728,30 @@ function TeamTab({
           })
         }
 
+        {/* 라인별 M1/M2 설정 현황 */}
+        {players.length > 0 && (() => {
+          const m1Counts: Record<string, number> = {}
+          const m2Counts: Record<string, number> = {}
+          LINES.forEach(l => { m1Counts[l] = 0; m2Counts[l] = 0 })
+          players.forEach(p => {
+            if (p.most1 && p.most1 !== 'any') m1Counts[p.most1] = (m1Counts[p.most1] ?? 0) + 1
+            if (p.most2 && p.most2 !== 'any') m2Counts[p.most2] = (m2Counts[p.most2] ?? 0) + 1
+          })
+          return (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+              {LINES.map(l => (
+                <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', background: 'var(--bg3)', borderRadius: 3, border: '0.5px solid var(--border)', fontSize: 11 }}>
+                  <span style={{ color: 'var(--blue)' }}>{l}</span>
+                  <span style={{ color: 'var(--text2)' }}>M1:</span>
+                  <span style={{ color: m1Counts[l] >= 2 ? 'var(--green)' : 'var(--text3)', fontWeight: 600 }}>{m1Counts[l]}</span>
+                  <span style={{ color: 'var(--text3)', margin: '0 2px' }}>·</span>
+                  <span style={{ color: 'var(--text2)' }}>M2:</span>
+                  <span style={{ color: 'var(--text3)', fontWeight: 600 }}>{m2Counts[l]}</span>
+                </div>
+              ))}
+            </div>
+          )
+        })()}
         <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
           <button className="btn btn-gold" onClick={balance} disabled={!!result || countdown !== null}>팀 균형 맞추기</button>
           <button className="btn" onClick={() => { setPlayers([]); setResult(null); setPendingResult(null); setError(''); onSessionUpdate([], null); supabase.from('session').update({ balance_started_at: null, pending_result: null }).eq('id', 1) }}>초기화</button>
