@@ -773,7 +773,7 @@ function TeamTab({
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
             <button className="btn btn-gold" onClick={async () => {
-              const WEBHOOK = 'https://discord.com/api/webhooks/1503643794166517860/TE94_3riqrE1_LlEanUn8SeEdkMlbaqOH227MimpWR9A4dErgm5oBQOMfte6zJPwcLZe'
+              const WEBHOOK = DISCORD_WEBHOOK_URL
               const lineOrder = ['탑','정글','미드','원딜','서포터']
               const sortedT1 = [...result.team1].sort((a,b) => lineOrder.indexOf(a.line) - lineOrder.indexOf(b.line))
               const sortedT2 = [...result.team2].sort((a,b) => lineOrder.indexOf(a.line) - lineOrder.indexOf(b.line))
