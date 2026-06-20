@@ -17,7 +17,7 @@ interface GameRecord {
 
 const ADMIN_PASSWORD = 'daumathematics'
 
-const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1503643794166517860/TE94_3riqrE1_LlEanUn8SeEdkMlbaqOH227MimpWR9A4dErgm5oBQOMfte6zJPwcLZe'
+const DISCORD_WEBHOOK_URL = 'https://discordapp.com/api/webhooks/1517851751976538182/5o_PAydNLLEWPzhbl49GAIszwcMloutO-GWhv25j_KtKLtmiFT5NwuOpSPmWf8J4okBF'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
