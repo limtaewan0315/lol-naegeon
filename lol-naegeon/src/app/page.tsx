@@ -1332,6 +1332,21 @@ function StatsTab({ records, summoners, tierHistory }: {
           const sortedLines = (Object.keys(lines) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b])
           const tierGraph = getTierGraph(selected)
 
+          // 마지막 게임 날짜 계산 (records는 최신순 정렬되어 있음)
+          const lastGame = records.find(r => r.blue.some(p => p.name === selected) || r.red.some(p => p.name === selected))
+          let lastGameText = ''
+          if (lastGame) {
+            const lastDate = new Date((lastGame as any).created_at ?? '')
+            if (!isNaN(lastDate.getTime())) {
+              const now = new Date()
+              const diffMs = now.getTime() - lastDate.getTime()
+              const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+              const dateStr = `${lastDate.getMonth() + 1}/${lastDate.getDate()}`
+              if (diffDays === 0) lastGameText = `오늘 (${dateStr})`
+              else lastGameText = `${dateStr} · ${diffDays}일 전`
+            }
+          }
+
           return (
             <div>
               {/* 총 통계 */}
@@ -1343,6 +1358,11 @@ function StatsTab({ records, summoners, tierHistory }: {
                   <span style={{ fontSize: 12, color: 'var(--text2)' }}>{total}판</span>
                   <span style={{ marginLeft: 'auto', fontSize: 16, fontWeight: 700, color: wr >= 50 ? 'var(--green)' : 'var(--red)' }}>{wr}%</span>
                 </div>
+                {lastGameText && (
+                  <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>
+                    🕐 마지막 게임: {lastGameText}
+                  </div>
+                )}
                 <OX results={recentAll} />
               </div>
 
