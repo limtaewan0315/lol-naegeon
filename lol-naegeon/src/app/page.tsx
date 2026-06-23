@@ -604,19 +604,18 @@ function TeamTab({
 
       const fmtPlayer = (p: TeamPlayer, isWinner: boolean) => {
         const h = historyEntries.find(e => e.name===p.name && e.line===p.line)
-        const tierChange = h
-          ? `↳ ${h.tier_before} → ${h.tier_after} ${isWinner?'▲':'▼'}`
-          : ''
         const beforeScore = summonerScores[p.name]?.[p.line] ?? getScoreByTier(p.tier)
         const afterScore = isWinner ? beforeScore + 1 : beforeScore - 1
+        const afterTier = getTierByScore(afterScore)
+        const tierChange = h
+          ? `↳ ${h.tier_before} → ${h.tier_after} ${isWinner?'▲':'▼'}`
+          : `↳ ${afterTier} (변동없음)`
         const scoreChange = `↳ ${beforeScore}점 → ${afterScore}점 (${isWinner ? '+1' : '-1'})`
         const streak = getStreak(p.name, p.line, updatedRecords)
         const abs = Math.abs(streak)
         const streakStr = abs >= 2 ? (streak > 0 ? ` 🔥${abs}연승` : ` 💧${abs}연패`) : ''
         const line1 = `\`${p.line}\` **${p.name}**${streakStr}`
-        const lines = [line1]
-        if (tierChange) lines.push(tierChange)
-        lines.push(scoreChange)
+        const lines = [line1, tierChange, scoreChange]
         return lines.join('\n')
       }
 
@@ -1160,9 +1159,10 @@ function RecordTab({ records, onDelete, onClear }: {
 }
 
 // ── 개인 통계 탭 ──────────────────────────────────────────────
-function StatsTab({ records, summoners, tierHistory }: {
+function StatsTab({ records, summoners, summonerScores, tierHistory }: {
   records: GameRecord[]
   summoners: SummonerMap
+  summonerScores: SummonerScoreMap
   tierHistory: { record_id: number; name: string; line: string; tier_before: string; tier_after: string }[]
 }) {
   const [search, setSearch] = useState('')
@@ -1515,7 +1515,12 @@ function StatsTab({ records, summoners, tierHistory }: {
                     <div style={{ padding: '10px 12px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                         <span className="badge b-line">{l}</span>
-                        {selected && summoners[selected]?.[l] && <span className="badge b-tier">{summoners[selected][l]}</span>}
+                        {selected && summoners[selected]?.[l] && (
+                          <>
+                            <span className="badge b-tier">{summoners[selected][l]}</span>
+                            <span style={{ fontSize: 11, color: 'var(--text3)' }}>{summonerScores[selected]?.[l] ?? '-'}점</span>
+                          </>
+                        )}
                         <span className="badge b-win" style={{ fontSize: 10 }}>{ls.win}승</span>
                         <span className="badge b-lose" style={{ fontSize: 10 }}>{ls.lose}패</span>
                         <span style={{ fontSize: 11, color: 'var(--text2)' }}>{lTotal}판</span>
@@ -2246,7 +2251,7 @@ export default function Home() {
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'hall' && <HallOfFameTab records={records} />}
-          {tab === 'stats' && <StatsTab records={records} summoners={summoners} tierHistory={tierHistory} />}
+          {tab === 'stats' && <StatsTab records={records} summoners={summoners} summonerScores={summonerScores} tierHistory={tierHistory} />}
 
           {tab === 'summoners' && <SummonerTab summoners={summoners} summonerScores={summonerScores} onRefresh={fetchAll} />}
         </>
