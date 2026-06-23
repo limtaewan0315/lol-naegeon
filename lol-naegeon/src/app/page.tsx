@@ -646,7 +646,8 @@ function TeamTab({
 
     setIsRecording(false)
     recordingRef.current = false
-    fetchAll()
+    // 점수/티어 변경이 확실히 반영되도록 페이지 새로고침
+    window.location.reload()
   }
 
   const sortByLine = (arr: TeamPlayer[]) => [...arr].sort((a, b) => (LINE_ORDER[a.line] ?? 9) - (LINE_ORDER[b.line] ?? 9))
