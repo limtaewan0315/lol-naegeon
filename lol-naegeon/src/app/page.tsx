@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { TIERS, LINES, getScore, getTierByScore, getScoreByTier, shuffle } from '@/lib/data'
 import type { Line } from '@/lib/data'
@@ -522,9 +522,11 @@ function TeamTab({
   }
 
   const [isRecording, setIsRecording] = useState(false)
+  const recordingRef = useRef(false) // race condition 방지용 (state보다 즉시 반영됨)
 
   const recordWin = async (winner: 'blue' | 'red') => {
-    if (!result || isRecording) return
+    if (!result || recordingRef.current) return
+    recordingRef.current = true
     setIsRecording(true)
 
     const winners = winner === 'blue' ? result.team1 : result.team2
@@ -602,12 +604,20 @@ function TeamTab({
 
       const fmtPlayer = (p: TeamPlayer, isWinner: boolean) => {
         const h = historyEntries.find(e => e.name===p.name && e.line===p.line)
-        const tierChange = h ? `↳ ${h.tier_before} → ${h.tier_after} ${isWinner?'▲':'▼'}` : ''
+        const tierChange = h
+          ? `↳ ${h.tier_before} → ${h.tier_after} ${isWinner?'▲':'▼'}`
+          : ''
+        const beforeScore = summonerScores[p.name]?.[p.line] ?? getScoreByTier(p.tier)
+        const afterScore = isWinner ? beforeScore + 1 : beforeScore - 1
+        const scoreChange = `↳ ${beforeScore}점 → ${afterScore}점 (${isWinner ? '+1' : '-1'})`
         const streak = getStreak(p.name, p.line, updatedRecords)
         const abs = Math.abs(streak)
         const streakStr = abs >= 2 ? (streak > 0 ? ` 🔥${abs}연승` : ` 💧${abs}연패`) : ''
         const line1 = `\`${p.line}\` **${p.name}**${streakStr}`
-        return tierChange ? `${line1}\n${tierChange}` : line1
+        const lines = [line1]
+        if (tierChange) lines.push(tierChange)
+        lines.push(scoreChange)
+        return lines.join('\n')
       }
 
       const winLabel = winner === 'blue' ? '🔵 블루팀' : '🔴 레드팀'
@@ -636,6 +646,7 @@ function TeamTab({
     } catch (e) { console.error('Discord webhook error:', e) }
 
     setIsRecording(false)
+    recordingRef.current = false
     fetchAll()
   }
 
