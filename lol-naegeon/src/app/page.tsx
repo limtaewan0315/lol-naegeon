@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@supabase/supabase-js'
-import { TIERS, LINES, getScore, shuffle } from '@/lib/data'
+import { TIERS, LINES, getScore, getTierByScore, getScoreByTier, shuffle } from '@/lib/data'
 import type { Line } from '@/lib/data'
 type TeamPlayer = { name: string; tier: string; line: Line; score: number }
 interface BalanceResult { team1: TeamPlayer[]; team2: TeamPlayer[]; s1: number; s2: number }
@@ -27,8 +27,10 @@ const supabase = createClient(
 const LINE_ORDER: Record<string, number> = { 탑: 0, 정글: 1, 미드: 2, 원딜: 3, 서포터: 4 }
 
 // summoners 테이블: { name, line, tier } (name+line 복합키)
-// SummonerMap: name -> { line -> tier }
+// SummonerMap: name -> { line -> tier } (표시용 티어명)
 type SummonerMap = Record<string, Record<Line, string>>
+// SummonerScoreMap: name -> { line -> score } (실제 포인트, 티어 계산의 기준)
+type SummonerScoreMap = Record<string, Record<Line, number>>
 
 // 팀 뽑기용 플레이어 (모스트1/2 포함)
 interface PlayerEntry {
@@ -48,7 +50,9 @@ function checkPassword(): boolean {
   return false
 }
 
+// 점수 기반 티어 시스템 헬퍼
 function tierUp(tier: string): string {
+  // 호환용: 기존 코드에서 호출하는 곳이 있다면 다음 티어명 반환 (점수 무관)
   const idx = TIERS.indexOf(tier)
   if (idx <= 0) return TIERS[0]
   return TIERS[idx - 1]
@@ -65,7 +69,7 @@ function isDia1OrAbove(tier: string): boolean {
 }
 
 function isSilver3OrBelowGlobal(tier: string): boolean {
-  return ['실버3 이하'].includes(tier)
+  return ['언랭'].includes(tier)
 }
 
 function getConsecutiveLineWins(playerName: string, line: string, records: GameRecord[], n = 2): number {
@@ -120,7 +124,7 @@ function getWinsSinceLastTierUp(playerName: string, line: string, records: GameR
 }
 
 const TIER_SCORES: Record<string, number> = {
-  '실버3 이하': 12, '실버2': 13, '실버1': 14, '골드4': 14, '골드3': 15, '골드2': 16, '골드1': 18,
+  '언랭': 12, '실버2': 13, '실버1': 14, '골드4': 14, '골드3': 15, '골드2': 16, '골드1': 18,
   '플래티넘4': 19, '플래티넘3': 20, '플래티넘2': 21, '플래티넘1': 23,
   '에메랄드4': 24, '에메랄드3': 26, '에메랄드2': 27, '에메랄드1': 29,
   '다이아4': 31, '다이아3': 33, '다이아2': 35, '다이아1': 36,
@@ -132,7 +136,7 @@ const TIER_SCORES: Record<string, number> = {
 }
 
 // ── 소환사 관리 탭 ──────────────────────────────────────────────
-function SummonerTab({ summoners, onRefresh }: { summoners: SummonerMap; onRefresh: () => void }) {
+function SummonerTab({ summoners, summonerScores, onRefresh }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; onRefresh: () => void }) {
   const [name, setName] = useState('')
   const [tier, setTier] = useState('골드2')
   const [line, setLine] = useState<Line>('탑')
@@ -147,7 +151,7 @@ function SummonerTab({ summoners, onRefresh }: { summoners: SummonerMap; onRefre
     if (!n) { setError('소환사명을 입력해주세요.'); return }
     if (!checkPassword()) return
     setError('')
-    await supabase.from('summoners').upsert({ name: n, line, tier }, { onConflict: 'name,line' })
+    await supabase.from('summoners').upsert({ name: n, line, tier, score: getScoreByTier(tier) }, { onConflict: 'name,line' })
     setName('')
     onRefresh()
   }
@@ -166,7 +170,7 @@ function SummonerTab({ summoners, onRefresh }: { summoners: SummonerMap; onRefre
   const saveEdit = async () => {
     if (!editing) return
     if (!checkPassword()) return
-    await supabase.from('summoners').update({ tier: editTier }).eq('name', editing.name).eq('line', editing.line)
+    await supabase.from('summoners').update({ tier: editTier, score: getScoreByTier(editTier) }).eq('name', editing.name).eq('line', editing.line)
     setEditing(null)
     onRefresh()
   }
@@ -240,6 +244,7 @@ function SummonerTab({ summoners, onRefresh }: { summoners: SummonerMap; onRefre
                     ) : (
                       <>
                         <span className="badge b-tier" style={{ flex: 1 }}>{lines[l]}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text3)' }}>{summonerScores[n]?.[l] ?? getScoreByTier(lines[l])}점</span>
                         <button className="btn btn-sm" onClick={() => startEdit(n, l)}>수정</button>
                         <button className="btn btn-danger btn-sm" onClick={() => remove(n, l)}>삭제</button>
                       </>
@@ -260,6 +265,7 @@ function SummonerTab({ summoners, onRefresh }: { summoners: SummonerMap; onRefre
 function TeamTab({
   onRecord,
   summoners,
+  summonerScores,
   players, setPlayers,
   result, setResult,
   records,
@@ -274,6 +280,7 @@ function TeamTab({
 }: {
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
   summoners: SummonerMap
+  summonerScores: SummonerScoreMap
   players: PlayerEntry[]
   setPlayers: React.Dispatch<React.SetStateAction<PlayerEntry[]>>
   result: BalanceResult | null
@@ -372,9 +379,9 @@ function TeamTab({
       return opts.length > 0 ? opts : allLines
     }
 
-    // 라인별 승률 기반 점수 보정 (15판 이상일 때만)
+    // 실제 보유 점수를 그대로 사용 (티어명이 아닌 score 컬럼 기준)
     const getAdjustedScore = (name: string, line: Line, tier: string): number => {
-      return getScore(tier, line)
+      return summonerScores[name]?.[line] ?? getScoreByTier(tier)
     }
 
     let best: BalanceResult | null = null
@@ -539,30 +546,27 @@ function TeamTab({
     const updatedRecords = (latestRecs ?? []) as GameRecord[]
     const historyEntries: { record_id: number; name: string; line: string; tier_before: string; tier_after: string }[] = []
 
+    // 포인트 기반 티어 시스템: 승리 +1점, 패배 -1점, 점수에 따라 티어명 자동 산출
     for (const p of winners) {
       if (!summoners[p.name]?.[p.line]) continue
       const currentTier = summoners[p.name][p.line]
-      let newTier: string | null = null
-      if (isSilver3OrBelow(currentTier)) {
-        const wr = getRecentLineWinRate(p.name, p.line, updatedRecords, 5)
-        if (wr !== null && wr >= 0.6) newTier = tierUp(currentTier)
-      } else if (isDia1OrAbove(currentTier)) {
-        newTier = tierUp(currentTier)
-      } else {
-        newTier = tierUp(currentTier)
-      }
-      if (newTier && newTier !== currentTier) {
-        await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
-        if (recId) historyEntries.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
+      const currentScore = summonerScores[p.name]?.[p.line] ?? getScoreByTier(currentTier)
+      const newScore = currentScore + 1
+      const newTier = getTierByScore(newScore)
+      await supabase.from('summoners').update({ score: newScore, tier: newTier }).eq('name', p.name).eq('line', p.line)
+      if (newTier !== currentTier && recId) {
+        historyEntries.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
       }
     }
     for (const p of losers) {
       if (!summoners[p.name]?.[p.line]) continue
       const currentTier = summoners[p.name][p.line]
-      const newTier = tierDown(currentTier)
-      if (newTier !== currentTier) {
-        await supabase.from('summoners').update({ tier: newTier }).eq('name', p.name).eq('line', p.line)
-        if (recId) historyEntries.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
+      const currentScore = summonerScores[p.name]?.[p.line] ?? getScoreByTier(currentTier)
+      const newScore = currentScore - 1
+      const newTier = getTierByScore(newScore)
+      await supabase.from('summoners').update({ score: newScore, tier: newTier }).eq('name', p.name).eq('line', p.line)
+      if (newTier !== currentTier && recId) {
+        historyEntries.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
       }
     }
     if (historyEntries.length > 0) {
@@ -621,11 +625,14 @@ function TeamTab({
           footer: { text: `lol-naegeon.vercel.app · ${dateStr}` }
         }]
       }
-      await fetch(DISCORD_WEBHOOK_URL, {
+      const discordRes = await fetch(DISCORD_WEBHOOK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       })
+      if (!discordRes.ok) {
+        console.error('Discord webhook failed:', discordRes.status, await discordRes.text())
+      }
     } catch (e) { console.error('Discord webhook error:', e) }
 
     setIsRecording(false)
@@ -792,8 +799,17 @@ function TeamTab({
                   timestamp: new Date().toISOString(),
                 }]
               }
-              await fetch(WEBHOOK, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(msg) })
-              alert('디스코드에 공유됐어요! 🎉')
+              try {
+                const res = await fetch(WEBHOOK, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(msg) })
+                if (res.ok) {
+                  alert('디스코드에 공유됐어요! 🎉')
+                } else {
+                  const errText = await res.text()
+                  alert(`디스코드 전송 실패 (${res.status}): ${errText}`)
+                }
+              } catch (err) {
+                alert('디스코드 전송 중 오류 발생: ' + (err as Error).message)
+              }
             }}>📢 디스코드 공유</button>
             <button className="btn btn-danger" onClick={async () => {
               setResult(null)
@@ -1276,7 +1292,7 @@ function StatsTab({ records, summoners, tierHistory }: {
 
   // 티어 점수 (그래프용 간단 수치)
   const TIER_SCORE: Record<string, number> = {
-    '실버3 이하': 1, '실버2': 2, '실버1': 3, '골드4': 4, '골드3': 5, '골드2': 6, '골드1': 7,
+    '언랭': 1, '실버2': 2, '실버1': 3, '골드4': 4, '골드3': 5, '골드2': 6, '골드1': 7,
     '플래티넘4': 8, '플래티넘3': 9, '플래티넘2': 10, '플래티넘1': 11,
     '에메랄드4': 12, '에메랄드3': 13, '에메랄드2': 14, '에메랄드1': 15,
     '다이아4': 16, '다이아3': 17, '다이아2': 18, '다이아1': 19,
@@ -1972,6 +1988,7 @@ export default function Home() {
   const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'hall' | 'stats' | 'summoners'>('team')
   const [records, setRecords] = useState<GameRecord[]>([])
   const [summoners, setSummoners] = useState<SummonerMap>({})
+  const [summonerScores, setSummonerScores] = useState<SummonerScoreMap>({})
 
   const [tierHistory, setTierHistory] = useState<{ record_id: number; name: string; line: string; tier_before: string; tier_after: string }[]>([])
   const [loading, setLoading] = useState(true)
@@ -1993,11 +2010,17 @@ export default function Home() {
     if (hist) setTierHistory(hist)
     if (sums) {
       const map: SummonerMap = {}
-      sums.forEach((s: { name: string; tier: string; line: Line }) => {
+      const scoreMap: SummonerScoreMap = {}
+      sums.forEach((s: { name: string; tier: string; line: Line; score?: number }) => {
         if (!map[s.name]) map[s.name] = {} as Record<Line, string>
-        map[s.name][s.line] = s.tier
+        if (!scoreMap[s.name]) scoreMap[s.name] = {} as Record<Line, number>
+        // score 컬럼이 있으면 그걸로 티어명 재계산, 없으면(마이그레이션 전) 기존 tier 그대로 사용
+        const score = s.score ?? getScoreByTier(s.tier)
+        scoreMap[s.name][s.line] = score
+        map[s.name][s.line] = getTierByScore(score)
       })
       setSummoners(map)
+      setSummonerScores(scoreMap)
     }
     if (sess) {
       setTeamPlayers(sess.players ?? [])
@@ -2093,31 +2116,56 @@ export default function Home() {
   }
 
   const deleteRecord = async (id: number) => {
-    // 해당 전적의 티어 이력 조회 후 롤백
-    const { data: history } = await supabase.from('tier_history').select('*').eq('record_id', id)
-    if (history && history.length > 0) {
-      for (const h of history) {
-        // tier_before로 되돌리기 + dia_points 리셋
-        await supabase.from('summoners').update({ tier: h.tier_before, dia_points: 0 }).eq('name', h.name).eq('line', h.line)
+    // 삭제할 전적 정보 조회 (승/패 참가자)
+    const target = records.find(r => r.id === id)
+    if (target) {
+      const winners = target.winner === 'blue' ? target.blue : target.red
+      const losers = target.winner === 'blue' ? target.red : target.blue
+      // 승리자는 +1점 받았으니 -1점으로 되돌리고, 패배자는 -1점 받았으니 +1점으로 되돌림
+      for (const p of winners) {
+        const { data: row } = await supabase.from('summoners').select('score, tier').eq('name', p.name).eq('line', p.line).single()
+        if (row) {
+          const newScore = (row.score ?? getScoreByTier(row.tier)) - 1
+          await supabase.from('summoners').update({ score: newScore, tier: getTierByScore(newScore) }).eq('name', p.name).eq('line', p.line)
+        }
       }
-      await supabase.from('tier_history').delete().eq('record_id', id)
+      for (const p of losers) {
+        const { data: row } = await supabase.from('summoners').select('score, tier').eq('name', p.name).eq('line', p.line).single()
+        if (row) {
+          const newScore = (row.score ?? getScoreByTier(row.tier)) + 1
+          await supabase.from('summoners').update({ score: newScore, tier: getTierByScore(newScore) }).eq('name', p.name).eq('line', p.line)
+        }
+      }
     }
+    await supabase.from('tier_history').delete().eq('record_id', id)
     await supabase.from('records').delete().eq('id', id)
     setRecords(prev => prev.filter(r => r.id !== id))
     await fetchAll()
   }
 
   const clearRecords = async () => {
-    if (!confirm('전체 기록을 삭제할까요? 티어도 전부 롤백돼요!')) return
-    // 모든 tier_history 롤백
-    const { data: allHistory } = await supabase.from('tier_history').select('*').order('id', { ascending: false })
-    if (allHistory && allHistory.length > 0) {
-      // 최신 이력부터 역순으로 롤백
-      for (const h of allHistory) {
-        await supabase.from('summoners').update({ tier: h.tier_before, dia_points: 0 }).eq('name', h.name).eq('line', h.line)
+    if (!confirm('전체 기록을 삭제할까요? 티어(점수)도 전부 0판 상태로 롤백돼요!')) return
+    if (!checkPassword()) return
+    // 모든 전적을 역순으로 롤백
+    for (const r of records) {
+      const winners = r.winner === 'blue' ? r.blue : r.red
+      const losers = r.winner === 'blue' ? r.red : r.blue
+      for (const p of winners) {
+        const { data: row } = await supabase.from('summoners').select('score, tier').eq('name', p.name).eq('line', p.line).single()
+        if (row) {
+          const newScore = (row.score ?? getScoreByTier(row.tier)) - 1
+          await supabase.from('summoners').update({ score: newScore, tier: getTierByScore(newScore) }).eq('name', p.name).eq('line', p.line)
+        }
       }
-      await supabase.from('tier_history').delete().neq('id', 0)
+      for (const p of losers) {
+        const { data: row } = await supabase.from('summoners').select('score, tier').eq('name', p.name).eq('line', p.line).single()
+        if (row) {
+          const newScore = (row.score ?? getScoreByTier(row.tier)) + 1
+          await supabase.from('summoners').update({ score: newScore, tier: getTierByScore(newScore) }).eq('name', p.name).eq('line', p.line)
+        }
+      }
     }
+    await supabase.from('tier_history').delete().neq('id', 0)
     await supabase.from('records').delete().neq('id', 0)
     setRecords([])
     await fetchAll()
@@ -2183,13 +2231,13 @@ export default function Home() {
         <div className="empty">불러오는 중...</div>
       ) : (
         <>
-          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} countdown={countdown} setCountdown={setCountdown} setBalanceStartedAt={setBalanceStartedAt} />}
+          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} summonerScores={summonerScores} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} countdown={countdown} setCountdown={setCountdown} setBalanceStartedAt={setBalanceStartedAt} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'hall' && <HallOfFameTab records={records} />}
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} tierHistory={tierHistory} />}
 
-          {tab === 'summoners' && <SummonerTab summoners={summoners} onRefresh={fetchAll} />}
+          {tab === 'summoners' && <SummonerTab summoners={summoners} summonerScores={summonerScores} onRefresh={fetchAll} />}
         </>
       )}
     </div>
