@@ -330,19 +330,17 @@ function TeamTab({
     // 모스트1 = 가장 많이 한 라인 (등록 순서 = LINE_ORDER), 모스트2 = 두 번째
     setPlayers(prev => {
       const next = [...prev, { name: n, most1: lines[0], most2: lines.length >= 2 ? lines[1] : null }]
-      onSessionUpdate(next, null)
+      onSessionUpdate(next, result)
       return next
     })
-    setResult(null)
   }
 
   const removePlayer = (n: string) => {
     setPlayers(prev => {
       const next = prev.filter(p => p.name !== n)
-      onSessionUpdate(next, null)
+      onSessionUpdate(next, result)
       return next
     })
-    setResult(null)
   }
 
   const updateMost = (name: string, field: 'most1' | 'most2', value: string) => {
