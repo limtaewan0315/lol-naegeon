@@ -359,8 +359,9 @@ function TeamTab({
 
   // 팀 균형 맞추기: 각 플레이어마다 most1/most2 중 랜덤 라인 선택 후 밸런싱
   const balance = useCallback(async () => {
+    console.log('🟢 balance 함수 시작, players:', players.length)
     setError('')
-    if (players.length !== 10) { setError(`정확히 10명이 필요해요. (현재 ${players.length}명)`); return }
+    if (players.length !== 10) { setError(`정확히 10명이 필요해요. (현재 ${players.length}명)`); console.log('🔴 10명 아님, 중단'); return }
 
     // 각 플레이어의 가능한 라인 목록 생성
     const getOptions = (p: PlayerEntry): Line[] => {
@@ -443,15 +444,20 @@ function TeamTab({
       if (diff === 0) break
     }
 
+    console.log('🟡 5000번 반복 끝, best:', best, 'bestDiff:', bestDiff)
+
     if (best && Math.abs(best.s1 - best.s2) > 15) {
+      console.log('🔴 점수차 15 초과로 best를 null 처리:', Math.abs(best.s1 - best.s2))
       setError(`팀 편성이 불가능해요. 최선의 조합도 ${Math.abs(best.s1 - best.s2).toFixed(1)}점 차이가 나요. 참가자 구성을 변경해주세요.`)
       best = null
     }
     if (best) {
+      console.log('🟢 best 확정, 세션 저장 시도:', best)
       const startedAt = new Date().toISOString()
       // 세션 저장
-      const { error: saveErr } = await supabase.from('session').update({ balance_started_at: startedAt, pending_result: best }).eq('id', 1)
-      if (saveErr) console.error('세션 pending_result 저장 실패:', saveErr)
+      const { error: saveErr, data: saveData } = await supabase.from('session').update({ balance_started_at: startedAt, pending_result: best }).eq('id', 1).select()
+      if (saveErr) console.error('🔴 세션 pending_result 저장 실패:', saveErr)
+      else console.log('🟢 세션 저장 성공:', saveData)
       // 로컬 상태 즉시 업데이트 (실시간 구독 기다리지 않음)
       setPendingResult(best)
       setBalanceStartedAt(startedAt)
