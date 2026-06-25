@@ -452,7 +452,8 @@ function TeamTab({
     if (best) {
       const startedAt = new Date().toISOString()
       // 세션 저장
-      await supabase.from('session').update({ balance_started_at: startedAt, pending_result: best }).eq('id', 1)
+      const { error: saveErr } = await supabase.from('session').update({ balance_started_at: startedAt, pending_result: best }).eq('id', 1)
+      if (saveErr) console.error('세션 pending_result 저장 실패:', saveErr)
       // 로컬 상태 즉시 업데이트 (실시간 구독 기다리지 않음)
       setPendingResult(best)
       setBalanceStartedAt(startedAt)
@@ -2102,11 +2103,15 @@ export default function Home() {
   useEffect(() => {
     if (countdown === null || !pendingResult) return
     if (countdown <= 0) {
+      const resultToSave = pendingResult
       setCountdown(null)
       setBalanceStartedAt(null)
-      setTeamResult(pendingResult)
+      setTeamResult(resultToSave)
       setPendingResult(null)
-      supabase.from('session').update({ result: pendingResult, balance_started_at: null, pending_result: null }).eq('id', 1)
+      supabase.from('session').update({ result: resultToSave, balance_started_at: null, pending_result: null }).eq('id', 1)
+        .then(({ error }) => {
+          if (error) console.error('세션 result 저장 실패:', error)
+        })
       return
     }
     const timer = setTimeout(() => setCountdown(c => c !== null ? c - 1 : null), 1000)
