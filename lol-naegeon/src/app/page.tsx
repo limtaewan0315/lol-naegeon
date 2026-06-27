@@ -143,6 +143,7 @@ function SummonerTab({ summoners, summonerScores, onRefresh }: { summoners: Summ
   const [error, setError] = useState('')
   const [editing, setEditing] = useState<{ name: string; line: Line } | null>(null)
   const [editTier, setEditTier] = useState('')
+  const [editScore, setEditScore] = useState('')
   const [search, setSearch] = useState('')
 
   // 등록: name+line 복합키로 upsert
@@ -165,12 +166,16 @@ function SummonerTab({ summoners, summonerScores, onRefresh }: { summoners: Summ
   const startEdit = (n: string, l: Line) => {
     setEditing({ name: n, line: l })
     setEditTier(summoners[n][l])
+    setEditScore(String(summonerScores[n]?.[l] ?? getScoreByTier(summoners[n][l])))
   }
 
   const saveEdit = async () => {
     if (!editing) return
     if (!checkPassword()) return
-    await supabase.from('summoners').update({ tier: editTier, score: getScoreByTier(editTier) }).eq('name', editing.name).eq('line', editing.line)
+    const scoreNum = parseInt(editScore, 10)
+    if (isNaN(scoreNum)) { setError('점수는 숫자로 입력해주세요.'); return }
+    const newTier = getTierByScore(scoreNum)
+    await supabase.from('summoners').update({ tier: newTier, score: scoreNum }).eq('name', editing.name).eq('line', editing.line)
     setEditing(null)
     onRefresh()
   }
@@ -235,9 +240,15 @@ function SummonerTab({ summoners, summonerScores, onRefresh }: { summoners: Summ
                     <span className="badge b-line" style={{ width: 52, textAlign: 'center' }}>{l}</span>
                     {editing?.name === n && editing?.line === l ? (
                       <>
-                        <select value={editTier} onChange={e => setEditTier(e.target.value)} style={{ flex: 1 }}>
-                          {TIERS.map(t => <option key={t}>{t}</option>)}
-                        </select>
+                        <input
+                          type="number"
+                          value={editScore}
+                          onChange={e => setEditScore(e.target.value)}
+                          style={{ flex: '0 0 70px', textAlign: 'center' }}
+                        />
+                        <span className="badge b-tier" style={{ flex: 1, textAlign: 'center' }}>
+                          {isNaN(parseInt(editScore, 10)) ? '?' : getTierByScore(parseInt(editScore, 10))}
+                        </span>
                         <button className="btn btn-gold btn-sm" onClick={saveEdit}>저장</button>
                         <button className="btn btn-sm" onClick={() => setEditing(null)}>취소</button>
                       </>
@@ -1028,11 +1039,14 @@ function TeamTab({
             <div className="card-title" style={{ marginBottom: 8 }}>경기 결과 기록</div>
             <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 4 }}>어느 팀이 이겼나요?</div>
             <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>🏆 이긴 팀은 티어 UP, 진 팀은 티어 DOWN</div>
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-              <button className="btn btn-blue" onClick={() => recordWin('blue')} disabled={isRecording}>🔵 블루팀 승리</button>
-              <button className="btn btn-red" onClick={() => recordWin('red')} disabled={isRecording}>🔴 레드팀 승리</button>
-            </div>
-            {isRecording && <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text3)' }}>처리 중...</div>}
+            {!isRecording ? (
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                <button className="btn btn-blue" onClick={() => { if (!recordingRef.current) recordWin('blue') }}>🔵 블루팀 승리</button>
+                <button className="btn btn-red" onClick={() => { if (!recordingRef.current) recordWin('red') }}>🔴 레드팀 승리</button>
+              </div>
+            ) : (
+              <div style={{ marginTop: 4, fontSize: 13, color: 'var(--text3)' }}>⏳ 처리 중... (잠시만 기다려주세요)</div>
+            )}
           </div>
         </>
       )}
