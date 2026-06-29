@@ -419,6 +419,8 @@ function TeamTab({
     let best: BalanceResult | null = null
     let bestDiff = Infinity
     let bestLineDiff = Infinity
+    // 후보 조합들을 모아둠 (점수차이, 라인차이, 총합, 결과)
+    const candidates: { diff: number; lineDiff: number; total: number; result: BalanceResult }[] = []
 
     for (let i = 0; i < 5000; i++) {
       // 1) 각 플레이어 랜덤 라인 배정
@@ -483,23 +485,34 @@ function TeamTab({
         if (p1 && p2) lineDiff += Math.abs(p1.score - p2.score)
       }
 
-      // 1순위: 전체 점수 차이가 더 작으면 무조건 갱신
-      // 2순위: 전체 차이가 같으면, 라인별 점수 차이 합이 더 작은 쪽으로 갱신
+      const candidateResult: BalanceResult = {
+        team1: t1.map(p => ({ name: p.name, tier: summoners[p.name]?.[p.line] ?? '골드2', line: p.line, score: p.score })),
+        team2: t2.map(p => ({ name: p.name, tier: summoners[p.name]?.[p.line] ?? '골드2', line: p.line, score: p.score })),
+        s1, s2,
+      }
+      candidates.push({ diff, lineDiff, total: s1 + s2, result: candidateResult })
+
+      // 밸런스 최선 후보도 별도로 계속 추적 (10점 이하 후보가 전혀 없을 때 대비)
       const isBetter = diff < bestDiff || (diff === bestDiff && lineDiff < bestLineDiff)
       if (isBetter) {
         bestDiff = diff
         bestLineDiff = lineDiff
-        best = {
-          team1: t1.map(p => ({ name: p.name, tier: summoners[p.name]?.[p.line] ?? '골드2', line: p.line, score: p.score })),
-          team2: t2.map(p => ({ name: p.name, tier: summoners[p.name]?.[p.line] ?? '골드2', line: p.line, score: p.score })),
-          s1, s2,
-        }
+        best = candidateResult
       }
-      // 전체 차이가 0인 완벽한 케이스를 충분히 더 탐색해서 라인 매칭까지 최적화될 기회를 줌
-      if (diff === 0 && lineDiff === 0) break
     }
 
-    console.log('🟡 5000번 반복 끝, best:', best, 'bestDiff:', bestDiff, 'bestLineDiff:', bestLineDiff)
+    // 점수 차이 10점 이하인 후보들 중, 총합이 높은 상위 10개에서 랜덤 선택
+    // (10점 이하 후보가 없으면 밸런스가 가장 좋은 best로 그대로 진행)
+    const goodCandidates = candidates.filter(c => c.diff <= 10)
+    if (goodCandidates.length > 0) {
+      goodCandidates.sort((a, b) => b.total - a.total)
+      const top10 = goodCandidates.slice(0, 10)
+      const picked = top10[Math.floor(Math.random() * top10.length)]
+      best = picked.result
+      bestDiff = picked.diff
+    }
+
+    console.log('🟡 5000번 반복 끝, best:', best, 'bestDiff:', bestDiff, 'bestLineDiff:', bestLineDiff, '10점이하 후보수:', goodCandidates.length)
 
     if (best && Math.abs(best.s1 - best.s2) > 15) {
       console.log('🔴 점수차 15 초과로 best를 null 처리:', Math.abs(best.s1 - best.s2))
