@@ -1900,20 +1900,28 @@ function StatsTab({ records, summoners, summonerScores, tierHistory }: {
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
                               <select
                                 value={sameTeamLineA}
-                                onChange={e => setSameTeamLineA(e.target.value as Line | '')}
+                                onChange={e => {
+                                  const v = e.target.value as Line | ''
+                                  setSameTeamLineA(v)
+                                  if (v && v === sameTeamLineB) setSameTeamLineB('')
+                                }}
                                 style={{ flex: 1, fontSize: 12 }}
                               >
                                 <option value="">{selected} 라인 선택</option>
-                                {LINES.map(l => <option key={l} value={l}>{l}</option>)}
+                                {LINES.map(l => <option key={l} value={l} disabled={l === sameTeamLineB}>{l}{l === sameTeamLineB ? ' (같은 팀에선 불가)' : ''}</option>)}
                               </select>
                               <span style={{ fontSize: 11, color: 'var(--text3)', flexShrink: 0 }}>+</span>
                               <select
                                 value={sameTeamLineB}
-                                onChange={e => setSameTeamLineB(e.target.value as Line | '')}
+                                onChange={e => {
+                                  const v = e.target.value as Line | ''
+                                  setSameTeamLineB(v)
+                                  if (v && v === sameTeamLineA) setSameTeamLineA('')
+                                }}
                                 style={{ flex: 1, fontSize: 12 }}
                               >
                                 <option value="">{oppSelected} 라인 선택</option>
-                                {LINES.map(l => <option key={l} value={l}>{l}</option>)}
+                                {LINES.map(l => <option key={l} value={l} disabled={l === sameTeamLineA}>{l}{l === sameTeamLineA ? ' (같은 팀에선 불가)' : ''}</option>)}
                               </select>
                             </div>
                             {sameTeamLineA && sameTeamLineB && (() => {
