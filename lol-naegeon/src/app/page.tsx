@@ -315,7 +315,22 @@ function TeamTab({
   // 소환사의 등록된 라인 목록 (LINE_ORDER 순)
   const getSummonerLines = (n: string): Line[] => {
     if (!summoners[n]) return []
-    return (Object.keys(summoners[n]) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b])
+    const registeredLines = Object.keys(summoners[n]) as Line[]
+    // 각 라인별 판수 계산
+    const lineCounts: Record<string, number> = {}
+    registeredLines.forEach(l => { lineCounts[l] = 0 })
+    records.forEach(r => {
+      const inBlue = r.blue.find(p => p.name === n)
+      const inRed = r.red.find(p => p.name === n)
+      const p = inBlue ?? inRed
+      if (p && lineCounts[p.line] !== undefined) lineCounts[p.line]++
+    })
+    // 판수 내림차순, 동일 판수면 LINE_ORDER(탑>정글>미드>원딜>서폿) 순서로 정렬
+    return registeredLines.sort((a, b) => {
+      const diff = lineCounts[b] - lineCounts[a]
+      if (diff !== 0) return diff
+      return LINE_ORDER[a] - LINE_ORDER[b]
+    })
   }
 
   const handleNameChange = (val: string) => {
