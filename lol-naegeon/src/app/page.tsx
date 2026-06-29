@@ -1330,6 +1330,8 @@ function StatsTab({ records, summoners, summonerScores, tierHistory }: {
   const [oppSuggestions, setOppSuggestions] = useState<string[]>([])
   const [detailLineA, setDetailLineA] = useState<Line | ''>('')
   const [detailLineB, setDetailLineB] = useState<Line | ''>('')
+  const [sameTeamLineA, setSameTeamLineA] = useState<Line | ''>('')
+  const [sameTeamLineB, setSameTeamLineB] = useState<Line | ''>('')
 
   // 전체 플레이어 목록 (records 기반)
   const allNames = Array.from(new Set(records.flatMap(r => [...r.blue, ...r.red].map(p => p.name)))).sort()
@@ -1385,6 +1387,24 @@ function StatsTab({ records, summoners, summonerScores, tierHistory }: {
       else bWin++
     })
     return { total, aWin, bWin }
+  }
+
+  // 라인을 직접 선택해서 보는 같은 팀 디테일 조회 (추가 기능)
+  // nameA가 lineA 라인, nameB가 lineB 라인으로 같은 팀일 때의 전적
+  const getDetailedSameTeam = (nameA: string, lineA: Line, nameB: string, lineB: Line) => {
+    let total = 0, win = 0
+    records.forEach(r => {
+      const aEntry = [...r.blue, ...r.red].find(p => p.name === nameA && p.line === lineA)
+      const bEntry = [...r.blue, ...r.red].find(p => p.name === nameB && p.line === lineB)
+      if (!aEntry || !bEntry) return
+      const aInBlue = r.blue.includes(aEntry)
+      const bInBlue = r.blue.includes(bEntry)
+      if (aInBlue !== bInBlue) return // 다른 팀이면 "같은 팀" 대상 아님
+      total++
+      const teamWins = (aInBlue && r.winner === 'blue') || (!aInBlue && r.winner === 'red')
+      if (teamWins) win++
+    })
+    return { total, win, lose: total - win }
   }
 
   const getStats = (name: string) => {
@@ -1803,6 +1823,59 @@ function StatsTab({ records, summoners, summonerScores, tierHistory }: {
                               <div style={{ fontSize: 11, color: 'var(--text2)' }}>{m.bWin}승</div>
                             </div>
                           </div>
+
+                          {/* 라인 선택 디테일 조회 (추가 기능, 기존 합산 통계와 별개) */}
+                          <div style={{ marginTop: 10 }}>
+                            <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 8 }}>라인별 디테일 맞대결 (직접 라인 선택)</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                              <select
+                                value={detailLineA}
+                                onChange={e => setDetailLineA(e.target.value as Line | '')}
+                                style={{ flex: 1, fontSize: 12 }}
+                              >
+                                <option value="">{selected} 라인 선택</option>
+                                {LINES.map(l => <option key={l} value={l}>{l}</option>)}
+                              </select>
+                              <span style={{ fontSize: 11, color: 'var(--text3)', flexShrink: 0 }}>vs</span>
+                              <select
+                                value={detailLineB}
+                                onChange={e => setDetailLineB(e.target.value as Line | '')}
+                                style={{ flex: 1, fontSize: 12 }}
+                              >
+                                <option value="">{oppSelected} 라인 선택</option>
+                                {LINES.map(l => <option key={l} value={l}>{l}</option>)}
+                              </select>
+                            </div>
+                            {detailLineA && detailLineB && (() => {
+                              const dm = getDetailedMatchup(selected!, detailLineA, oppSelected, detailLineB)
+                              if (dm.total === 0) return <div className="empty">해당 라인 조합으로 맞붙은 적이 없어요.</div>
+                              const wr = Math.round(dm.aWin / dm.total * 100)
+                              return (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
+                                  <div style={{ flex: 1, textAlign: 'right' }}>
+                                    <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--blue)' }}>{selected}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text2)' }}>{detailLineA} · {dm.aWin}승</div>
+                                  </div>
+                                  <div style={{ textAlign: 'center', minWidth: 90 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 700 }}>
+                                      <span style={{ color: 'var(--blue)' }}>{dm.aWin}</span>
+                                      <span style={{ margin: '0 4px', color: 'var(--text3)' }}>-</span>
+                                      <span style={{ color: 'var(--red)' }}>{dm.bWin}</span>
+                                    </div>
+                                    <div style={{ fontSize: 10, color: 'var(--text3)' }}>{dm.total}판</div>
+                                    <div style={{ height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden', display: 'flex', marginTop: 4 }}>
+                                      <div style={{ height: '100%', width: `${wr}%`, background: 'var(--blue)' }} />
+                                      <div style={{ height: '100%', flex: 1, background: 'var(--red)' }} />
+                                    </div>
+                                  </div>
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--red)' }}>{oppSelected}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--text2)' }}>{detailLineB} · {dm.bWin}승</div>
+                                  </div>
+                                </div>
+                              )
+                            })()}
+                          </div>
                         </div>
                       )}
                       {m.sameTeam > 0 && (
@@ -1820,61 +1893,51 @@ function StatsTab({ records, summoners, summonerScores, tierHistory }: {
                               {Math.round(m.sameWin/m.sameTeam*100)}%
                             </span>
                           </div>
+
+                          {/* 같은 팀 라인 선택 디테일 조회 (추가 기능) */}
+                          <div style={{ marginTop: 10 }}>
+                            <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 8 }}>같은 팀 라인 조합 (직접 라인 선택)</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                              <select
+                                value={sameTeamLineA}
+                                onChange={e => setSameTeamLineA(e.target.value as Line | '')}
+                                style={{ flex: 1, fontSize: 12 }}
+                              >
+                                <option value="">{selected} 라인 선택</option>
+                                {LINES.map(l => <option key={l} value={l}>{l}</option>)}
+                              </select>
+                              <span style={{ fontSize: 11, color: 'var(--text3)', flexShrink: 0 }}>+</span>
+                              <select
+                                value={sameTeamLineB}
+                                onChange={e => setSameTeamLineB(e.target.value as Line | '')}
+                                style={{ flex: 1, fontSize: 12 }}
+                              >
+                                <option value="">{oppSelected} 라인 선택</option>
+                                {LINES.map(l => <option key={l} value={l}>{l}</option>)}
+                              </select>
+                            </div>
+                            {sameTeamLineA && sameTeamLineB && (() => {
+                              const stm = getDetailedSameTeam(selected!, sameTeamLineA, oppSelected, sameTeamLineB)
+                              if (stm.total === 0) return <div className="empty">해당 라인 조합으로 같은 팀이었던 적이 없어요.</div>
+                              const wr = Math.round(stm.win / stm.total * 100)
+                              return (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
+                                  <span style={{ fontSize: 12, flex: 1 }}>
+                                    <span style={{ color: 'var(--blue)', fontWeight: 600 }}>{selected}({sameTeamLineA})</span>
+                                    <span style={{ color: 'var(--text3)' }}> + </span>
+                                    <span style={{ color: 'var(--red)', fontWeight: 600 }}>{oppSelected}({sameTeamLineB})</span>
+                                  </span>
+                                  <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>{stm.win}승</span>
+                                  <span style={{ fontSize: 11, color: 'var(--red)', marginLeft: 6 }}>{stm.lose}패</span>
+                                  <span style={{ fontSize: 13, fontWeight: 700, marginLeft: 8, color: wr >= 50 ? 'var(--green)' : 'var(--red)' }}>
+                                    {wr}%
+                                  </span>
+                                </div>
+                              )
+                            })()}
+                          </div>
                         </div>
                       )}
-
-                      {/* 라인 선택 디테일 조회 (추가 기능, 기존 합산 통계와 별개) */}
-                      <div style={{ marginTop: 14, paddingTop: 12, borderTop: '0.5px solid var(--border)' }}>
-                        <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 8 }}>라인별 디테일 맞대결 (직접 라인 선택)</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-                          <select
-                            value={detailLineA}
-                            onChange={e => setDetailLineA(e.target.value as Line | '')}
-                            style={{ flex: 1, fontSize: 12 }}
-                          >
-                            <option value="">{selected} 라인 선택</option>
-                            {LINES.map(l => <option key={l} value={l}>{l}</option>)}
-                          </select>
-                          <span style={{ fontSize: 11, color: 'var(--text3)', flexShrink: 0 }}>vs</span>
-                          <select
-                            value={detailLineB}
-                            onChange={e => setDetailLineB(e.target.value as Line | '')}
-                            style={{ flex: 1, fontSize: 12 }}
-                          >
-                            <option value="">{oppSelected} 라인 선택</option>
-                            {LINES.map(l => <option key={l} value={l}>{l}</option>)}
-                          </select>
-                        </div>
-                        {detailLineA && detailLineB && (() => {
-                          const dm = getDetailedMatchup(selected!, detailLineA, oppSelected, detailLineB)
-                          if (dm.total === 0) return <div className="empty">해당 라인 조합으로 맞붙은 적이 없어요.</div>
-                          const wr = Math.round(dm.aWin / dm.total * 100)
-                          return (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
-                              <div style={{ flex: 1, textAlign: 'right' }}>
-                                <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--blue)' }}>{selected}</div>
-                                <div style={{ fontSize: 11, color: 'var(--text2)' }}>{detailLineA} · {dm.aWin}승</div>
-                              </div>
-                              <div style={{ textAlign: 'center', minWidth: 90 }}>
-                                <div style={{ fontSize: 13, fontWeight: 700 }}>
-                                  <span style={{ color: 'var(--blue)' }}>{dm.aWin}</span>
-                                  <span style={{ margin: '0 4px', color: 'var(--text3)' }}>-</span>
-                                  <span style={{ color: 'var(--red)' }}>{dm.bWin}</span>
-                                </div>
-                                <div style={{ fontSize: 10, color: 'var(--text3)' }}>{dm.total}판</div>
-                                <div style={{ height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden', display: 'flex', marginTop: 4 }}>
-                                  <div style={{ height: '100%', width: `${wr}%`, background: 'var(--blue)' }} />
-                                  <div style={{ height: '100%', flex: 1, background: 'var(--red)' }} />
-                                </div>
-                              </div>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--red)' }}>{oppSelected}</div>
-                                <div style={{ fontSize: 11, color: 'var(--text2)' }}>{detailLineB} · {dm.bWin}승</div>
-                              </div>
-                            </div>
-                          )
-                        })()}
-                      </div>
                     </div>
                   )
                 })()}
