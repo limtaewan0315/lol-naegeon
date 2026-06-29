@@ -823,24 +823,54 @@ function TeamTab({
         {players.length > 0 && (() => {
           const m1Counts: Record<string, number> = {}
           const m2Counts: Record<string, number> = {}
-          LINES.forEach(l => { m1Counts[l] = 0; m2Counts[l] = 0 })
+          const totalCounts: Record<string, number> = {}
+          LINES.forEach(l => { m1Counts[l] = 0; m2Counts[l] = 0; totalCounts[l] = 0 })
           players.forEach(p => {
-            if (p.most1 && p.most1 !== 'any') m1Counts[p.most1] = (m1Counts[p.most1] ?? 0) + 1
-            if (p.most2 && p.most2 !== 'any') m2Counts[p.most2] = (m2Counts[p.most2] ?? 0) + 1
+            if (p.most1 === 'any') {
+              // 상관없음이면 등록된 모든 라인에 카운트
+              getSummonerLines(p.name).forEach(l => { totalCounts[l] = (totalCounts[l] ?? 0) + 1 })
+            } else {
+              if (p.most1) { m1Counts[p.most1] = (m1Counts[p.most1] ?? 0) + 1; totalCounts[p.most1] = (totalCounts[p.most1] ?? 0) + 1 }
+              if (p.most2 && p.most2 !== 'any') { m2Counts[p.most2] = (m2Counts[p.most2] ?? 0) + 1; totalCounts[p.most2] = (totalCounts[p.most2] ?? 0) + 1 }
+            }
           })
+          const shortLines = LINES.filter(l => totalCounts[l] < 3)
           return (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
-              {LINES.map(l => (
-                <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', background: 'var(--bg3)', borderRadius: 3, border: '0.5px solid var(--border)', fontSize: 11 }}>
-                  <span style={{ color: 'var(--blue)' }}>{l}</span>
-                  <span style={{ color: 'var(--text2)' }}>M1:</span>
-                  <span style={{ color: m1Counts[l] >= 2 ? 'var(--green)' : 'var(--text3)', fontWeight: 600 }}>{m1Counts[l]}</span>
-                  <span style={{ color: 'var(--text3)', margin: '0 2px' }}>·</span>
-                  <span style={{ color: 'var(--text2)' }}>M2:</span>
-                  <span style={{ color: 'var(--text3)', fontWeight: 600 }}>{m2Counts[l]}</span>
+            <>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                {LINES.map(l => (
+                  <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', background: 'var(--bg3)', borderRadius: 3, border: '0.5px solid var(--border)', fontSize: 11 }}>
+                    <span style={{ color: 'var(--blue)' }}>{l}</span>
+                    <span style={{ color: 'var(--text2)' }}>M1:</span>
+                    <span style={{ color: m1Counts[l] >= 2 ? 'var(--green)' : 'var(--text3)', fontWeight: 600 }}>{m1Counts[l]}</span>
+                    <span style={{ color: 'var(--text3)', margin: '0 2px' }}>·</span>
+                    <span style={{ color: 'var(--text2)' }}>M2:</span>
+                    <span style={{ color: 'var(--text3)', fontWeight: 600 }}>{m2Counts[l]}</span>
+                  </div>
+                ))}
+              </div>
+              {shortLines.length > 0 && (
+                <div style={{ marginTop: 10, padding: '10px 12px', background: 'rgba(232,64,87,0.07)', border: '0.5px solid rgba(232,64,87,0.3)', borderRadius: 'var(--radius)' }}>
+                  <div style={{ fontSize: 12, color: 'var(--red)', fontWeight: 700, marginBottom: 6 }}>⚠️ 라인별 인원이 부족해요</div>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 8 }}>
+                    {shortLines.map(l => `${l}(${totalCounts[l]}명)`).join(', ')}을 선호(M1/M2/상관없음)하는 인원이 3명 미만이에요. 일부 참가자의 M1/M2를 조정해주세요!
+                  </div>
+                  <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                    {LINES.map(l => (
+                      <div key={l} style={{
+                        padding: '4px 8px', borderRadius: 3, fontSize: 10,
+                        background: totalCounts[l] < 3 ? 'rgba(232,64,87,0.1)' : 'rgba(62,207,142,0.08)',
+                        border: `0.5px solid ${totalCounts[l] < 3 ? 'rgba(232,64,87,0.4)' : 'rgba(62,207,142,0.25)'}`,
+                        color: totalCounts[l] < 3 ? 'var(--red)' : 'var(--green)',
+                        fontWeight: totalCounts[l] < 3 ? 700 : 400,
+                      }}>
+                        {l} {totalCounts[l]}명{totalCounts[l] < 3 ? ' ⚠️' : ''}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           )
         })()}
         <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
