@@ -394,17 +394,32 @@ function TeamTab({
       return summonerScores[name]?.[line] ?? getScoreByTier(tier)
     }
 
+    // 특정 소환사 라인 선호도 가중치 (UI에는 노출되지 않음)
+    const LINE_PREFERENCE: Record<string, Line> = {
+      '공민규': '정글',
+      '강재현': '탑',
+    }
+    const PREFERENCE_RATE = 0.95 // 선호 라인으로 배정될 확률
+
     let best: BalanceResult | null = null
     let bestDiff = Infinity
+    let bestLineDiff = Infinity
 
     for (let i = 0; i < 5000; i++) {
       // 1) 각 플레이어 랜덤 라인 배정
       const assigned = players.map(p => {
+        const preferredLine = LINE_PREFERENCE[p.name]
+        const allLines = getSummonerLines(p.name)
+        // 선호 라인이 있고 실제로 등록된 라인이면 높은 확률로 그 라인 배정
+        if (preferredLine && allLines.includes(preferredLine) && Math.random() < PREFERENCE_RATE) {
+          const tier = summoners[p.name]?.[preferredLine] ?? '골드2'
+          const score = getAdjustedScore(p.name, preferredLine, tier)
+          return { name: p.name, line: preferredLine, score }
+        }
         // M1/M2 가중치 적용 (M1: 70%, M2: 30%)
         let line: Line
         let isM2 = false
         if (p.most1 === 'any') {
-          const allLines = getSummonerLines(p.name)
           line = allLines[Math.floor(Math.random() * allLines.length)]
         } else if (!p.most2 || p.most2 === 'any') {
           line = p.most1 as Line
@@ -444,18 +459,32 @@ function TeamTab({
       const s1 = t1.reduce((a, p) => a + p.score, 0)
       const s2 = t2.reduce((a, p) => a + p.score, 0)
       const diff = Math.abs(s1 - s2)
-      if (diff < bestDiff) {
+
+      // 라인별 점수 차이 합계 (탑vs탑, 정글vs정글 등 같은 라인끼리 점수 격차)
+      let lineDiff = 0
+      for (const l of LINES) {
+        const p1 = t1.find(p => p.line === l)
+        const p2 = t2.find(p => p.line === l)
+        if (p1 && p2) lineDiff += Math.abs(p1.score - p2.score)
+      }
+
+      // 1순위: 전체 점수 차이가 더 작으면 무조건 갱신
+      // 2순위: 전체 차이가 같으면, 라인별 점수 차이 합이 더 작은 쪽으로 갱신
+      const isBetter = diff < bestDiff || (diff === bestDiff && lineDiff < bestLineDiff)
+      if (isBetter) {
         bestDiff = diff
+        bestLineDiff = lineDiff
         best = {
           team1: t1.map(p => ({ name: p.name, tier: summoners[p.name]?.[p.line] ?? '골드2', line: p.line, score: p.score })),
           team2: t2.map(p => ({ name: p.name, tier: summoners[p.name]?.[p.line] ?? '골드2', line: p.line, score: p.score })),
           s1, s2,
         }
       }
-      if (diff === 0) break
+      // 전체 차이가 0인 완벽한 케이스를 충분히 더 탐색해서 라인 매칭까지 최적화될 기회를 줌
+      if (diff === 0 && lineDiff === 0) break
     }
 
-    console.log('🟡 5000번 반복 끝, best:', best, 'bestDiff:', bestDiff)
+    console.log('🟡 5000번 반복 끝, best:', best, 'bestDiff:', bestDiff, 'bestLineDiff:', bestLineDiff)
 
     if (best && Math.abs(best.s1 - best.s2) > 15) {
       console.log('🔴 점수차 15 초과로 best를 null 처리:', Math.abs(best.s1 - best.s2))
