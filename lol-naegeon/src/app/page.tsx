@@ -424,6 +424,10 @@ function TeamTab({
     let best: BalanceResult | null = null
     let bestDiff = Infinity
     let bestLineDiff = Infinity
+    // 정상 후보가 전혀 없을 때만 쓰일 비상용 후보 (30점 제한 무시)
+    let fallback: BalanceResult | null = null
+    let fallbackDiff = Infinity
+    let fallbackLineDiff = Infinity
     // 후보 조합들을 모아둠 (점수차이, 라인차이, 총합, 결과)
     const candidates: { diff: number; lineDiff: number; total: number; result: BalanceResult }[] = []
 
@@ -492,10 +496,15 @@ function TeamTab({
 
       // 라인별 점수 차이 합계 (탑vs탑, 정글vs정글 등 같은 라인끼리 점수 격차)
       let lineDiff = 0
+      let maxLineDiff = 0
       for (const l of LINES) {
         const p1 = t1.find(p => p.line === l)
         const p2 = t2.find(p => p.line === l)
-        if (p1 && p2) lineDiff += Math.abs(p1.score - p2.score)
+        if (p1 && p2) {
+          const d = Math.abs(p1.score - p2.score)
+          lineDiff += d
+          if (d > maxLineDiff) maxLineDiff = d
+        }
       }
 
       const candidateResult: BalanceResult = {
@@ -503,6 +512,19 @@ function TeamTab({
         team2: t2.map(p => ({ name: p.name, tier: summoners[p.name]?.[p.line] ?? '골드2', line: p.line, score: p.score })),
         s1, s2,
       }
+
+      // 비상용: 30점 이상 차이나는 조합이라도 만일을 위해 최후의 보완 후보로 계속 추적
+      // (정상 조합이 하나도 안 나오는 극단적 상황에서 매칭 실패 자체를 막기 위함, 사용자에게 이유는 노출하지 않음)
+      const isBetterFallback = diff < fallbackDiff || (diff === fallbackDiff && lineDiff < fallbackLineDiff)
+      if (isBetterFallback) {
+        fallbackDiff = diff
+        fallbackLineDiff = lineDiff
+        fallback = candidateResult
+      }
+
+      // 한 라인이라도 30점 이상 차이나면 이 조합은 정상 후보에서 배제
+      if (maxLineDiff >= 30) continue
+
       candidates.push({ diff, lineDiff, total: s1 + s2, result: candidateResult })
 
       // 밸런스 최선 후보도 별도로 계속 추적 (10점 이하 후보가 전혀 없을 때 대비)
@@ -523,6 +545,12 @@ function TeamTab({
       const picked = top10[Math.floor(Math.random() * top10.length)]
       best = picked.result
       bestDiff = picked.diff
+    }
+
+    // 30점 제한 때문에 정상 후보가 단 하나도 없었던 경우, 조용히 비상용 후보로 대체 (사용자에게 이유 노출 안 함)
+    if (!best && fallback) {
+      best = fallback
+      bestDiff = fallbackDiff
     }
 
     console.log('🟡 5000번 반복 끝, best:', best, 'bestDiff:', bestDiff, 'bestLineDiff:', bestLineDiff, '10점이하 후보수:', goodCandidates.length)
