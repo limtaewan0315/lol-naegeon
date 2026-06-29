@@ -507,6 +507,11 @@ function TeamTab({
         }
       }
 
+      // 바텀(원딜+서포터) 합산 점수 차이 체크
+      const t1Bot = t1.filter(p => p.line === '원딜' || p.line === '서포터').reduce((a, p) => a + p.score, 0)
+      const t2Bot = t2.filter(p => p.line === '원딜' || p.line === '서포터').reduce((a, p) => a + p.score, 0)
+      const botDiff = Math.abs(t1Bot - t2Bot)
+
       const candidateResult: BalanceResult = {
         team1: t1.map(p => ({ name: p.name, tier: summoners[p.name]?.[p.line] ?? '골드2', line: p.line, score: p.score })),
         team2: t2.map(p => ({ name: p.name, tier: summoners[p.name]?.[p.line] ?? '골드2', line: p.line, score: p.score })),
@@ -522,8 +527,8 @@ function TeamTab({
         fallback = candidateResult
       }
 
-      // 한 라인이라도 30점 이상 차이나면 이 조합은 정상 후보에서 배제
-      if (maxLineDiff >= 30) continue
+      // 한 라인이라도 30점 이상 차이나거나, 바텀(원딜+서포터) 합산이 35점 이상 차이나면 정상 후보에서 배제
+      if (maxLineDiff >= 30 || botDiff >= 35) continue
 
       candidates.push({ diff, lineDiff, total: s1 + s2, result: candidateResult })
 
