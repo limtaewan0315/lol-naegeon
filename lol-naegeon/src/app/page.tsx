@@ -412,9 +412,14 @@ function TeamTab({
     // 특정 소환사 라인 선호도 가중치 (UI에는 노출되지 않음)
     const LINE_PREFERENCE: Record<string, Line> = {
       '공민규': '정글',
-      '강재현': '탑',
     }
     const PREFERENCE_RATE = 0.95 // 선호 라인으로 배정될 확률
+
+    // 강재현: 미드/원딜로 배정될 확률을 10%로 제한 (나머지는 정상 M1/M2 가중치)
+    const LINE_AVOID: Record<string, Line[]> = {
+      '강재현': ['미드', '원딜'],
+    }
+    const AVOID_RATE = 0.1 // 회피 대상 라인이 뽑혔을 때 실제로 그 라인으로 갈 확률
 
     let best: BalanceResult | null = null
     let bestDiff = Infinity
@@ -443,6 +448,14 @@ function TeamTab({
         } else {
           isM2 = Math.random() >= 0.7
           line = isM2 ? p.most2 as Line : p.most1 as Line
+        }
+        // 회피 라인이 뽑혔다면, 낮은 확률로만 실제 적용하고 그 외엔 다른 등록 라인 중 재선택
+        const avoidLines = LINE_AVOID[p.name]
+        if (avoidLines && avoidLines.includes(line) && Math.random() >= AVOID_RATE) {
+          const altLines = allLines.filter(l => !avoidLines.includes(l))
+          if (altLines.length > 0) {
+            line = altLines[Math.floor(Math.random() * altLines.length)]
+          }
         }
         const tier = summoners[p.name]?.[line] ?? '골드2'
         const score = getAdjustedScore(p.name, line, tier)
