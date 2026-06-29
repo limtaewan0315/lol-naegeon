@@ -846,6 +846,9 @@ function TeamTab({
                     <span style={{ color: 'var(--text3)', margin: '0 2px' }}>·</span>
                     <span style={{ color: 'var(--text2)' }}>M2:</span>
                     <span style={{ color: 'var(--text3)', fontWeight: 600 }}>{m2Counts[l]}</span>
+                    <span style={{ color: 'var(--text3)', margin: '0 2px' }}>·</span>
+                    <span style={{ color: 'var(--text2)' }}>총:</span>
+                    <span style={{ color: totalCounts[l] < 3 ? 'var(--red)' : 'var(--green)', fontWeight: 700 }}>{totalCounts[l]}</span>
                   </div>
                 ))}
               </div>
