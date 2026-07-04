@@ -288,6 +288,8 @@ function TeamTab({
   countdown,
   setCountdown,
   setBalanceStartedAt,
+  maxScoreDiff,
+  onMaxScoreDiffChange,
 }: {
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
   summoners: SummonerMap
@@ -305,6 +307,8 @@ function TeamTab({
   countdown: number | null
   setCountdown: React.Dispatch<React.SetStateAction<number | null>>
   setBalanceStartedAt: React.Dispatch<React.SetStateAction<string | null>>
+  maxScoreDiff: number
+  onMaxScoreDiffChange: (value: number) => void
 }) {
   const [name, setName] = useState('')
   const [error, setError] = useState('')
@@ -541,9 +545,9 @@ function TeamTab({
       }
     }
 
-    // 점수 차이 10점 이하인 후보들 중, 총합이 높은 상위 10개에서 랜덤 선택
-    // (10점 이하 후보가 없으면 밸런스가 가장 좋은 best로 그대로 진행)
-    const goodCandidates = candidates.filter(c => c.diff <= 10)
+    // 점수 차이가 설정된 최대 점수차 이하인 후보들 중, 총합이 높은 상위 10개에서 랜덤 선택
+    // (해당 조건의 후보가 없으면 밸런스가 가장 좋은 best로 그대로 진행)
+    const goodCandidates = candidates.filter(c => c.diff <= maxScoreDiff)
     if (goodCandidates.length > 0) {
       goodCandidates.sort((a, b) => b.total - a.total)
       const top10 = goodCandidates.slice(0, 10)
@@ -560,9 +564,9 @@ function TeamTab({
 
     console.log('🟡 5000번 반복 끝, best:', best, 'bestDiff:', bestDiff, 'bestLineDiff:', bestLineDiff, '10점이하 후보수:', goodCandidates.length)
 
-    if (best && Math.abs(best.s1 - best.s2) > 15) {
-      console.log('🔴 점수차 15 초과로 best를 null 처리:', Math.abs(best.s1 - best.s2))
-      setError(`팀 편성이 불가능해요. 최선의 조합도 ${Math.abs(best.s1 - best.s2).toFixed(1)}점 차이가 나요. 참가자 구성을 변경해주세요.`)
+    if (best && Math.abs(best.s1 - best.s2) > maxScoreDiff) {
+      console.log(`🔴 점수차 ${maxScoreDiff} 초과로 best를 null 처리:`, Math.abs(best.s1 - best.s2))
+      setError(`팀 편성이 불가능해요. 최선의 조합도 ${Math.abs(best.s1 - best.s2).toFixed(1)}점 차이가 나요. 참가자 구성을 변경하거나 최대 점수차 설정을 늘려주세요.`)
       best = null
     }
     if (best) {
@@ -616,7 +620,7 @@ function TeamTab({
       }
       return
     }
-  }, [players, summoners])
+  }, [players, summoners, maxScoreDiff])
 
 
 
@@ -922,9 +926,24 @@ function TeamTab({
             </>
           )
         })()}
-        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <button className="btn btn-gold" onClick={balance} disabled={!!result || countdown !== null}>팀 균형 맞추기</button>
           <button className="btn" onClick={() => { setPlayers([]); setResult(null); setPendingResult(null); setError(''); onSessionUpdate([], null); supabase.from('session').update({ balance_started_at: null, pending_result: null }).eq('id', 1) }}>초기화</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 4, fontSize: 12, color: 'var(--text2)' }}>
+            <span>최대 점수차</span>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={maxScoreDiff}
+              onChange={e => {
+                const v = parseInt(e.target.value, 10)
+                if (!isNaN(v) && v > 0) onMaxScoreDiffChange(v)
+              }}
+              style={{ width: 56, padding: '4px 6px', fontSize: 12, textAlign: 'center' }}
+            />
+            <span>점</span>
+          </div>
         </div>
       </div>
 
@@ -2315,6 +2334,8 @@ export default function Home() {
   const [balanceStartedAt, setBalanceStartedAt] = useState<string | null>(null)
   const [pendingResult, setPendingResult] = useState<BalanceResult | null>(null)
   const [countdown, setCountdown] = useState<number | null>(null)
+  // 팀 편성 시 허용할 전체 팀 점수 최대 차이 (팀편성 버튼 옆에서 설정, DB에 저장되어 유지됨)
+  const [maxScoreDiff, setMaxScoreDiff] = useState<number>(15)
 
   const fetchAll = useCallback(async () => {
     const [{ data: recs }, { data: sums }, { data: sess }, { data: hist }] = await Promise.all([
@@ -2342,6 +2363,7 @@ export default function Home() {
     if (sess) {
       setTeamPlayers(sess.players ?? [])
       setTeamResult(sess.result ?? null)
+      setMaxScoreDiff(sess.max_score_diff ?? 15)
       // 카운트다운 복원
       if (sess.balance_started_at && !sess.result) {
         const elapsed = Math.floor((Date.now() - new Date(sess.balance_started_at).getTime()) / 1000)
@@ -2377,6 +2399,7 @@ export default function Home() {
         if (sess) {
           setTeamPlayers(sess.players ?? [])
           setTeamResult(sess.result ?? null)
+          setMaxScoreDiff(sess.max_score_diff ?? 15)
           if (sess.balance_started_at && !sess.result) {
             const elapsed = Math.floor((Date.now() - new Date(sess.balance_started_at).getTime()) / 1000)
             const remaining = 10 - elapsed
@@ -2420,6 +2443,12 @@ export default function Home() {
   // 세션 업데이트 함수 (팀편성 관련만 업데이트, 투표 상태 유지)
   const updateSession = async (players: PlayerEntry[], result: BalanceResult | null) => {
     await supabase.from('session').update({ players, result, updated_at: new Date().toISOString() }).eq('id', 1)
+  }
+
+  // 최대 점수차 설정 업데이트 (DB에 저장되어 새로고침해도 유지됨)
+  const updateMaxScoreDiff = async (value: number) => {
+    setMaxScoreDiff(value)
+    await supabase.from('session').update({ max_score_diff: value }).eq('id', 1)
   }
 
 
@@ -2552,7 +2581,7 @@ export default function Home() {
         <div className="empty">불러오는 중...</div>
       ) : (
         <>
-          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} summonerScores={summonerScores} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} countdown={countdown} setCountdown={setCountdown} setBalanceStartedAt={setBalanceStartedAt} />}
+          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} summonerScores={summonerScores} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} countdown={countdown} setCountdown={setCountdown} setBalanceStartedAt={setBalanceStartedAt} maxScoreDiff={maxScoreDiff} onMaxScoreDiffChange={updateMaxScoreDiff} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'hall' && <HallOfFameTab records={records} />}
