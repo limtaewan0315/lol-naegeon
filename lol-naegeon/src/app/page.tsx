@@ -672,27 +672,42 @@ function TeamTab({
     const historyEntries: { record_id: number; name: string; line: string; tier_before: string; tier_after: string }[] = []
 
     // 포인트 기반 티어 시스템: 승리 +1점, 패배 -1점, 점수에 따라 티어명 자동 산출
+    // (예전엔 summoners 로컬 state에 없으면 그냥 건너뛰어서 가끔 점수가 안 바뀌는 버그가 있었음.
+    //  이제는 로컬 state가 비어있어도 매칭 당시 값(p.tier/p.score)을 fallback으로 써서 항상 갱신을 시도하고,
+    //  실제 DB 에러가 나면 명시적으로 알려줌)
+    const failedPlayers: string[] = []
     for (const p of winners) {
-      if (!summoners[p.name]?.[p.line]) continue
-      const currentTier = summoners[p.name][p.line]
-      const currentScore = summonerScores[p.name]?.[p.line] ?? getScoreByTier(currentTier)
+      const currentTier = summoners[p.name]?.[p.line] ?? p.tier
+      const currentScore = summonerScores[p.name]?.[p.line] ?? p.score
       const newScore = currentScore + 1
       const newTier = getTierByScore(newScore)
-      await supabase.from('summoners').update({ score: newScore, tier: newTier }).eq('name', p.name).eq('line', p.line)
+      const { error: updErr } = await supabase.from('summoners').update({ score: newScore, tier: newTier }).eq('name', p.name).eq('line', p.line)
+      if (updErr) {
+        console.error('🔴 점수 업데이트 실패:', p.name, p.line, updErr)
+        failedPlayers.push(`${p.name}(${p.line})`)
+        continue
+      }
       if (newTier !== currentTier && recId) {
         historyEntries.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
       }
     }
     for (const p of losers) {
-      if (!summoners[p.name]?.[p.line]) continue
-      const currentTier = summoners[p.name][p.line]
-      const currentScore = summonerScores[p.name]?.[p.line] ?? getScoreByTier(currentTier)
+      const currentTier = summoners[p.name]?.[p.line] ?? p.tier
+      const currentScore = summonerScores[p.name]?.[p.line] ?? p.score
       const newScore = currentScore - 1
       const newTier = getTierByScore(newScore)
-      await supabase.from('summoners').update({ score: newScore, tier: newTier }).eq('name', p.name).eq('line', p.line)
+      const { error: updErr } = await supabase.from('summoners').update({ score: newScore, tier: newTier }).eq('name', p.name).eq('line', p.line)
+      if (updErr) {
+        console.error('🔴 점수 업데이트 실패:', p.name, p.line, updErr)
+        failedPlayers.push(`${p.name}(${p.line})`)
+        continue
+      }
       if (newTier !== currentTier && recId) {
         historyEntries.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
       }
+    }
+    if (failedPlayers.length > 0) {
+      alert(`⚠️ 다음 참가자는 점수 갱신에 실패했어요: ${failedPlayers.join(', ')}\n소환사 관리 탭에서 점수를 직접 확인/수정해주세요.`)
     }
     if (historyEntries.length > 0) {
       await supabase.from('tier_history').insert(historyEntries)
