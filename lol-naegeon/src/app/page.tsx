@@ -960,6 +960,7 @@ function TeamTab({
               type="checkbox"
               checked={matchMode === 'line'}
               onChange={() => setMatchMode('line')}
+              style={{ width: 'auto' }}
             />
             라인밸런싱
           </label>
@@ -968,6 +969,7 @@ function TeamTab({
               type="checkbox"
               checked={matchMode === 'random'}
               onChange={() => setMatchMode('random')}
+              style={{ width: 'auto' }}
             />
             올랜덤
           </label>
