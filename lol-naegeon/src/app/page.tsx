@@ -313,6 +313,8 @@ function TeamTab({
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [suggestions, setSuggestions] = useState<string[]>([])
+  // 매칭 방식: 라인밸런싱(기존 방식) vs 올랜덤(라인 무시하고 팀 총점으로만 매칭)
+  const [matchMode, setMatchMode] = useState<'line' | 'random'>('line')
 
 
 
@@ -470,35 +472,44 @@ function TeamTab({
         return { name: p.name, line, score }
       })
 
-      // 2) 각 라인에 최소 2명이 있는지 체크
-      const lineCounts: Record<string, number> = {}
-      assigned.forEach(p => { lineCounts[p.line] = (lineCounts[p.line] ?? 0) + 1 })
-      const valid = LINES.every(l => (lineCounts[l] ?? 0) >= 2)
-      if (!valid) continue
+      // 2) 팀 나누기: 라인밸런싱 모드 vs 올랜덤 모드
+      let t1: typeof assigned = [], t2: typeof assigned = []
 
-      // 3) 라인별로 1명씩 각 팀에 배정
-      const t1: typeof assigned = [], t2: typeof assigned = []
-      let ok = true
-      for (const l of LINES) {
-        const pool = shuffle(assigned.filter(p => p.line === l))
-        if (pool.length < 2) { ok = false; break }
-        t1.push(pool[0]); t2.push(pool[1])
+      if (matchMode === 'line') {
+        // 각 라인에 최소 2명이 있는지 체크
+        const lineCounts: Record<string, number> = {}
+        assigned.forEach(p => { lineCounts[p.line] = (lineCounts[p.line] ?? 0) + 1 })
+        const valid = LINES.every(l => (lineCounts[l] ?? 0) >= 2)
+        if (!valid) continue
+
+        // 라인별로 1명씩 각 팀에 배정
+        let ok = true
+        for (const l of LINES) {
+          const pool = shuffle(assigned.filter(p => p.line === l))
+          if (pool.length < 2) { ok = false; break }
+          t1.push(pool[0]); t2.push(pool[1])
+        }
+        if (!ok) continue
+
+        // 남는 플레이어 배분
+        const used = new Set([...t1, ...t2])
+        const rest = shuffle(assigned.filter(p => !used.has(p)))
+        const half = Math.ceil(rest.length / 2)
+        rest.slice(0, half).forEach(p => t1.push(p))
+        rest.slice(half).forEach(p => t2.push(p))
+        if (t1.length !== 5 || t2.length !== 5) continue
+      } else {
+        // 올랜덤: 라인 페어링 상관없이 10명을 그냥 5:5로 랜덤 분할
+        const shuffled = shuffle(assigned)
+        t1 = shuffled.slice(0, 5)
+        t2 = shuffled.slice(5, 10)
       }
-      if (!ok) continue
-
-      // 4) 남는 플레이어 배분
-      const used = new Set([...t1, ...t2])
-      const rest = shuffle(assigned.filter(p => !used.has(p)))
-      const half = Math.ceil(rest.length / 2)
-      rest.slice(0, half).forEach(p => t1.push(p))
-      rest.slice(half).forEach(p => t2.push(p))
-      if (t1.length !== 5 || t2.length !== 5) continue
 
       const s1 = t1.reduce((a, p) => a + p.score, 0)
       const s2 = t2.reduce((a, p) => a + p.score, 0)
       const diff = Math.abs(s1 - s2)
 
-      // 라인별 점수 차이 합계 (탑vs탑, 정글vs정글 등 같은 라인끼리 점수 격차)
+      // 라인별 점수 차이 합계 (탑vs탑, 정글vs정글 등 같은 라인끼리 점수 격차) - 라인밸런싱 모드에서만 의미 있음
       let lineDiff = 0
       let maxLineDiff = 0
       for (const l of LINES) {
@@ -531,12 +542,13 @@ function TeamTab({
         fallback = candidateResult
       }
 
-      // 한 라인이라도 30점 이상 차이나거나, 바텀(원딜+서포터) 합산이 35점 이상 차이나면 정상 후보에서 배제
-      if (maxLineDiff >= 30 || botDiff >= 35) continue
+      // 라인밸런싱 모드에서만: 한 라인이라도 30점 이상 차이나거나, 바텀 합산이 35점 이상 차이나면 정상 후보에서 배제
+      // (올랜덤 모드는 라인 페어링 자체를 신경 쓰지 않는 방식이라 이 제약을 적용하지 않음)
+      if (matchMode === 'line' && (maxLineDiff >= 30 || botDiff >= 35)) continue
 
       candidates.push({ diff, lineDiff, total: s1 + s2, result: candidateResult })
 
-      // 밸런스 최선 후보도 별도로 계속 추적 (10점 이하 후보가 전혀 없을 때 대비)
+      // 밸런스 최선 후보도 별도로 계속 추적 (설정된 최대 점수차 이하 후보가 전혀 없을 때 대비)
       const isBetter = diff < bestDiff || (diff === bestDiff && lineDiff < bestLineDiff)
       if (isBetter) {
         bestDiff = diff
@@ -620,7 +632,7 @@ function TeamTab({
       }
       return
     }
-  }, [players, summoners, maxScoreDiff])
+  }, [players, summoners, maxScoreDiff, matchMode])
 
 
 
@@ -941,7 +953,26 @@ function TeamTab({
             </>
           )
         })()}
-        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 12, fontSize: 12, color: 'var(--text2)' }}>
+          <span>매칭 방식</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={matchMode === 'line'}
+              onChange={() => setMatchMode('line')}
+            />
+            라인밸런싱
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={matchMode === 'random'}
+              onChange={() => setMatchMode('random')}
+            />
+            올랜덤
+          </label>
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button className="btn btn-gold" onClick={balance} disabled={!!result || countdown !== null}>팀 균형 맞추기</button>
           <button className="btn" onClick={() => { setPlayers([]); setResult(null); setPendingResult(null); setError(''); onSessionUpdate([], null); supabase.from('session').update({ balance_started_at: null, pending_result: null }).eq('id', 1) }}>초기화</button>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 4, fontSize: 12, color: 'var(--text2)' }}>
