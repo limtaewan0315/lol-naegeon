@@ -167,11 +167,12 @@ const TIER_SCORES: Record<string, number> = {
 // ── 대회 탭 ──────────────────────────────────────────────
 const ROUND_PRESETS = ['승자조 1라운드', '승자조 2라운드', '승자조 준결승', '승자조 결승', '패자조 1라운드', '패자조 2라운드', '패자조 3라운드', '패자조 결승', '최종 결승']
 
+// 스코어는 게임/세트 승수라 음수가 될 이유가 없음 (음수 입력은 무시)
 const parseScoreInput = (s: string): number | null => {
   const t = s.trim()
   if (!t) return null
   const n = parseInt(t, 10)
-  return isNaN(n) ? null : n
+  return isNaN(n) || n < 0 ? null : n
 }
 
 function TournamentTab({ summoners }: { summoners: SummonerMap }) {
@@ -463,13 +464,13 @@ function TournamentTab({ summoners }: { summoners: SummonerMap }) {
                 <option value="">A팀 선택</option>
                 {teams.filter(t => !t.eliminated).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
-              <input type="number" value={scoreA} onChange={e => setScoreA(e.target.value)} placeholder="점수(선택)" style={{ width: 90 }} />
+              <input type="number" min={0} value={scoreA} onChange={e => setScoreA(e.target.value)} placeholder="점수(선택)" style={{ width: 90 }} />
               <span>vs</span>
               <select value={teamBId} onChange={e => { setTeamBId(e.target.value ? Number(e.target.value) : ''); setWinnerId('') }} style={{ flex: 1, minWidth: 120 }}>
                 <option value="">B팀 선택</option>
                 {teams.filter(t => !t.eliminated).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
-              <input type="number" value={scoreB} onChange={e => setScoreB(e.target.value)} placeholder="점수(선택)" style={{ width: 90 }} />
+              <input type="number" min={0} value={scoreB} onChange={e => setScoreB(e.target.value)} placeholder="점수(선택)" style={{ width: 90 }} />
             </div>
             {teamAId !== '' && teamBId !== '' && teamAId !== teamBId && (
               <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
@@ -482,19 +483,65 @@ function TournamentTab({ summoners }: { summoners: SummonerMap }) {
           </div>
 
           <div className="card">
-            <div className="card-title">경기 기록 리스트 ({matches.length})</div>
+            <div className="card-title">🌳 대진표 ({matches.length}경기)</div>
             {matches.length === 0 ? <div className="empty">아직 기록된 경기가 없어요</div> : (
-              [...matches].reverse().map(m => (
-                <div key={m.id} className="player-row" style={{ marginBottom: 6, flexWrap: 'wrap' }}>
-                  <span className="badge b-line" style={{ fontSize: 11 }}>{m.round_label}</span>
-                  <span style={{ flex: 1 }}>
-                    <b style={{ color: m.winner_id === m.team_a_id ? 'var(--gold)' : undefined }}>{teamNameOf(m.team_a_id)}</b>
-                    {m.score_a !== null && m.score_b !== null ? ` ${m.score_a} : ${m.score_b} ` : ' vs '}
-                    <b style={{ color: m.winner_id === m.team_b_id ? 'var(--gold)' : undefined }}>{teamNameOf(m.team_b_id)}</b>
-                  </span>
-                  <button className="btn btn-danger btn-sm" onClick={() => deleteMatch(m)}>삭제</button>
-                </div>
-              ))
+              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                {(['승자조', '패자조', '결승'] as const).map(col => {
+                  const colMatches = matches.filter(m => {
+                    if (col === '승자조') return m.round_label.startsWith('승자조')
+                    if (col === '패자조') return m.round_label.startsWith('패자조')
+                    return !m.round_label.startsWith('승자조') && !m.round_label.startsWith('패자조')
+                  })
+                  if (colMatches.length === 0) return null
+                  // 라운드명별로 그룹핑 (등록된 순서 유지)
+                  const order: string[] = []
+                  const groups: Record<string, TournamentMatch[]> = {}
+                  colMatches.forEach(m => {
+                    if (!groups[m.round_label]) { groups[m.round_label] = []; order.push(m.round_label) }
+                    groups[m.round_label].push(m)
+                  })
+                  return (
+                    <div key={col} style={{ flex: '1 1 240px', minWidth: 240 }}>
+                      <div style={{
+                        fontSize: 13, fontWeight: 700, marginBottom: 10,
+                        color: col === '승자조' ? 'var(--blue)' : col === '패자조' ? 'var(--red)' : 'var(--gold)'
+                      }}>
+                        {col === '승자조' ? '🔵 승자조' : col === '패자조' ? '🔴 패자조' : '🏆 결승'}
+                      </div>
+                      {order.map(label => (
+                        <div key={label} style={{ marginBottom: 14, paddingLeft: 10, borderLeft: '2px solid var(--border2)' }}>
+                          <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 6 }}>{label}</div>
+                          {groups[label].map(m => (
+                            <div key={m.id} style={{
+                              background: 'var(--bg3)', border: '0.5px solid var(--border)',
+                              borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 6, fontSize: 12
+                            }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                                <span style={{
+                                  fontWeight: m.winner_id === m.team_a_id ? 700 : 400,
+                                  color: m.winner_id === m.team_a_id ? 'var(--gold)' : 'var(--text)'
+                                }}>
+                                  {teamNameOf(m.team_a_id)}{m.score_a !== null ? ` ${m.score_a}` : ''}
+                                </span>
+                                <span style={{ color: 'var(--text3)', fontSize: 10 }}>vs</span>
+                                <span style={{
+                                  fontWeight: m.winner_id === m.team_b_id ? 700 : 400,
+                                  color: m.winner_id === m.team_b_id ? 'var(--gold)' : 'var(--text)'
+                                }}>
+                                  {m.score_b !== null ? `${m.score_b} ` : ''}{teamNameOf(m.team_b_id)}
+                                </span>
+                              </div>
+                              <div style={{ textAlign: 'right', marginTop: 4 }}>
+                                <button className="btn btn-danger btn-sm" style={{ fontSize: 10, padding: '2px 6px' }} onClick={() => deleteMatch(m)}>삭제</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })}
+              </div>
             )}
           </div>
         </>
