@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { TIERS, LINES, getScore, getTierByScore, getScoreByTier, shuffle } from '@/lib/data'
 import type { Line } from '@/lib/data'
@@ -2359,6 +2359,61 @@ function RankingTab({ records }: { records: GameRecord[] }) {
 }
 
 // ── 메인 페이지 ──────────────────────────────────────────────
+// ── 장기 미참여자 위젯 (우측 하단 고정) ──────────────────────────────────────────────
+function InactivePlayersWidget({ summoners, records }: { summoners: SummonerMap; records: GameRecord[] }) {
+  const [collapsed, setCollapsed] = useState(false)
+
+  const list = useMemo(() => {
+    const names = Object.keys(summoners)
+    const now = Date.now()
+    const result: { name: string; days: number }[] = []
+    for (const name of names) {
+      // records는 최신순 정렬되어 있음 (마지막 통계 탭과 동일한 방식)
+      const lastGame = records.find(r => r.blue.some(p => p.name === name) || r.red.some(p => p.name === name))
+      if (!lastGame) continue // 기록이 아예 없는 사람은 제외 (미참여가 아니라 기록 자체가 없는 것)
+      const lastDate = new Date((lastGame as any).created_at ?? '')
+      if (isNaN(lastDate.getTime())) continue
+      const days = Math.floor((now - lastDate.getTime()) / (1000 * 60 * 60 * 24))
+      if (days >= 14) result.push({ name, days })
+    }
+    return result.sort((a, b) => b.days - a.days)
+  }, [summoners, records])
+
+  if (list.length === 0) return null
+
+  return (
+    <div style={{
+      position: 'fixed', right: 12, bottom: 12, zIndex: 50,
+      background: 'rgba(6,17,31,0.92)', border: '0.5px solid var(--border2)',
+      borderRadius: 'var(--radius)', padding: '8px 10px',
+      fontSize: 11, minWidth: 120, maxWidth: 170,
+      boxShadow: '0 2px 10px rgba(0,0,0,0.4)',
+    }}>
+      <div
+        onClick={() => setCollapsed(v => !v)}
+        style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          cursor: 'pointer', fontWeight: 700, color: 'var(--text2)',
+          marginBottom: collapsed ? 0 : 6,
+        }}
+      >
+        <span>😴 장기 미참여자 ({list.length})</span>
+        <span style={{ marginLeft: 6 }}>{collapsed ? '▸' : '▾'}</span>
+      </div>
+      {!collapsed && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 160, overflowY: 'auto' }}>
+          {list.map(p => (
+            <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, color: 'var(--text3)' }}>
+              <span>{p.name}</span>
+              <span>{p.days}일</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Home() {
   const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'hall' | 'stats' | 'summoners'>('team')
   const [records, setRecords] = useState<GameRecord[]>([])
@@ -2629,6 +2684,8 @@ export default function Home() {
           {tab === 'summoners' && <SummonerTab summoners={summoners} summonerScores={summonerScores} onRefresh={fetchAll} />}
         </>
       )}
+
+      {!loading && <InactivePlayersWidget summoners={summoners} records={records} />}
     </div>
   )
 }
