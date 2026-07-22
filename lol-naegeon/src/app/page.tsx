@@ -313,7 +313,7 @@ function TeamTab({
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [suggestions, setSuggestions] = useState<string[]>([])
-  // 매칭 방식: 라인밸런싱(기존 방식) vs 올랜덤(라인 무시하고 팀 총점으로만 매칭)
+  // 매칭 방식: 라인밸런싱(기존 방식) vs 올랜덤(맞라인/바텀 점수차 제약 없이 팀 총점으로만 매칭, 라인당 1명은 동일하게 지킴)
   const [matchMode, setMatchMode] = useState<'line' | 'random'>('line')
 
 
@@ -472,38 +472,29 @@ function TeamTab({
         return { name: p.name, line, score }
       })
 
-      // 2) 팀 나누기: 라인밸런싱 모드 vs 올랜덤 모드
+      // 2) 팀 나누기: 라인당 1명씩 배정 (두 모드 공통 — 롤은 라인 중복이 있으면 안 되니까)
+      // 각 라인에 최소 2명이 있는지 체크
+      const lineCounts: Record<string, number> = {}
+      assigned.forEach(p => { lineCounts[p.line] = (lineCounts[p.line] ?? 0) + 1 })
+      const valid = LINES.every(l => (lineCounts[l] ?? 0) >= 2)
+      if (!valid) continue
+
       let t1: typeof assigned = [], t2: typeof assigned = []
-
-      if (matchMode === 'line') {
-        // 각 라인에 최소 2명이 있는지 체크
-        const lineCounts: Record<string, number> = {}
-        assigned.forEach(p => { lineCounts[p.line] = (lineCounts[p.line] ?? 0) + 1 })
-        const valid = LINES.every(l => (lineCounts[l] ?? 0) >= 2)
-        if (!valid) continue
-
-        // 라인별로 1명씩 각 팀에 배정
-        let ok = true
-        for (const l of LINES) {
-          const pool = shuffle(assigned.filter(p => p.line === l))
-          if (pool.length < 2) { ok = false; break }
-          t1.push(pool[0]); t2.push(pool[1])
-        }
-        if (!ok) continue
-
-        // 남는 플레이어 배분
-        const used = new Set([...t1, ...t2])
-        const rest = shuffle(assigned.filter(p => !used.has(p)))
-        const half = Math.ceil(rest.length / 2)
-        rest.slice(0, half).forEach(p => t1.push(p))
-        rest.slice(half).forEach(p => t2.push(p))
-        if (t1.length !== 5 || t2.length !== 5) continue
-      } else {
-        // 올랜덤: 라인 페어링 상관없이 10명을 그냥 5:5로 랜덤 분할
-        const shuffled = shuffle(assigned)
-        t1 = shuffled.slice(0, 5)
-        t2 = shuffled.slice(5, 10)
+      let ok = true
+      for (const l of LINES) {
+        const pool = shuffle(assigned.filter(p => p.line === l))
+        if (pool.length < 2) { ok = false; break }
+        t1.push(pool[0]); t2.push(pool[1])
       }
+      if (!ok) continue
+
+      // 남는 플레이어 배분
+      const used = new Set([...t1, ...t2])
+      const rest = shuffle(assigned.filter(p => !used.has(p)))
+      const half = Math.ceil(rest.length / 2)
+      rest.slice(0, half).forEach(p => t1.push(p))
+      rest.slice(half).forEach(p => t2.push(p))
+      if (t1.length !== 5 || t2.length !== 5) continue
 
       const s1 = t1.reduce((a, p) => a + p.score, 0)
       const s2 = t2.reduce((a, p) => a + p.score, 0)
@@ -543,7 +534,7 @@ function TeamTab({
       }
 
       // 라인밸런싱 모드에서만: 한 라인이라도 30점 이상 차이나거나, 바텀 합산이 35점 이상 차이나면 정상 후보에서 배제
-      // (올랜덤 모드는 라인 페어링 자체를 신경 쓰지 않는 방식이라 이 제약을 적용하지 않음)
+      // (올랜덤 모드는 라인당 1명 배정은 동일하게 지키되, 맞라인/바텀 점수차 제약만 없이 팀 총점 위주로 고름)
       if (matchMode === 'line' && (maxLineDiff >= 30 || botDiff >= 35)) continue
 
       candidates.push({ diff, lineDiff, total: s1 + s2, result: candidateResult })
