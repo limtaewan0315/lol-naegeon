@@ -395,6 +395,13 @@ function TeamTab({
     setError('')
     if (players.length !== 10) { setError(`정확히 10명이 필요해요. (현재 ${players.length}명)`); console.log('🔴 10명 아님, 중단'); return }
 
+    // 참가자 추가 이후 소환사 관리에서 라인이 전부 삭제된 사람이 있는지 미리 확인
+    const noLineNames = players.filter(p => getSummonerLines(p.name).length === 0).map(p => p.name)
+    if (noLineNames.length > 0) {
+      setError(`다음 참가자는 등록된 라인이 없어요: ${noLineNames.join(', ')} — 소환사 관리 탭에서 라인을 다시 등록하거나 참가자 목록에서 빼주세요.`)
+      return
+    }
+
     // 각 플레이어의 가능한 라인 목록 생성
     const getOptions = (p: PlayerEntry): Line[] => {
       const allLines = getSummonerLines(p.name)
@@ -415,18 +422,6 @@ function TeamTab({
       return summonerScores[name]?.[line] ?? getScoreByTier(tier)
     }
 
-    // 특정 소환사 라인 선호도 가중치 (UI에는 노출되지 않음)
-    const LINE_PREFERENCE: Record<string, Line> = {
-      '공민규': '정글',
-    }
-    const PREFERENCE_RATE = 0.95 // 선호 라인으로 배정될 확률
-
-    // 강재현: 미드/원딜로 배정될 확률을 10%로 제한 (나머지는 정상 M1/M2 가중치)
-    const LINE_AVOID: Record<string, Line[]> = {
-      '강재현': ['미드', '원딜'],
-    }
-    const AVOID_RATE = 0.1 // 회피 대상 라인이 뽑혔을 때 실제로 그 라인으로 갈 확률
-
     let best: BalanceResult | null = null
     let bestDiff = Infinity
     let bestLineDiff = Infinity
@@ -440,32 +435,22 @@ function TeamTab({
     for (let i = 0; i < 5000; i++) {
       // 1) 각 플레이어 랜덤 라인 배정
       const assigned = players.map(p => {
-        const preferredLine = LINE_PREFERENCE[p.name]
         const allLines = getSummonerLines(p.name)
-        // 선호 라인이 있고 실제로 등록된 라인이면 높은 확률로 그 라인 배정
-        if (preferredLine && allLines.includes(preferredLine) && Math.random() < PREFERENCE_RATE) {
-          const tier = summoners[p.name]?.[preferredLine] ?? '골드2'
-          const score = getAdjustedScore(p.name, preferredLine, tier)
-          return { name: p.name, line: preferredLine, score }
-        }
         // M1/M2 가중치 적용 (M1: 70%, M2: 30%)
+        // most1/most2는 참가자 추가 시점의 스냅샷이라, 그 후 소환사 관리에서 라인이 삭제/변경되면
+        // 더는 유효하지 않을 수 있음 → 매칭 직전에 실제 등록 라인인지 재검증
+        const most1Valid = p.most1 === 'any' || allLines.includes(p.most1 as Line)
+        const most2Valid = !!p.most2 && p.most2 !== 'any' && allLines.includes(p.most2 as Line)
         let line: Line
         let isM2 = false
-        if (p.most1 === 'any') {
+        if (p.most1 === 'any' || !most1Valid) {
+          // most1이 'any'거나 더 이상 유효하지 않으면, 현재 등록된 라인 중에서 랜덤 배정
           line = allLines[Math.floor(Math.random() * allLines.length)]
-        } else if (!p.most2 || p.most2 === 'any') {
+        } else if (!most2Valid) {
           line = p.most1 as Line
         } else {
           isM2 = Math.random() >= 0.7
           line = isM2 ? p.most2 as Line : p.most1 as Line
-        }
-        // 회피 라인이 뽑혔다면, 낮은 확률로만 실제 적용하고 그 외엔 다른 등록 라인 중 재선택
-        const avoidLines = LINE_AVOID[p.name]
-        if (avoidLines && avoidLines.includes(line) && Math.random() >= AVOID_RATE) {
-          const altLines = allLines.filter(l => !avoidLines.includes(l))
-          if (altLines.length > 0) {
-            line = altLines[Math.floor(Math.random() * altLines.length)]
-          }
         }
         const tier = summoners[p.name]?.[line] ?? '골드2'
         const score = getAdjustedScore(p.name, line, tier)
