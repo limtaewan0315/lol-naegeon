@@ -3915,8 +3915,8 @@ function RoomsTab({
       const isBetterFallback = diff < fallbackDiff || (diff === fallbackDiff && lineDiff < fallbackLineDiff)
       if (isBetterFallback) { fallbackDiff = diff; fallbackLineDiff = lineDiff; fallback = candidateResult }
 
-      // 라인밸런싱 모드에서만 라인별/바텀 격차 필터링 적용. 올랜덤 모드는 팀 총점 차이만 봄.
-      if (myRoom.match_mode === 'line' && (maxLineDiff >= 30 || botDiff >= 35)) continue
+      // 라인밸런싱 모드에서만 라인별/바텀 격차 필터링 적용. 올랜덤 모드는 팀 총점 차이만 봄. (값이 없으면 라인밸런싱 기본)
+      if ((myRoom.match_mode ?? 'line') === 'line' && (maxLineDiff >= 30 || botDiff >= 35)) continue
 
       candidates.push({ diff, lineDiff, total: s1 + s2, result: candidateResult })
 
@@ -4233,7 +4233,7 @@ function RoomsTab({
                     <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
                       <input
                         type="radio"
-                        checked={myRoom.match_mode === 'line'}
+                        checked={(myRoom.match_mode ?? 'line') === 'line'}
                         onChange={() => updateMatchMode('line')}
                         style={{ width: 'auto', flexShrink: 0 }}
                       />
@@ -4251,7 +4251,7 @@ function RoomsTab({
                   </div>
                 ) : (
                   <span style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                    {myRoom.match_mode === 'line' ? '라인밸런싱' : '올랜덤'}
+                    {(myRoom.match_mode ?? 'line') === 'line' ? '라인밸런싱' : '올랜덤'}
                   </span>
                 )}
               </div>
