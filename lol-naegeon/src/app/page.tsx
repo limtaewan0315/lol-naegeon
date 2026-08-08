@@ -2527,29 +2527,37 @@ function RankingTab({ records }: { records: GameRecord[] }) {
   )
 }
 
-// ── 휴대폰번호 유틸 ──────────────────────────────────────────────
-// 010/011/016/017/018/019로 시작하는 국내 휴대폰번호 (하이픈 유무 무관)
-const PHONE_REGEX = /^01[016789]\d{7,8}$/
-
-function normalizePhone(raw: string): string {
-  return raw.replace(/[^0-9]/g, '')
+// ── 계정 ID 유틸 ──────────────────────────────────────────────
+function isValidEmail(raw: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw.trim())
 }
 
-function isValidPhone(raw: string): boolean {
-  return PHONE_REGEX.test(normalizePhone(raw))
+// 문자열 → UTF-8 hex (Postgres의 encode(convert_to(text,'UTF8'),'hex')와 동일한 결과)
+// 레거시 소환사 계정(아이디=소환사명)을 이메일 형식의 local-part로 안전하게 변환하기 위함
+function toHexUtf8(str: string): string {
+  return Array.from(new TextEncoder().encode(str))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
 }
 
-// Supabase Auth는 이메일 기반이라, 휴대폰번호를 내부 전용 가짜 이메일로 변환해서 사용
-// (실제 전화번호는 user_metadata.phone에 그대로 저장됨)
-function phoneToInternalEmail(phone: string): string {
-  return `${normalizePhone(phone)}@phone.lol-naegeon.local`
+// 소환사명(레거시 계정 아이디) → 내부 전용 가짜 이메일
+// SQL 마이그레이션(create-legacy-accounts.js)에서 생성한 계정과 동일한 규칙(hex 인코딩)을 사용해야 함
+function nameToInternalEmail(name: string): string {
+  return `${toHexUtf8(name.trim())}@name.lol-naegeon.local`
+}
+
+// 로그인 화면의 "아이디" 입력값 → 실제 인증에 쓸 이메일
+// 진짜 이메일 형식이면 그대로 사용(신규 가입자), 아니면(소환사명 등) 레거시 계정 방식으로 변환
+function idToInternalEmail(id: string): string {
+  const trimmed = id.trim()
+  return isValidEmail(trimmed) ? trimmed : nameToInternalEmail(trimmed)
 }
 
 // ── 개인정보 수집·이용 동의 상세 내용 ──────────────────────────────────
 const PRIVACY_CONSENT_DETAIL = `[개인정보 수집·이용 동의]
 
 1. 수집하는 개인정보 항목
-   - 필수 항목: 휴대폰번호, 비밀번호(암호화 저장)
+   - 필수 항목: 이메일, 비밀번호(암호화 저장), 소환사명(인게임 닉네임)
 
 2. 개인정보의 수집 및 이용 목적
    - 회원 식별 및 로그인 인증
@@ -2569,7 +2577,10 @@ const PRIVACY_CONSENT_DETAIL = `[개인정보 수집·이용 동의]
 
 // ── 로그인 페이지 ──────────────────────────────────────────────
 function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
-  const [phone, setPhone] = useState('')
+  // 로그인: 실제 이메일(신규 계정) 또는 소환사명(레거시 계정) 둘 다 "아이디"로 입력 가능
+  const [loginId, setLoginId] = useState('')
+  // 회원가입: 실제 이메일 필수
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isSignUp, setIsSignUp] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -2577,16 +2588,64 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   const [agreed, setAgreed] = useState(false)
   const [showConsentDetail, setShowConsentDetail] = useState(false)
 
-  const handleAuth = async () => {
-    if (!phone || !password) {
-      setError('휴대폰번호와 비밀번호를 입력해주세요')
+  // 회원가입 시 소환사 연결 정보
+  const [summonerName, setSummonerName] = useState('')
+  const [m1Line, setM1Line] = useState<Line>(LINES[0])
+  const [m1Tier, setM1Tier] = useState('골드2')
+  const [m2Line, setM2Line] = useState<Line>(LINES[1])
+  const [m2Tier, setM2Tier] = useState('골드2')
+
+  const resetSignUpFields = () => {
+    setEmail('')
+    setPassword('')
+    setAgreed(false)
+    setShowConsentDetail(false)
+    setSummonerName('')
+    setM1Line(LINES[0])
+    setM1Tier('골드2')
+    setM2Line(LINES[1])
+    setM2Tier('골드2')
+  }
+
+  const handleLogin = async () => {
+    if (!loginId || !password) {
+      setError('아이디와 비밀번호를 입력해주세요')
       return
     }
-    if (!isValidPhone(phone)) {
-      setError('올바른 휴대폰번호 형식이 아니에요 (예: 01012345678)')
+    setLoading(true)
+    setError('')
+    try {
+      const { error: loginErr } = await supabase.auth.signInWithPassword({
+        email: idToInternalEmail(loginId),
+        password,
+      })
+      if (loginErr) {
+        setError('로그인 실패: 아이디 또는 비밀번호를 확인해주세요')
+        setLoading(false)
+        return
+      }
+      onAuthSuccess()
+    } catch (err) {
+      setError('오류 발생: ' + (err as any).message)
+    }
+    setLoading(false)
+  }
+
+  const handleSignUp = async () => {
+    const n = summonerName.trim()
+    if (!email || !password || !n) {
+      setError('이메일, 비밀번호, 소환사명을 모두 입력해주세요')
       return
     }
-    if (isSignUp && !agreed) {
+    if (!isValidEmail(email)) {
+      setError('올바른 이메일 형식이 아니에요')
+      return
+    }
+    if (m1Line === m2Line) {
+      setError('M1 라인과 M2 라인은 서로 다르게 선택해주세요')
+      return
+    }
+    if (!agreed) {
       setError('개인정보 수집·이용에 동의해야 회원가입이 가능해요')
       return
     }
@@ -2594,87 +2653,153 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
     setLoading(true)
     setError('')
 
-    const internalEmail = phoneToInternalEmail(phone)
-    const normalizedPhone = normalizePhone(phone)
-
     try {
-      if (isSignUp) {
-        // 회원가입
-        const { error: signUpErr } = await supabase.auth.signUp({
-          email: internalEmail,
-          password,
-          options: {
-            data: {
-              phone: normalizedPhone,
-              privacy_consent: true,
-              privacy_consent_at: new Date().toISOString(),
-            },
-          },
-        })
-        if (signUpErr) {
-          setError('회원가입 실패: ' + signUpErr.message)
-          setLoading(false)
-          return
-        }
-        setError('') // 성공 시 에러 메시지 제거
-        alert('회원가입 성공! 이제 로그인해주세요.')
-        setIsSignUp(false)
-        setPhone('')
-        setPassword('')
-        setAgreed(false)
-      } else {
-        // 로그인
-        const { error: loginErr } = await supabase.auth.signInWithPassword({
-          email: internalEmail,
-          password,
-        })
-        if (loginErr) {
-          setError('로그인 실패: 휴대폰번호 또는 비밀번호를 확인해주세요')
-          setLoading(false)
-          return
-        }
-        // 로그인 성공
-        onAuthSuccess()
+      // 소환사명이 이미 다른 계정에 연결돼 있는지 확인
+      // (member_accounts는 RLS로 보호돼 있어 직접 조회 대신 안전한 함수를 호출)
+      const { data: isTaken, error: checkErr } = await supabase.rpc('is_summoner_name_taken', { p_name: n })
+      if (checkErr) {
+        setError('중복 확인 중 오류가 발생했어요: ' + checkErr.message)
+        setLoading(false)
+        return
       }
+      if (isTaken) {
+        setError('이미 계정이 연결된 소환사명이에요. 관리자에게 문의해주세요.')
+        setLoading(false)
+        return
+      }
+
+      // 1) 계정 생성 (실제 이메일 기반 — Supabase 이메일 확인이 켜져 있으면 인증 메일이 실제로 발송됨)
+      const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: {
+            summoner_name: n,
+            privacy_consent: true,
+            privacy_consent_at: new Date().toISOString(),
+          },
+        },
+      })
+      if (signUpErr || !signUpData.user) {
+        setError('회원가입 실패: ' + (signUpErr?.message ?? '알 수 없는 오류'))
+        setLoading(false)
+        return
+      }
+
+      // 2) 소환사 M1/M2 라인·티어 저장 (기존 소환사 관리 테이블과 동일한 name+line 복합키 upsert)
+      await supabase.from('summoners').upsert(
+        [
+          { name: n, line: m1Line, tier: m1Tier, score: getScoreByTier(m1Tier) },
+          { name: n, line: m2Line, tier: m2Tier, score: getScoreByTier(m2Tier) },
+        ],
+        { onConflict: 'name,line' }
+      )
+
+      // 3) 계정 ↔ 소환사 1:1 연결
+      const { error: linkErr } = await supabase.from('member_accounts').insert({
+        summoner_name: n,
+        user_id: signUpData.user.id,
+        email: email.trim(),
+      })
+      if (linkErr) {
+        setError('계정은 생성됐지만 소환사 연결에 실패했어요: ' + linkErr.message)
+        setLoading(false)
+        return
+      }
+
+      alert(
+        signUpData.session
+          ? '회원가입 성공! 이제 로그인해주세요.'
+          : '회원가입 성공! 입력한 이메일로 인증 메일이 발송됐어요. 메일함을 확인하고 인증을 완료한 뒤 로그인해주세요.'
+      )
+      setIsSignUp(false)
+      resetSignUpFields()
     } catch (err) {
       setError('오류 발생: ' + (err as any).message)
     }
     setLoading(false)
   }
 
+  const handleAuth = () => (isSignUp ? handleSignUp() : handleLogin())
+
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center',
-      background: 'linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%)'
+      background: 'linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%)', padding: 20
     }}>
       <div style={{
         background: 'var(--bg2)', border: '0.5px solid var(--border2)', borderRadius: 'var(--radius)',
-        padding: 30, width: 320, boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
+        padding: 30, width: 340, boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
       }}>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 6 }}>⚔ 내전 매니저</div>
           <div style={{ fontSize: 12, color: 'var(--text3)' }}>로그인 / 회원가입</div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
-          <input
-            type="tel"
-            placeholder="휴대폰번호 (예: 01012345678)"
-            value={phone}
-            onChange={e => setPhone(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAuth()}
-            disabled={loading}
-            maxLength={13}
-          />
-          <input
-            type="password"
-            placeholder="비밀번호"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleAuth()}
-            disabled={loading}
-          />
-        </div>
+        {!isSignUp && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
+            <input
+              type="text"
+              placeholder="아이디 (이메일 또는 소환사명)"
+              value={loginId}
+              onChange={e => setLoginId(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAuth()}
+              disabled={loading}
+            />
+            <input
+              type="password"
+              placeholder="비밀번호"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAuth()}
+              disabled={loading}
+            />
+          </div>
+        )}
+
+        {isSignUp && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
+            <input
+              type="email"
+              placeholder="이메일"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              disabled={loading}
+            />
+            <input
+              type="password"
+              placeholder="비밀번호"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              disabled={loading}
+            />
+            <input
+              type="text"
+              placeholder="소환사명 (인게임 이름)"
+              value={summonerName}
+              onChange={e => setSummonerName(e.target.value)}
+              disabled={loading}
+            />
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <select value={m1Line} onChange={e => setM1Line(e.target.value as Line)} disabled={loading} style={{ flex: 1 }}>
+                {LINES.map(l => <option key={l} value={l}>M1: {l}</option>)}
+              </select>
+              <select value={m1Tier} onChange={e => setM1Tier(e.target.value)} disabled={loading} style={{ flex: 1 }}>
+                {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <select value={m2Line} onChange={e => setM2Line(e.target.value as Line)} disabled={loading} style={{ flex: 1 }}>
+                {LINES.filter(l => l !== m1Line).map(l => <option key={l} value={l}>M2: {l}</option>)}
+              </select>
+              <select value={m2Tier} onChange={e => setM2Tier(e.target.value)} disabled={loading} style={{ flex: 1 }}>
+                {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+        )}
 
         {isSignUp && (
           <div style={{ marginBottom: 16 }}>
@@ -2726,7 +2851,7 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
 
         <button
           className="btn"
-          onClick={() => { setIsSignUp(!isSignUp); setError(''); setAgreed(false); setShowConsentDetail(false) }}
+          onClick={() => { setIsSignUp(!isSignUp); setError(''); resetSignUpFields() }}
           disabled={loading}
           style={{ width: '100%', fontSize: 12 }}
         >
