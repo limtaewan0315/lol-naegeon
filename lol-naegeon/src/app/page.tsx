@@ -2527,8 +2527,112 @@ function RankingTab({ records }: { records: GameRecord[] }) {
   )
 }
 
+// ── 로그인 페이지 ──────────────────────────────────────────────
+function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [isSignUp, setIsSignUp] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleAuth = async () => {
+    if (!email || !password) {
+      setError('이메일과 비밀번호를 입력해주세요')
+      return
+    }
+    setLoading(true)
+    setError('')
+
+    try {
+      if (isSignUp) {
+        // 회원가입
+        const { error: signUpErr } = await supabase.auth.signUp({ email, password })
+        if (signUpErr) {
+          setError('회원가입 실패: ' + signUpErr.message)
+          setLoading(false)
+          return
+        }
+        setError('') // 성공 시 에러 메시지 제거
+        alert('회원가입 성공! 이제 로그인해주세요.')
+        setIsSignUp(false)
+        setEmail('')
+        setPassword('')
+      } else {
+        // 로그인
+        const { error: loginErr } = await supabase.auth.signInWithPassword({ email, password })
+        if (loginErr) {
+          setError('로그인 실패: ' + loginErr.message)
+          setLoading(false)
+          return
+        }
+        // 로그인 성공
+        onAuthSuccess()
+      }
+    } catch (err) {
+      setError('오류 발생: ' + (err as any).message)
+    }
+    setLoading(false)
+  }
+
+  return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center',
+      background: 'linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%)'
+    }}>
+      <div style={{
+        background: 'var(--bg2)', border: '0.5px solid var(--border2)', borderRadius: 'var(--radius)',
+        padding: 30, width: 320, boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
+      }}>
+        <div style={{ textAlign: 'center', marginBottom: 24 }}>
+          <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 6 }}>⚔ 내전 매니저</div>
+          <div style={{ fontSize: 12, color: 'var(--text3)' }}>로그인 / 회원가입</div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
+          <input
+            type="email"
+            placeholder="이메일"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleAuth()}
+            disabled={loading}
+          />
+          <input
+            type="password"
+            placeholder="비밀번호"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleAuth()}
+            disabled={loading}
+          />
+        </div>
+
+        {error && <div className="error" style={{ marginBottom: 12 }}>{error}</div>}
+
+        <button
+          className="btn btn-gold"
+          onClick={handleAuth}
+          disabled={loading}
+          style={{ width: '100%', marginBottom: 12 }}
+        >
+          {loading ? '처리 중...' : isSignUp ? '회원가입' : '로그인'}
+        </button>
+
+        <button
+          className="btn"
+          onClick={() => { setIsSignUp(!isSignUp); setError('') }}
+          disabled={loading}
+          style={{ width: '100%', fontSize: 12 }}
+        >
+          {isSignUp ? '로그인 페이지로' : '회원가입 페이지로'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── 메인 페이지 ──────────────────────────────────────────────
-export default function Home() {
+function MainApp() {
   const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'hall' | 'stats' | 'summoners' | 'admin'>('team')
   const [isAdmin, setIsAdmin] = useState(false)
   const [records, setRecords] = useState<GameRecord[]>([])
@@ -2788,6 +2892,16 @@ export default function Home() {
         >
           {isAdmin ? '🔓 로그아웃' : '🔒 관리자'}
         </button>
+        <button
+          className="btn btn-sm"
+          onClick={async () => {
+            await supabase.auth.signOut()
+            window.location.reload()
+          }}
+          style={{ fontSize: 11, whiteSpace: 'nowrap' }}
+        >
+          로그아웃
+        </button>
       </div>
 
       <div className="tabs" style={{ background: 'rgba(6,17,31,0.75)' }}>
@@ -2819,4 +2933,44 @@ export default function Home() {
       )}
     </div>
   )
+}
+
+// ── Auth 래퍼 (로그인 체크) ──────────────────────────────────────────────
+export default function App() {
+  const [user, setUser] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    // 초기 auth 상태 체크
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      setUser(session?.user ?? null)
+      setLoading(false)
+    }
+    checkAuth()
+
+    // auth 상태 변화 리스닝
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setUser(session?.user ?? null)
+    })
+
+    return () => subscription?.unsubscribe()
+  }, [])
+
+  if (loading) {
+    return (
+      <div style={{
+        minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center',
+        background: 'linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%)'
+      }}>
+        <div style={{ color: 'var(--text2)' }}>로드 중...</div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return <LoginPage onAuthSuccess={() => {}} />
+  }
+
+  return <MainApp />
 }
