@@ -512,8 +512,15 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
     setFieldError('')
 
     // 현재 비밀번호 확인 (재로그인 시도로 검증)
+    // 이메일을 추측해서 재구성하지 않고, 지금 로그인된 세션의 실제 이메일을 그대로 사용
+    const { data: { user: currentUser } } = await supabase.auth.getUser()
+    if (!currentUser?.email) {
+      setFieldError('계정 정보를 확인할 수 없어요. 새로고침 후 다시 시도해주세요.')
+      setSaving(false)
+      return
+    }
     const { error: verifyErr } = await supabase.auth.signInWithPassword({
-      email: idToInternalEmail(displayId),
+      email: currentUser.email,
       password: oldPassword,
     })
     if (verifyErr) {
@@ -4289,8 +4296,15 @@ function ForcePasswordChangeGate({ onDone }: { onDone: () => void }) {
     setSaving(true)
     setError('')
 
+    // 이메일을 추측해서 재구성하지 않고, 지금 로그인된 세션의 실제 이메일을 그대로 사용
+    const { data: { user: currentUser } } = await supabase.auth.getUser()
+    if (!currentUser?.email) {
+      setError('계정 정보를 확인할 수 없어요. 새로고침 후 다시 시도해주세요.')
+      setSaving(false)
+      return
+    }
     const { error: verifyErr } = await supabase.auth.signInWithPassword({
-      email: idToInternalEmail(displayId),
+      email: currentUser.email,
       password: oldPassword,
     })
     if (verifyErr) {
