@@ -371,6 +371,12 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
 
+  // 롤 계정(소환사이름#태그) — 기존 계정은 비어있을 수 있고, 직접 입력해서 채울 수 있음
+  const [riotId, setRiotId] = useState('')
+  const [riotIdInput, setRiotIdInput] = useState('')
+  const [savingRiotId, setSavingRiotId] = useState(false)
+  const [riotIdError, setRiotIdError] = useState('')
+
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -380,14 +386,18 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
 
       let name: string | null = null
       if (user) {
-        // 본인 계정에 연결된 소환사명만 조회 (RLS로 보호되어 다른 사람 데이터는 조회 불가)
+        // 본인 계정에 연결된 소환사명/롤계정만 조회 (RLS로 보호되어 다른 사람 데이터는 조회 불가)
         const { data } = await supabase
           .from('member_accounts')
-          .select('summoner_name')
+          .select('summoner_name, riot_id')
           .eq('user_id', user.id)
           .maybeSingle()
         name = data?.summoner_name ?? null
-        if (!cancelled) setSummonerName(name)
+        if (!cancelled) {
+          setSummonerName(name)
+          setRiotId(data?.riot_id ?? '')
+          setRiotIdInput(data?.riot_id ?? '')
+        }
       }
 
       // 로그인 아이디로 실제 사용하는 값만 표시 (내부 시스템용 가짜 이메일은 노출하지 않음)
@@ -399,6 +409,28 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
     })()
     return () => { cancelled = true }
   }, [])
+
+  const saveRiotId = async () => {
+    const trimmed = riotIdInput.trim()
+    if (!trimmed.includes('#')) {
+      setRiotIdError('롤 계정을 "소환사이름#태그" 형식으로 입력해주세요 (예: 임태완#KR1)')
+      return
+    }
+    setSavingRiotId(true)
+    setRiotIdError('')
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) { setSavingRiotId(false); return }
+    const { error: err } = await supabase
+      .from('member_accounts')
+      .update({ riot_id: trimmed })
+      .eq('user_id', user.id)
+    if (err) {
+      setRiotIdError('저장 실패: ' + err.message)
+    } else {
+      setRiotId(trimmed)
+    }
+    setSavingRiotId(false)
+  }
 
   const myLines: Partial<Record<Line, string>> = summonerName ? (summoners[summonerName] ?? {}) : {}
   const registeredLines = (Object.keys(myLines) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b])
@@ -445,6 +477,30 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
           <div><span style={{ color: 'var(--text3)' }}>아이디: </span>{displayId}</div>
           <div><span style={{ color: 'var(--text3)' }}>비밀번호: </span><span style={{ color: 'var(--text3)' }}>보안을 위해 표시되지 않아요</span></div>
           <div><span style={{ color: 'var(--text3)' }}>소환사명: </span><strong>{summonerName}</strong></div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ color: 'var(--text3)' }}>롤 계정: </span>
+            {riotId ? <strong>{riotId}</strong> : <span style={{ color: 'var(--text3)' }}>미입력</span>}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+            <input
+              type="text"
+              placeholder="소환사이름#태그 (예: 임태완#KR1)"
+              value={riotIdInput}
+              onChange={e => setRiotIdInput(e.target.value)}
+              disabled={savingRiotId}
+              style={{ flex: 1 }}
+            />
+            <button
+              className="btn btn-gold"
+              onClick={saveRiotId}
+              disabled={savingRiotId || !riotIdInput.trim() || riotIdInput.trim() === riotId}
+              style={{ width: 'auto', flexShrink: 0, whiteSpace: 'nowrap', padding: '0 16px' }}
+            >
+              {savingRiotId ? '저장 중...' : riotId ? '수정' : '저장'}
+            </button>
+          </div>
+          {riotIdError && <div className="error" style={{ marginTop: 2 }}>{riotIdError}</div>}
         </div>
       </div>
 
@@ -2553,7 +2609,7 @@ function idToInternalEmail(id: string): string {
 const PRIVACY_CONSENT_DETAIL = `[개인정보 수집·이용 동의]
 
 1. 수집하는 개인정보 항목
-   - 필수 항목: 휴대폰번호, 비밀번호(암호화 저장), 소환사명(인게임 닉네임)
+   - 필수 항목: 휴대폰번호, 비밀번호(암호화 저장), 소환사명(인게임 닉네임), 롤 계정(소환사이름#태그)
 
 2. 개인정보의 수집 및 이용 목적
    - 회원 식별 및 로그인 인증
@@ -2586,6 +2642,7 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
 
   // 가입 신청 시 소환사 연결 정보
   const [summonerName, setSummonerName] = useState('')
+  const [riotId, setRiotId] = useState('')
   const [m1Line, setM1Line] = useState<Line>(LINES[0])
   const [m1Tier, setM1Tier] = useState('골드2')
   const [m2Line, setM2Line] = useState<Line>(LINES[1])
@@ -2597,6 +2654,7 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
     setAgreed(false)
     setShowConsentDetail(false)
     setSummonerName('')
+    setRiotId('')
     setM1Line(LINES[0])
     setM1Tier('골드2')
     setM2Line(LINES[1])
@@ -2629,12 +2687,17 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
 
   const handleSignUp = async () => {
     const n = summonerName.trim()
-    if (!phone || !password || !n) {
-      setError('휴대폰번호, 비밀번호, 소환사명을 모두 입력해주세요')
+    const r = riotId.trim()
+    if (!phone || !password || !n || !r) {
+      setError('휴대폰번호, 비밀번호, 소환사명, 롤 계정을 모두 입력해주세요')
       return
     }
     if (!isValidPhone(phone)) {
       setError('올바른 휴대폰번호 형식이 아니에요 (예: 01012345678)')
+      return
+    }
+    if (!r.includes('#')) {
+      setError('롤 계정을 "소환사이름#태그" 형식으로 입력해주세요 (예: 임태완#KR1)')
       return
     }
     if (m1Line === m2Line) {
@@ -2650,11 +2713,12 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
     setError('')
 
     try {
-      // 계정을 바로 만들지 않고 "가입 신청"으로 접수 — 관리자 승인 후 실제 계정이 생성됨
+      // 계정을 바로 만들지 않고 "가입 신청"으로 접수 — 관리자가 롤 계정을 확인하고 승인 후 실제 계정이 생성됨
       const { error: reqErr } = await supabase.rpc('submit_signup_request', {
         p_phone: normalizePhone(phone),
         p_password: password,
         p_summoner_name: n,
+        p_riot_id: r,
         p_m1_line: m1Line,
         p_m1_tier: m1Tier,
         p_m2_line: m2Line,
@@ -2734,6 +2798,13 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
               placeholder="소환사명 (인게임 이름)"
               value={summonerName}
               onChange={e => setSummonerName(e.target.value)}
+              disabled={loading}
+            />
+            <input
+              type="text"
+              placeholder="롤 계정 (예: 임태완#KR1)"
+              value={riotId}
+              onChange={e => setRiotId(e.target.value)}
               disabled={loading}
             />
 
@@ -2823,6 +2894,7 @@ type SignupRequest = {
   id: number
   phone: string
   summoner_name: string
+  riot_id: string | null
   m1_line: string
   m1_tier: string
   m2_line: string
@@ -2836,6 +2908,8 @@ function SignupRequestsTab({ onRefresh }: { onRefresh: () => void }) {
   const [loading, setLoading] = useState(true)
   const [processingId, setProcessingId] = useState<number | null>(null)
   const [error, setError] = useState('')
+  // 승인 전 관리자가 실제 티어를 확인하고 조정할 수 있도록, 요청별로 편집 중인 티어값을 따로 보관
+  const [editedTiers, setEditedTiers] = useState<Record<number, { m1: string; m2: string }>>({})
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -2843,8 +2917,18 @@ function SignupRequestsTab({ onRefresh }: { onRefresh: () => void }) {
       .from('signup_requests')
       .select('*')
       .order('created_at', { ascending: false })
-    if (err) setError(err.message)
-    else setRequests(data ?? [])
+    if (err) {
+      setError(err.message)
+    } else {
+      setRequests(data ?? [])
+      setEditedTiers(prev => {
+        const next = { ...prev }
+        for (const r of data ?? []) {
+          if (!next[r.id]) next[r.id] = { m1: r.m1_tier, m2: r.m2_tier }
+        }
+        return next
+      })
+    }
     setLoading(false)
   }, [])
 
@@ -2853,7 +2937,12 @@ function SignupRequestsTab({ onRefresh }: { onRefresh: () => void }) {
   const approve = async (id: number) => {
     setProcessingId(id)
     setError('')
-    const { error: err } = await supabase.rpc('approve_signup_request', { p_request_id: id })
+    const edited = editedTiers[id]
+    const { error: err } = await supabase.rpc('approve_signup_request', {
+      p_request_id: id,
+      p_m1_tier: edited?.m1 ?? null,
+      p_m2_tier: edited?.m2 ?? null,
+    })
     if (err) setError('승인 실패: ' + err.message)
     else { await load(); onRefresh() }
     setProcessingId(null)
@@ -2882,28 +2971,58 @@ function SignupRequestsTab({ onRefresh }: { onRefresh: () => void }) {
         ) : pending.length === 0 ? (
           <div className="empty">대기 중인 가입 신청이 없어요</div>
         ) : (
-          pending.map(r => (
-            <div key={r.id} style={{
-              marginBottom: 10, padding: '10px 12px', background: 'var(--bg3)',
-              borderRadius: 'var(--radius)', border: '0.5px solid var(--border)'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <span style={{ fontWeight: 700 }}>{r.summoner_name}</span>
-                <span style={{ fontSize: 11, color: 'var(--text3)' }}>{r.phone}</span>
+          pending.map(r => {
+            const edited = editedTiers[r.id] ?? { m1: r.m1_tier, m2: r.m2_tier }
+            return (
+              <div key={r.id} style={{
+                marginBottom: 10, padding: '10px 12px', background: 'var(--bg3)',
+                borderRadius: 'var(--radius)', border: '0.5px solid var(--border)'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                  <span style={{ fontWeight: 700 }}>{r.summoner_name}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text3)' }}>{r.phone}</span>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>
+                  롤 계정: <strong>{r.riot_id || '미입력'}</strong>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, width: 70, color: 'var(--text3)' }}>M1: {r.m1_line}</span>
+                    <select
+                      value={edited.m1}
+                      onChange={e => setEditedTiers(prev => ({ ...prev, [r.id]: { ...edited, m1: e.target.value } }))}
+                      style={{ flex: 1, fontSize: 12 }}
+                    >
+                      {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 12, width: 70, color: 'var(--text3)' }}>M2: {r.m2_line}</span>
+                    <select
+                      value={edited.m2}
+                      onChange={e => setEditedTiers(prev => ({ ...prev, [r.id]: { ...edited, m2: e.target.value } }))}
+                      style={{ flex: 1, fontSize: 12 }}
+                    >
+                      {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>
+                  💡 실제 롤 계정을 확인해서 티어가 다르면 위에서 직접 수정한 뒤 승인해줘
+                </div>
+
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button className="btn btn-gold btn-sm" disabled={processingId === r.id} onClick={() => approve(r.id)}>
+                    {processingId === r.id ? '처리 중...' : '승인'}
+                  </button>
+                  <button className="btn btn-danger btn-sm" disabled={processingId === r.id} onClick={() => reject(r.id)}>
+                    거절
+                  </button>
+                </div>
               </div>
-              <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>
-                M1: {r.m1_line} ({r.m1_tier}) &nbsp;·&nbsp; M2: {r.m2_line} ({r.m2_tier})
-              </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button className="btn btn-gold btn-sm" disabled={processingId === r.id} onClick={() => approve(r.id)}>
-                  {processingId === r.id ? '처리 중...' : '승인'}
-                </button>
-                <button className="btn btn-danger btn-sm" disabled={processingId === r.id} onClick={() => reject(r.id)}>
-                  거절
-                </button>
-              </div>
-            </div>
-          ))
+            )
+          })
         )}
       </div>
 
