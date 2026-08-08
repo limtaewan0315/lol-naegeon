@@ -363,136 +363,120 @@ function AdminTab({ summoners, summonerScores, records }: { summoners: SummonerM
 }
 
 // ── 소환사 관리 탭 ──────────────────────────────────────────────
-function SummonerTab({ summoners, summonerScores, onRefresh }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; onRefresh: () => void }) {
-  const [name, setName] = useState('')
-  const [tier, setTier] = useState('골드2')
-  const [line, setLine] = useState<Line>('탑')
+function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; onRefresh: () => void }) {
+  const [loading, setLoading] = useState(true)
+  const [email, setEmail] = useState('')
+  const [summonerName, setSummonerName] = useState<string | null>(null)
+  const [selectedNewLine, setSelectedNewLine] = useState<Line | ''>('')
+  const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
-  const [editing, setEditing] = useState<{ name: string; line: Line } | null>(null)
-  const [editTier, setEditTier] = useState('')
-  const [editScore, setEditScore] = useState('')
-  const [search, setSearch] = useState('')
 
-  // 등록: name+line 복합키로 upsert
-  const add = async () => {
-    const n = name.trim()
-    if (!n) { setError('소환사명을 입력해주세요.'); return }
-    if (!checkPassword()) return
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      const { data: { user } } = await supabase.auth.getUser()
+      if (cancelled) return
+      setEmail(user?.email ?? user?.user_metadata?.phone ?? '')
+
+      if (user) {
+        // 본인 계정에 연결된 소환사명만 조회 (RLS로 보호되어 다른 사람 데이터는 조회 불가)
+        const { data } = await supabase
+          .from('member_accounts')
+          .select('summoner_name')
+          .eq('user_id', user.id)
+          .maybeSingle()
+        if (!cancelled) setSummonerName(data?.summoner_name ?? null)
+      }
+      if (!cancelled) setLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  const myLines = summonerName ? (summoners[summonerName] ?? {}) : {}
+  const registeredLines = (Object.keys(myLines) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b])
+  const availableLines = LINES.filter(l => !registeredLines.includes(l))
+  const canAddMore = registeredLines.length < 5 && availableLines.length > 0
+
+  const addLine = async () => {
+    if (!summonerName || !selectedNewLine) return
+    if (registeredLines.length >= 5) {
+      setError('라인은 최대 5개까지만 등록할 수 있어요.')
+      return
+    }
+    setAdding(true)
     setError('')
-    await supabase.from('summoners').upsert({ name: n, line, tier, score: getScoreByTier(tier) }, { onConflict: 'name,line' })
-    setName('')
-    onRefresh()
+    const { error: err } = await supabase
+      .from('summoners')
+      .insert({ name: summonerName, line: selectedNewLine, tier: '언랭', score: getScoreByTier('언랭') })
+    if (err) {
+      setError('라인 추가 실패: ' + err.message)
+    } else {
+      setSelectedNewLine('')
+      onRefresh()
+    }
+    setAdding(false)
   }
 
-  const remove = async (n: string, l: Line) => {
-    if (!checkPassword()) return
-    await supabase.from('summoners').delete().eq('name', n).eq('line', l)
-    onRefresh()
+  if (loading) {
+    return <div className="card"><div className="empty">불러오는 중...</div></div>
   }
 
-  const startEdit = (n: string, l: Line) => {
-    setEditing({ name: n, line: l })
-    setEditTier(summoners[n][l])
-    setEditScore(String(summonerScores[n]?.[l] ?? getScoreByTier(summoners[n][l])))
+  if (!summonerName) {
+    return (
+      <div className="card">
+        <div className="empty">계정에 연결된 소환사 정보가 없어요. 관리자에게 문의해주세요.</div>
+      </div>
+    )
   }
-
-  const saveEdit = async () => {
-    if (!editing) return
-    if (!checkPassword()) return
-    const scoreNum = parseInt(editScore, 10)
-    if (isNaN(scoreNum)) { setError('점수는 숫자로 입력해주세요.'); return }
-    const newTier = getTierByScore(scoreNum)
-    await supabase.from('summoners').update({ tier: newTier, score: scoreNum }).eq('name', editing.name).eq('line', editing.line)
-    setEditing(null)
-    onRefresh()
-  }
-
-  // 소환사 전체 삭제
-  const removeSummoner = async (n: string) => {
-    if (!checkPassword()) return
-    await supabase.from('summoners').delete().eq('name', n)
-    onRefresh()
-  }
-
-  const allSummonerNames = Object.keys(summoners).sort()
-  const summonerNames = search.trim()
-    ? allSummonerNames.filter(n => n.includes(search.trim()))
-    : []
 
   return (
     <div>
       <div className="card">
-        <div className="card-title">소환사 라인 등록</div>
-        <div className="add-row">
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="소환사명" onKeyDown={e => e.key === 'Enter' && add()} />
-          <select value={line} onChange={e => setLine(e.target.value as Line)}>
-            {LINES.map(l => <option key={l}>{l}</option>)}
-          </select>
-          <select value={tier} onChange={e => setTier(e.target.value)}>
-            {TIERS.map(t => <option key={t}>{t}</option>)}
-          </select>
-          <button className="btn btn-gold" onClick={add}>등록</button>
-        </div>
-        {error && <div className="error">{error}</div>}
-        <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>
-          💡 같은 소환사명으로 라인별로 여러 번 등록할 수 있어요
+        <div className="card-title">내 정보</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
+          <div><span style={{ color: 'var(--text3)' }}>계정: </span>{email}</div>
+          <div><span style={{ color: 'var(--text3)' }}>소환사명: </span><strong>{summonerName}</strong></div>
         </div>
       </div>
 
       <div className="card">
-        <div className="card-title">등록된 소환사 ({allSummonerNames.length}명)</div>
-        <div style={{ marginBottom: 10 }}>
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="소환사명 검색..."
-            style={{ width: '100%' }}
-          />
-        </div>
-        {!search.trim()
-          ? <div className="empty">소환사명을 검색해주세요</div>
-          : summonerNames.length === 0
-          ? <div className="empty">'{search}' 검색 결과가 없어요</div>
-          : summonerNames.map(n => {
-            const lines = summoners[n]
-            const sortedLines = (Object.keys(lines) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b])
-            return (
-              <div key={n} style={{ marginBottom: 12, padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <span style={{ fontWeight: 600, fontSize: 14 }}>{n}</span>
-                  <button className="btn btn-danger btn-sm" onClick={() => removeSummoner(n)}>전체삭제</button>
-                </div>
-                {sortedLines.map(l => (
-                  <div key={l} className="player-row" style={{ marginBottom: 4, padding: '6px 10px' }}>
-                    <span className="badge b-line" style={{ width: 52, textAlign: 'center' }}>{l}</span>
-                    {editing?.name === n && editing?.line === l ? (
-                      <>
-                        <input
-                          type="number"
-                          value={editScore}
-                          onChange={e => setEditScore(e.target.value)}
-                          style={{ flex: '0 0 70px', textAlign: 'center' }}
-                        />
-                        <span className="badge b-tier" style={{ flex: 1, textAlign: 'center' }}>
-                          {isNaN(parseInt(editScore, 10)) ? '?' : getTierByScore(parseInt(editScore, 10))}
-                        </span>
-                        <button className="btn btn-gold btn-sm" onClick={saveEdit}>저장</button>
-                        <button className="btn btn-sm" onClick={() => setEditing(null)}>취소</button>
-                      </>
-                    ) : (
-                      <>
-                        <span className="badge b-tier" style={{ flex: 1 }}>{lines[l]}</span>
-                        <span style={{ fontSize: 11, color: 'var(--text3)' }}>{summonerScores[n]?.[l] ?? getScoreByTier(lines[l])}점</span>
-                        <button className="btn btn-sm" onClick={() => startEdit(n, l)}>수정</button>
-                        <button className="btn btn-danger btn-sm" onClick={() => remove(n, l)}>삭제</button>
-                      </>
-                    )}
-                  </div>
-                ))}
+        <div className="card-title">내 라인 ({registeredLines.length}/5)</div>
+        {registeredLines.length === 0 ? (
+          <div className="empty">등록된 라인이 없어요</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: canAddMore ? 12 : 0 }}>
+            {registeredLines.map(l => (
+              <div key={l} className="player-row" style={{ padding: '6px 10px' }}>
+                <span className="badge b-line" style={{ width: 52, textAlign: 'center' }}>{l}</span>
+                <span className="badge b-tier" style={{ flex: 1 }}>{myLines[l]}</span>
+                <span style={{ fontSize: 11, color: 'var(--text3)' }}>
+                  {summonerScores[summonerName]?.[l] ?? getScoreByTier(myLines[l])}점
+                </span>
               </div>
-            )
-          })
-        }
+            ))}
+          </div>
+        )}
+
+        {canAddMore ? (
+          <div className="add-row">
+            <select value={selectedNewLine} onChange={e => setSelectedNewLine(e.target.value as Line)} style={{ flex: 1 }}>
+              <option value="">추가할 라인 선택</option>
+              {availableLines.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+            <button className="btn btn-gold" onClick={addLine} disabled={!selectedNewLine || adding}>
+              {adding ? '추가 중...' : '언랭으로 라인 추가'}
+            </button>
+          </div>
+        ) : registeredLines.length >= 5 ? (
+          <div style={{ fontSize: 12, color: 'var(--text3)' }}>모든 라인을 이미 등록했어요.</div>
+        ) : null}
+
+        <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 8 }}>
+          💡 새로 추가하는 라인은 항상 '언랭'으로 등록돼요. 기존 라인의 티어는 실제 경기 결과에 따라 자동으로 조정돼요.
+        </div>
+
+        {error && <div className="error" style={{ marginTop: 8 }}>{error}</div>}
       </div>
     </div>
   )
@@ -892,33 +876,24 @@ function TeamTab({
     // 최신 records로 승률 계산
     const { data: latestRecs } = await supabase.from('records').select('*').order('created_at', { ascending: false })
     const updatedRecords = (latestRecs ?? []) as GameRecord[]
-    const historyEntries: { record_id: number; name: string; line: string; tier_before: string; tier_after: string }[] = []
 
-    // 포인트 기반 티어 시스템: 승리 +1점, 패배 -1점, 점수에 따라 티어명 자동 산출
-    for (const p of winners) {
-      if (!summoners[p.name]?.[p.line]) continue
-      const currentTier = summoners[p.name][p.line]
-      const currentScore = summonerScores[p.name]?.[p.line] ?? getScoreByTier(currentTier)
-      const newScore = currentScore + 1
-      const newTier = getTierByScore(newScore)
-      await supabase.from('summoners').update({ score: newScore, tier: newTier }).eq('name', p.name).eq('line', p.line)
-      if (newTier !== currentTier && recId) {
-        historyEntries.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
+    // 점수/티어 변경은 서버(RPC)에서 처리 — 클라이언트는 ±1만 요청 가능하고
+    // 실제 계산·티어산출·이력기록은 DB 함수 안에서 검증되며 이뤄짐 (직접 update 금지)
+    if (recId) {
+      for (const p of winners) {
+        if (!summoners[p.name]?.[p.line]) continue
+        const { error: rpcErr } = await supabase.rpc('apply_match_score_delta', {
+          p_record_id: recId, p_name: p.name, p_line: p.line, p_delta: 1,
+        })
+        if (rpcErr) console.error('점수 반영 실패:', p.name, p.line, rpcErr.message)
       }
-    }
-    for (const p of losers) {
-      if (!summoners[p.name]?.[p.line]) continue
-      const currentTier = summoners[p.name][p.line]
-      const currentScore = summonerScores[p.name]?.[p.line] ?? getScoreByTier(currentTier)
-      const newScore = currentScore - 1
-      const newTier = getTierByScore(newScore)
-      await supabase.from('summoners').update({ score: newScore, tier: newTier }).eq('name', p.name).eq('line', p.line)
-      if (newTier !== currentTier && recId) {
-        historyEntries.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
+      for (const p of losers) {
+        if (!summoners[p.name]?.[p.line]) continue
+        const { error: rpcErr } = await supabase.rpc('apply_match_score_delta', {
+          p_record_id: recId, p_name: p.name, p_line: p.line, p_delta: -1,
+        })
+        if (rpcErr) console.error('점수 반영 실패:', p.name, p.line, rpcErr.message)
       }
-    }
-    if (historyEntries.length > 0) {
-      await supabase.from('tier_history').insert(historyEntries)
     }
 
     onRecord({ winner, blue: blueData, red: redData, skipInsert: true })
@@ -2686,23 +2661,30 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
         return
       }
 
-      // 2) 소환사 M1/M2 라인·티어 저장 (기존 소환사 관리 테이블과 동일한 name+line 복합키 upsert)
-      await supabase.from('summoners').upsert(
-        [
-          { name: n, line: m1Line, tier: m1Tier, score: getScoreByTier(m1Tier) },
-          { name: n, line: m2Line, tier: m2Tier, score: getScoreByTier(m2Tier) },
-        ],
-        { onConflict: 'name,line' }
-      )
-
-      // 3) 계정 ↔ 소환사 1:1 연결
+      // 2) 계정 ↔ 소환사 1:1 연결
+      // (아래 3번 소환사 라인 등록은 RLS상 "본인 소환사명"으로만 가능하므로,
+      //  본인 연결(member_accounts)이 먼저 생성되어 있어야 함 — 순서 중요)
       const { error: linkErr } = await supabase.from('member_accounts').insert({
         summoner_name: n,
         user_id: signUpData.user.id,
         email: email.trim(),
       })
       if (linkErr) {
-        setError('계정은 생성됐지만 소환사 연결에 실패했어요: ' + linkErr.message)
+        setError('계정 생성에 실패했어요: ' + linkErr.message)
+        setLoading(false)
+        return
+      }
+
+      // 3) 소환사 M1/M2 라인·티어 저장
+      const { error: summonerErr } = await supabase.from('summoners').upsert(
+        [
+          { name: n, line: m1Line, tier: m1Tier, score: getScoreByTier(m1Tier) },
+          { name: n, line: m2Line, tier: m2Tier, score: getScoreByTier(m2Tier) },
+        ],
+        { onConflict: 'name,line' }
+      )
+      if (summonerErr) {
+        setError('계정은 생성됐지만 라인 등록에 실패했어요: ' + summonerErr.message)
         setLoading(false)
         return
       }
@@ -3138,7 +3120,7 @@ function MainApp() {
       <div className="tabs" style={{ background: 'rgba(6,17,31,0.75)' }}>
         {(['team', 'record', 'ranking', 'hall', 'stats', 'summoners'] as const).map((t, i) => (
           <button key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-            {['팀 뽑기', '전적 기록', '전체 랭킹', '명예의 전당', '개인 통계', '소환사 관리'][i]}
+            {['팀 뽑기', '전적 기록', '전체 랭킹', '명예의 전당', '개인 통계', '내 정보'][i]}
           </button>
         ))}
       </div>
@@ -3153,7 +3135,7 @@ function MainApp() {
           {tab === 'hall' && <HallOfFameTab records={records} />}
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} summonerScores={summonerScores} tierHistory={tierHistory} />}
 
-          {tab === 'summoners' && <SummonerTab summoners={summoners} summonerScores={summonerScores} onRefresh={fetchAll} />}
+          {tab === 'summoners' && <MyInfoTab summoners={summoners} summonerScores={summonerScores} onRefresh={fetchAll} />}
 
           {tab === 'admin' && isAdmin && (
             <div>
