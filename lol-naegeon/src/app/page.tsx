@@ -3723,27 +3723,76 @@ function RoomsTab({
   }
 
   // 관리자 전용 테스트 기능: 등록된 다른 소환사들로 방을 10명까지 자동으로 채우고
-  // 전부 준비완료 상태로 만들어서, 혼자서도 매칭 테스트를 해볼 수 있게 함
+  // 전부 준비완료 상태로 만들어서, 혼자서도 매칭 테스트를 해볼 수 있게 함.
+  // 무작위로 뽑으면 라인이 한쪽으로 쏠려서 밸런싱이 실패할 수 있으므로,
+  // "아직 2명이 안 채워진 라인"부터 우선적으로 채우는 방식으로 채움.
   const fillTestMembers = async () => {
     if (!myRoom || !isHost || !dbIsAdmin) return
     const existingNames = new Set(myRoom.members.map(m => m.summoner_name))
-    const candidates = Object.keys(summoners).filter(n => !existingNames.has(n))
     const need = 10 - myRoom.members.length
     if (need <= 0) return
-    const picked = shuffle(candidates).slice(0, need)
-    const newMembers = [
-      ...myRoom.members,
-      ...picked.map(n => {
-        const lines = getSummonerLines(n)
-        return {
-          summoner_name: n,
-          most1: (lines[0] ?? '탑') as Line,
-          most2: lines.length >= 2 ? lines[1] : null,
-          ready: true,
-        }
-      }),
-    ]
+
+    const targetLines: Line[] = ['탑', '정글', '미드', '원딜', '서포터']
+    // 이미 방에 있는 사람들의 M1 기준으로 현재 라인별 인원 카운트 (M1='상관없음'인 사람은 유동적이라 카운트에서 제외)
+    const lineCount: Record<Line, number> = { 탑: 0, 정글: 0, 미드: 0, 원딜: 0, 서포터: 0 }
+    myRoom.members.forEach(m => {
+      if (m.most1 !== 'any') lineCount[m.most1 as Line] = (lineCount[m.most1 as Line] ?? 0) + 1
+    })
+
+    // 후보 풀: 아직 방에 없는 등록된 소환사 전부 + 각자 등록된 라인 목록
+    let pool = Object.keys(summoners)
+      .filter(n => !existingNames.has(n))
+      .map(n => ({ name: n, lines: getSummonerLines(n) }))
+      .filter(c => c.lines.length > 0)
+
+    const newFilled: RoomMember[] = []
+
+    while (newFilled.length < need && pool.length > 0) {
+      // 아직 2명이 안 채워진 라인 중 가장 부족한 라인부터
+      const needs = targetLines
+        .map(l => ({ line: l, remain: 2 - lineCount[l] }))
+        .filter(x => x.remain > 0)
+        .sort((a, b) => b.remain - a.remain)
+
+      if (needs.length === 0) break // 5라인 전부 2명씩 채워짐
+
+      const target = needs[0].line
+      const candidates = pool.filter(c => c.lines.includes(target))
+
+      if (candidates.length === 0) {
+        // 이 라인을 커버할 등록된 후보가 더 없음 → 포기하고 다음 부족 라인으로 넘어감
+        lineCount[target] = 2
+        continue
+      }
+
+      // 등록 라인이 적은(=다른 라인으로 대체하기 어려운) 사람을 우선 선택해서, 라인 많은 사람은 나중을 위해 아낌
+      candidates.sort((a, b) => a.lines.length - b.lines.length)
+      const chosen = candidates[0]
+
+      const otherLines = chosen.lines.filter(l => l !== target)
+      const most2 = otherLines.find(l => lineCount[l] < 2) ?? otherLines[0] ?? null
+
+      newFilled.push({ summoner_name: chosen.name, most1: target, most2, ready: true })
+      lineCount[target]++
+      pool = pool.filter(c => c.name !== chosen.name)
+    }
+
+    // 그래도 인원이 부족하면(등록된 소환사 자체가 적은 경우) 라인 무관하게 남은 후보로 채움
+    if (newFilled.length < need) {
+      const filledNames = new Set(newFilled.map(f => f.summoner_name))
+      const leftover = pool.filter(c => !filledNames.has(c.name)).slice(0, need - newFilled.length)
+      leftover.forEach(c => {
+        newFilled.push({ summoner_name: c.name, most1: (c.lines[0] ?? '탑') as Line, most2: c.lines[1] ?? null, ready: true })
+      })
+    }
+
+    const newMembers = [...myRoom.members, ...newFilled]
     await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
+
+    const stillShort = targetLines.filter(l => lineCount[l] < 2)
+    if (stillShort.length > 0) {
+      alert(`다음 라인은 등록된 소환사가 부족해서 2명을 못 채웠어요: ${stillShort.join(', ')}. 팀편성이 실패할 수 있어요.`)
+    }
   }
 
   const [balancing, setBalancing] = useState(false)
