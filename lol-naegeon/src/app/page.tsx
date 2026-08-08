@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { TIERS, LINES, getScore, getTierByScore, getScoreByTier, shuffle } from '@/lib/data'
 import type { Line } from '@/lib/data'
@@ -288,8 +288,6 @@ function TeamTab({
   countdown,
   setCountdown,
   setBalanceStartedAt,
-  maxScoreDiff,
-  onMaxScoreDiffChange,
 }: {
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
   summoners: SummonerMap
@@ -307,14 +305,10 @@ function TeamTab({
   countdown: number | null
   setCountdown: React.Dispatch<React.SetStateAction<number | null>>
   setBalanceStartedAt: React.Dispatch<React.SetStateAction<string | null>>
-  maxScoreDiff: number
-  onMaxScoreDiffChange: (value: number) => void
 }) {
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [suggestions, setSuggestions] = useState<string[]>([])
-  // 매칭 방식: 라인밸런싱(기존 방식) vs 올랜덤(맞라인/바텀 점수차 제약 없이 팀 총점으로만 매칭, 라인당 1명은 동일하게 지킴)
-  const [matchMode, setMatchMode] = useState<'line' | 'random'>('line')
 
 
 
@@ -395,13 +389,6 @@ function TeamTab({
     setError('')
     if (players.length !== 10) { setError(`정확히 10명이 필요해요. (현재 ${players.length}명)`); console.log('🔴 10명 아님, 중단'); return }
 
-    // 참가자 추가 이후 소환사 관리에서 라인이 전부 삭제된 사람이 있는지 미리 확인
-    const noLineNames = players.filter(p => getSummonerLines(p.name).length === 0).map(p => p.name)
-    if (noLineNames.length > 0) {
-      setError(`다음 참가자는 등록된 라인이 없어요: ${noLineNames.join(', ')} — 소환사 관리 탭에서 라인을 다시 등록하거나 참가자 목록에서 빼주세요.`)
-      return
-    }
-
     // 각 플레이어의 가능한 라인 목록 생성
     const getOptions = (p: PlayerEntry): Line[] => {
       const allLines = getSummonerLines(p.name)
@@ -422,6 +409,18 @@ function TeamTab({
       return summonerScores[name]?.[line] ?? getScoreByTier(tier)
     }
 
+    // 특정 소환사 라인 선호도 가중치 (UI에는 노출되지 않음)
+    const LINE_PREFERENCE: Record<string, Line> = {
+      '공민규': '정글',
+    }
+    const PREFERENCE_RATE = 0.95 // 선호 라인으로 배정될 확률
+
+    // 강재현: 미드/원딜로 배정될 확률을 10%로 제한 (나머지는 정상 M1/M2 가중치)
+    const LINE_AVOID: Record<string, Line[]> = {
+      '강재현': ['미드', '원딜'],
+    }
+    const AVOID_RATE = 0.1 // 회피 대상 라인이 뽑혔을 때 실제로 그 라인으로 갈 확률
+
     let best: BalanceResult | null = null
     let bestDiff = Infinity
     let bestLineDiff = Infinity
@@ -435,36 +434,46 @@ function TeamTab({
     for (let i = 0; i < 5000; i++) {
       // 1) 각 플레이어 랜덤 라인 배정
       const assigned = players.map(p => {
+        const preferredLine = LINE_PREFERENCE[p.name]
         const allLines = getSummonerLines(p.name)
+        // 선호 라인이 있고 실제로 등록된 라인이면 높은 확률로 그 라인 배정
+        if (preferredLine && allLines.includes(preferredLine) && Math.random() < PREFERENCE_RATE) {
+          const tier = summoners[p.name]?.[preferredLine] ?? '골드2'
+          const score = getAdjustedScore(p.name, preferredLine, tier)
+          return { name: p.name, line: preferredLine, score }
+        }
         // M1/M2 가중치 적용 (M1: 70%, M2: 30%)
-        // most1/most2는 참가자 추가 시점의 스냅샷이라, 그 후 소환사 관리에서 라인이 삭제/변경되면
-        // 더는 유효하지 않을 수 있음 → 매칭 직전에 실제 등록 라인인지 재검증
-        const most1Valid = p.most1 === 'any' || allLines.includes(p.most1 as Line)
-        const most2Valid = !!p.most2 && p.most2 !== 'any' && allLines.includes(p.most2 as Line)
         let line: Line
         let isM2 = false
-        if (p.most1 === 'any' || !most1Valid) {
-          // most1이 'any'거나 더 이상 유효하지 않으면, 현재 등록된 라인 중에서 랜덤 배정
+        if (p.most1 === 'any') {
           line = allLines[Math.floor(Math.random() * allLines.length)]
-        } else if (!most2Valid) {
+        } else if (!p.most2 || p.most2 === 'any') {
           line = p.most1 as Line
         } else {
           isM2 = Math.random() >= 0.7
           line = isM2 ? p.most2 as Line : p.most1 as Line
+        }
+        // 회피 라인이 뽑혔다면, 낮은 확률로만 실제 적용하고 그 외엔 다른 등록 라인 중 재선택
+        const avoidLines = LINE_AVOID[p.name]
+        if (avoidLines && avoidLines.includes(line) && Math.random() >= AVOID_RATE) {
+          const altLines = allLines.filter(l => !avoidLines.includes(l))
+          if (altLines.length > 0) {
+            line = altLines[Math.floor(Math.random() * altLines.length)]
+          }
         }
         const tier = summoners[p.name]?.[line] ?? '골드2'
         const score = getAdjustedScore(p.name, line, tier)
         return { name: p.name, line, score }
       })
 
-      // 2) 팀 나누기: 라인당 1명씩 배정 (두 모드 공통 — 롤은 라인 중복이 있으면 안 되니까)
-      // 각 라인에 최소 2명이 있는지 체크
+      // 2) 각 라인에 최소 2명이 있는지 체크
       const lineCounts: Record<string, number> = {}
       assigned.forEach(p => { lineCounts[p.line] = (lineCounts[p.line] ?? 0) + 1 })
       const valid = LINES.every(l => (lineCounts[l] ?? 0) >= 2)
       if (!valid) continue
 
-      let t1: typeof assigned = [], t2: typeof assigned = []
+      // 3) 라인별로 1명씩 각 팀에 배정
+      const t1: typeof assigned = [], t2: typeof assigned = []
       let ok = true
       for (const l of LINES) {
         const pool = shuffle(assigned.filter(p => p.line === l))
@@ -473,7 +482,7 @@ function TeamTab({
       }
       if (!ok) continue
 
-      // 남는 플레이어 배분
+      // 4) 남는 플레이어 배분
       const used = new Set([...t1, ...t2])
       const rest = shuffle(assigned.filter(p => !used.has(p)))
       const half = Math.ceil(rest.length / 2)
@@ -485,7 +494,7 @@ function TeamTab({
       const s2 = t2.reduce((a, p) => a + p.score, 0)
       const diff = Math.abs(s1 - s2)
 
-      // 라인별 점수 차이 합계 (탑vs탑, 정글vs정글 등 같은 라인끼리 점수 격차) - 라인밸런싱 모드에서만 의미 있음
+      // 라인별 점수 차이 합계 (탑vs탑, 정글vs정글 등 같은 라인끼리 점수 격차)
       let lineDiff = 0
       let maxLineDiff = 0
       for (const l of LINES) {
@@ -518,13 +527,12 @@ function TeamTab({
         fallback = candidateResult
       }
 
-      // 라인밸런싱 모드에서만: 한 라인이라도 30점 이상 차이나거나, 바텀 합산이 35점 이상 차이나면 정상 후보에서 배제
-      // (올랜덤 모드는 라인당 1명 배정은 동일하게 지키되, 맞라인/바텀 점수차 제약만 없이 팀 총점 위주로 고름)
-      if (matchMode === 'line' && (maxLineDiff >= 30 || botDiff >= 35)) continue
+      // 한 라인이라도 30점 이상 차이나거나, 바텀(원딜+서포터) 합산이 35점 이상 차이나면 정상 후보에서 배제
+      if (maxLineDiff >= 30 || botDiff >= 35) continue
 
       candidates.push({ diff, lineDiff, total: s1 + s2, result: candidateResult })
 
-      // 밸런스 최선 후보도 별도로 계속 추적 (설정된 최대 점수차 이하 후보가 전혀 없을 때 대비)
+      // 밸런스 최선 후보도 별도로 계속 추적 (10점 이하 후보가 전혀 없을 때 대비)
       const isBetter = diff < bestDiff || (diff === bestDiff && lineDiff < bestLineDiff)
       if (isBetter) {
         bestDiff = diff
@@ -533,9 +541,9 @@ function TeamTab({
       }
     }
 
-    // 점수 차이가 설정된 최대 점수차 이하인 후보들 중, 총합이 높은 상위 10개에서 랜덤 선택
-    // (해당 조건의 후보가 없으면 밸런스가 가장 좋은 best로 그대로 진행)
-    const goodCandidates = candidates.filter(c => c.diff <= maxScoreDiff)
+    // 점수 차이 10점 이하인 후보들 중, 총합이 높은 상위 10개에서 랜덤 선택
+    // (10점 이하 후보가 없으면 밸런스가 가장 좋은 best로 그대로 진행)
+    const goodCandidates = candidates.filter(c => c.diff <= 10)
     if (goodCandidates.length > 0) {
       goodCandidates.sort((a, b) => b.total - a.total)
       const top10 = goodCandidates.slice(0, 10)
@@ -552,9 +560,9 @@ function TeamTab({
 
     console.log('🟡 5000번 반복 끝, best:', best, 'bestDiff:', bestDiff, 'bestLineDiff:', bestLineDiff, '10점이하 후보수:', goodCandidates.length)
 
-    if (best && Math.abs(best.s1 - best.s2) > maxScoreDiff) {
-      console.log(`🔴 점수차 ${maxScoreDiff} 초과로 best를 null 처리:`, Math.abs(best.s1 - best.s2))
-      setError(`팀 편성이 불가능해요. 최선의 조합도 ${Math.abs(best.s1 - best.s2).toFixed(1)}점 차이가 나요. 참가자 구성을 변경하거나 최대 점수차 설정을 늘려주세요.`)
+    if (best && Math.abs(best.s1 - best.s2) > 15) {
+      console.log('🔴 점수차 15 초과로 best를 null 처리:', Math.abs(best.s1 - best.s2))
+      setError(`팀 편성이 불가능해요. 최선의 조합도 ${Math.abs(best.s1 - best.s2).toFixed(1)}점 차이가 나요. 참가자 구성을 변경해주세요.`)
       best = null
     }
     if (best) {
@@ -608,7 +616,7 @@ function TeamTab({
       }
       return
     }
-  }, [players, summoners, maxScoreDiff, matchMode])
+  }, [players, summoners])
 
 
 
@@ -660,42 +668,27 @@ function TeamTab({
     const historyEntries: { record_id: number; name: string; line: string; tier_before: string; tier_after: string }[] = []
 
     // 포인트 기반 티어 시스템: 승리 +1점, 패배 -1점, 점수에 따라 티어명 자동 산출
-    // (예전엔 summoners 로컬 state에 없으면 그냥 건너뛰어서 가끔 점수가 안 바뀌는 버그가 있었음.
-    //  이제는 로컬 state가 비어있어도 매칭 당시 값(p.tier/p.score)을 fallback으로 써서 항상 갱신을 시도하고,
-    //  실제 DB 에러가 나면 명시적으로 알려줌)
-    const failedPlayers: string[] = []
     for (const p of winners) {
-      const currentTier = summoners[p.name]?.[p.line] ?? p.tier
-      const currentScore = summonerScores[p.name]?.[p.line] ?? p.score
+      if (!summoners[p.name]?.[p.line]) continue
+      const currentTier = summoners[p.name][p.line]
+      const currentScore = summonerScores[p.name]?.[p.line] ?? getScoreByTier(currentTier)
       const newScore = currentScore + 1
       const newTier = getTierByScore(newScore)
-      const { error: updErr } = await supabase.from('summoners').update({ score: newScore, tier: newTier }).eq('name', p.name).eq('line', p.line)
-      if (updErr) {
-        console.error('🔴 점수 업데이트 실패:', p.name, p.line, updErr)
-        failedPlayers.push(`${p.name}(${p.line})`)
-        continue
-      }
+      await supabase.from('summoners').update({ score: newScore, tier: newTier }).eq('name', p.name).eq('line', p.line)
       if (newTier !== currentTier && recId) {
         historyEntries.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
       }
     }
     for (const p of losers) {
-      const currentTier = summoners[p.name]?.[p.line] ?? p.tier
-      const currentScore = summonerScores[p.name]?.[p.line] ?? p.score
+      if (!summoners[p.name]?.[p.line]) continue
+      const currentTier = summoners[p.name][p.line]
+      const currentScore = summonerScores[p.name]?.[p.line] ?? getScoreByTier(currentTier)
       const newScore = currentScore - 1
       const newTier = getTierByScore(newScore)
-      const { error: updErr } = await supabase.from('summoners').update({ score: newScore, tier: newTier }).eq('name', p.name).eq('line', p.line)
-      if (updErr) {
-        console.error('🔴 점수 업데이트 실패:', p.name, p.line, updErr)
-        failedPlayers.push(`${p.name}(${p.line})`)
-        continue
-      }
+      await supabase.from('summoners').update({ score: newScore, tier: newTier }).eq('name', p.name).eq('line', p.line)
       if (newTier !== currentTier && recId) {
         historyEntries.push({ record_id: recId, name: p.name, line: p.line, tier_before: currentTier, tier_after: newTier })
       }
-    }
-    if (failedPlayers.length > 0) {
-      alert(`⚠️ 다음 참가자는 점수 갱신에 실패했어요: ${failedPlayers.join(', ')}\n소환사 관리 탭에서 점수를 직접 확인/수정해주세요.`)
     }
     if (historyEntries.length > 0) {
       await supabase.from('tier_history').insert(historyEntries)
@@ -929,45 +922,9 @@ function TeamTab({
             </>
           )
         })()}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 12, fontSize: 12, color: 'var(--text2)' }}>
-          <span>매칭 방식</span>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={matchMode === 'line'}
-              onChange={() => setMatchMode('line')}
-              style={{ width: 'auto' }}
-            />
-            라인밸런싱
-          </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={matchMode === 'random'}
-              onChange={() => setMatchMode('random')}
-              style={{ width: 'auto' }}
-            />
-            올랜덤
-          </label>
-        </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
           <button className="btn btn-gold" onClick={balance} disabled={!!result || countdown !== null}>팀 균형 맞추기</button>
           <button className="btn" onClick={() => { setPlayers([]); setResult(null); setPendingResult(null); setError(''); onSessionUpdate([], null); supabase.from('session').update({ balance_started_at: null, pending_result: null }).eq('id', 1) }}>초기화</button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 4, fontSize: 12, color: 'var(--text2)' }}>
-            <span>최대 점수차</span>
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={maxScoreDiff}
-              onChange={e => {
-                const v = parseInt(e.target.value, 10)
-                if (!isNaN(v) && v > 0) onMaxScoreDiffChange(v)
-              }}
-              style={{ width: 56, padding: '4px 6px', fontSize: 12, textAlign: 'center' }}
-            />
-            <span>점</span>
-          </div>
         </div>
       </div>
 
@@ -2344,61 +2301,6 @@ function RankingTab({ records }: { records: GameRecord[] }) {
 }
 
 // ── 메인 페이지 ──────────────────────────────────────────────
-// ── 장기 미참여자 위젯 (우측 하단 고정) ──────────────────────────────────────────────
-function InactivePlayersWidget({ summoners, records }: { summoners: SummonerMap; records: GameRecord[] }) {
-  const [collapsed, setCollapsed] = useState(false)
-
-  const list = useMemo(() => {
-    const names = Object.keys(summoners)
-    const now = Date.now()
-    const result: { name: string; days: number }[] = []
-    for (const name of names) {
-      // records는 최신순 정렬되어 있음 (마지막 통계 탭과 동일한 방식)
-      const lastGame = records.find(r => r.blue.some(p => p.name === name) || r.red.some(p => p.name === name))
-      if (!lastGame) continue // 기록이 아예 없는 사람은 제외 (미참여가 아니라 기록 자체가 없는 것)
-      const lastDate = new Date((lastGame as any).created_at ?? '')
-      if (isNaN(lastDate.getTime())) continue
-      const days = Math.floor((now - lastDate.getTime()) / (1000 * 60 * 60 * 24))
-      if (days >= 14) result.push({ name, days })
-    }
-    return result.sort((a, b) => b.days - a.days)
-  }, [summoners, records])
-
-  if (list.length === 0) return null
-
-  return (
-    <div style={{
-      position: 'fixed', right: 12, bottom: 12, zIndex: 50,
-      background: 'rgba(6,17,31,0.92)', border: '0.5px solid var(--border2)',
-      borderRadius: 'var(--radius)', padding: '8px 10px',
-      fontSize: 11, minWidth: 120, maxWidth: 170,
-      boxShadow: '0 2px 10px rgba(0,0,0,0.4)',
-    }}>
-      <div
-        onClick={() => setCollapsed(v => !v)}
-        style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          cursor: 'pointer', fontWeight: 700, color: 'var(--text2)',
-          marginBottom: collapsed ? 0 : 6,
-        }}
-      >
-        <span>😴 장기 미참여자 ({list.length})</span>
-        <span style={{ marginLeft: 6 }}>{collapsed ? '▸' : '▾'}</span>
-      </div>
-      {!collapsed && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, maxHeight: 160, overflowY: 'auto' }}>
-          {list.map(p => (
-            <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, color: 'var(--text3)' }}>
-              <span>{p.name}</span>
-              <span>{p.days}일</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 export default function Home() {
   const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'hall' | 'stats' | 'summoners'>('team')
   const [records, setRecords] = useState<GameRecord[]>([])
@@ -2413,8 +2315,6 @@ export default function Home() {
   const [balanceStartedAt, setBalanceStartedAt] = useState<string | null>(null)
   const [pendingResult, setPendingResult] = useState<BalanceResult | null>(null)
   const [countdown, setCountdown] = useState<number | null>(null)
-  // 팀 편성 시 허용할 전체 팀 점수 최대 차이 (팀편성 버튼 옆에서 설정, DB에 저장되어 유지됨)
-  const [maxScoreDiff, setMaxScoreDiff] = useState<number>(15)
 
   const fetchAll = useCallback(async () => {
     const [{ data: recs }, { data: sums }, { data: sess }, { data: hist }] = await Promise.all([
@@ -2442,7 +2342,6 @@ export default function Home() {
     if (sess) {
       setTeamPlayers(sess.players ?? [])
       setTeamResult(sess.result ?? null)
-      setMaxScoreDiff(sess.max_score_diff ?? 15)
       // 카운트다운 복원
       if (sess.balance_started_at && !sess.result) {
         const elapsed = Math.floor((Date.now() - new Date(sess.balance_started_at).getTime()) / 1000)
@@ -2478,7 +2377,6 @@ export default function Home() {
         if (sess) {
           setTeamPlayers(sess.players ?? [])
           setTeamResult(sess.result ?? null)
-          setMaxScoreDiff(sess.max_score_diff ?? 15)
           if (sess.balance_started_at && !sess.result) {
             const elapsed = Math.floor((Date.now() - new Date(sess.balance_started_at).getTime()) / 1000)
             const remaining = 10 - elapsed
@@ -2522,12 +2420,6 @@ export default function Home() {
   // 세션 업데이트 함수 (팀편성 관련만 업데이트, 투표 상태 유지)
   const updateSession = async (players: PlayerEntry[], result: BalanceResult | null) => {
     await supabase.from('session').update({ players, result, updated_at: new Date().toISOString() }).eq('id', 1)
-  }
-
-  // 최대 점수차 설정 업데이트 (DB에 저장되어 새로고침해도 유지됨)
-  const updateMaxScoreDiff = async (value: number) => {
-    setMaxScoreDiff(value)
-    await supabase.from('session').update({ max_score_diff: value }).eq('id', 1)
   }
 
 
@@ -2660,7 +2552,7 @@ export default function Home() {
         <div className="empty">불러오는 중...</div>
       ) : (
         <>
-          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} summonerScores={summonerScores} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} countdown={countdown} setCountdown={setCountdown} setBalanceStartedAt={setBalanceStartedAt} maxScoreDiff={maxScoreDiff} onMaxScoreDiffChange={updateMaxScoreDiff} />}
+          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} summonerScores={summonerScores} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} countdown={countdown} setCountdown={setCountdown} setBalanceStartedAt={setBalanceStartedAt} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'hall' && <HallOfFameTab records={records} />}
@@ -2669,8 +2561,6 @@ export default function Home() {
           {tab === 'summoners' && <SummonerTab summoners={summoners} summonerScores={summonerScores} onRefresh={fetchAll} />}
         </>
       )}
-
-      {!loading && <InactivePlayersWidget summoners={summoners} records={records} />}
     </div>
   )
 }
