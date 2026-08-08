@@ -3489,6 +3489,7 @@ type Room = {
   pending_result: BalanceResult | null
   balance_started_at: string | null
   created_at: string
+  has_password: boolean
 }
 
 function RoomsTab({
@@ -3509,11 +3510,13 @@ function RoomsTab({
   const [rooms, setRooms] = useState<Room[]>([])
   const [loading, setLoading] = useState(true)
   const [newRoomName, setNewRoomName] = useState('')
+  const [newRoomPassword, setNewRoomPassword] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
 
   const loadRooms = useCallback(async () => {
-    const { data } = await supabase.from('rooms').select('*').order('created_at', { ascending: false })
+    // password_hash가 없는 공개용 뷰에서만 조회 (비밀번호 해시는 절대 클라이언트로 내려오지 않음)
+    const { data } = await supabase.from('rooms_public').select('*').order('created_at', { ascending: false })
     setRooms((data ?? []) as Room[])
   }, [])
 
@@ -3555,25 +3558,18 @@ function RoomsTab({
     return (Object.keys(summoners[n]) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b])
   }
 
-  const defaultMostFor = (n: string): { most1: Line | 'any'; most2: Line | 'any' | null } => {
-    const lines = getSummonerLines(n)
-    return { most1: (lines[0] ?? '탑') as Line, most2: lines.length >= 2 ? lines[1] : null }
-  }
-
+  // 방 만들기/입장 시 초기 M1/M2 값은 이제 DB 함수(create_room/join_room)가 서버에서 계산함
   const createRoom = async () => {
     if (!myName || !myUserId) return
     if (myRoom) { setError('이미 참가 중인 방이 있어요. 먼저 나가주세요.'); return }
-    const name = newRoomName.trim() || `${myName}의 방`
     setCreating(true)
     setError('')
-    const { error: err } = await supabase.from('rooms').insert({
-      name,
-      host_user_id: myUserId,
-      host_summoner_name: myName,
-      members: [{ summoner_name: myName, ...defaultMostFor(myName), ready: false }],
+    const { error: err } = await supabase.rpc('create_room', {
+      p_name: newRoomName.trim() || null,
+      p_password: newRoomPassword.trim() || null,
     })
     if (err) setError('방 생성 실패: ' + err.message)
-    else { setNewRoomName(''); await loadRooms() }
+    else { setNewRoomName(''); setNewRoomPassword(''); await loadRooms() }
     setCreating(false)
   }
 
@@ -3583,11 +3579,14 @@ function RoomsTab({
     if (room.members.length >= 10) { setError('방이 가득 찼어요.'); return }
     if (room.members.some(m => m.summoner_name === myName)) return
     setError('')
-    const newMembers = [...room.members, { summoner_name: myName, ...defaultMostFor(myName), ready: false }]
-    const { error: err } = await supabase
-      .from('rooms')
-      .update({ members: newMembers, updated_at: new Date().toISOString() })
-      .eq('id', room.id)
+
+    let pwd: string | null = null
+    if (room.has_password) {
+      pwd = prompt(`"${room.name}"은(는) 비밀번호가 설정된 방이에요. 비밀번호를 입력해주세요.`)
+      if (pwd === null) return // 취소
+    }
+
+    const { error: err } = await supabase.rpc('join_room', { p_room_id: room.id, p_password: pwd })
     if (err) setError('입장 실패: ' + err.message)
     else await loadRooms()
   }
@@ -3974,44 +3973,65 @@ function RoomsTab({
                   const pendingLines = pendingLinesMap[m.summoner_name] ?? []
                   const selectableLines = [...lines, ...pendingLines.filter(l => !lines.includes(l))]
                   return (
-                    <div key={m.summoner_name} className="player-row" style={{ padding: '8px 10px', flexWrap: 'wrap' }}>
+                    <div
+                      key={m.summoner_name}
+                      className="player-row"
+                      style={{
+                        padding: '8px 10px', flexWrap: 'wrap',
+                        background: isMe ? 'rgba(212,175,55,0.12)' : undefined,
+                        border: isMe ? '0.5px solid var(--gold, #d4af37)' : undefined,
+                        borderRadius: isMe ? 'var(--radius)' : undefined,
+                      }}
+                    >
                       <span style={{ fontWeight: 600, fontSize: 13, minWidth: 80 }}>
                         <NameWithIdBadge name={m.summoner_name} idPrefixMap={idPrefixMap} />
+                        {isMe && <span style={{ fontSize: 10, color: 'var(--gold, #d4af37)', marginLeft: 4 }}>(나)</span>}
                         {m.summoner_name === myRoom.host_summoner_name && <span style={{ fontSize: 10, color: 'var(--gold, #d4af37)', marginLeft: 4 }}>방장</span>}
                       </span>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         <span style={{ fontSize: 11, color: m.most1 === 'any' ? 'var(--text2)' : 'var(--gold)', fontWeight: 600 }}>M1</span>
-                        <select
-                          value={m.most1}
-                          onChange={e => isMe && updateMyMost('most1', e.target.value)}
-                          disabled={!isMe}
-                          style={{ width: 95, padding: '4px 8px', fontSize: 12 }}
-                        >
-                          {lines.length >= 2 && <option value="any">상관없음</option>}
-                          {selectableLines.map(l => (
-                            <option key={l} value={l} disabled={pendingLines.includes(l)}>
-                              {l}{pendingLines.includes(l) ? ' (허가신청)' : ''}
-                            </option>
-                          ))}
-                        </select>
+                        {isMe ? (
+                          <select
+                            value={m.most1}
+                            onChange={e => updateMyMost('most1', e.target.value)}
+                            style={{ width: 95, padding: '4px 8px', fontSize: 12 }}
+                          >
+                            {lines.length >= 2 && <option value="any">상관없음</option>}
+                            {selectableLines.map(l => (
+                              <option key={l} value={l} disabled={pendingLines.includes(l)}>
+                                {l}{pendingLines.includes(l) ? ' (허가신청)' : ''}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="badge b-line" style={{ minWidth: 60, textAlign: 'center' }}>
+                            {m.most1 === 'any' ? '상관없음' : m.most1}
+                          </span>
+                        )}
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                         <span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>M2</span>
-                        <select
-                          value={m.most2 ?? ''}
-                          onChange={e => isMe && updateMyMost('most2', e.target.value)}
-                          disabled={!isMe || m.most1 === 'any'}
-                          style={{ width: 95, padding: '4px 8px', fontSize: 12, opacity: m.most1 === 'any' ? 0.4 : 1 }}
-                        >
-                          <option value=''>없음</option>
-                          {selectableLines.filter(l => l !== m.most1 && m.most1 !== 'any').map(l => (
-                            <option key={l} value={l} disabled={pendingLines.includes(l)}>
-                              {l}{pendingLines.includes(l) ? ' (허가신청)' : ''}
-                            </option>
-                          ))}
-                        </select>
+                        {isMe ? (
+                          <select
+                            value={m.most2 ?? ''}
+                            onChange={e => updateMyMost('most2', e.target.value)}
+                            disabled={m.most1 === 'any'}
+                            style={{ width: 95, padding: '4px 8px', fontSize: 12, opacity: m.most1 === 'any' ? 0.4 : 1 }}
+                          >
+                            <option value=''>없음</option>
+                            {selectableLines.filter(l => l !== m.most1 && m.most1 !== 'any').map(l => (
+                              <option key={l} value={l} disabled={pendingLines.includes(l)}>
+                                {l}{pendingLines.includes(l) ? ' (허가신청)' : ''}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="badge b-line" style={{ minWidth: 60, textAlign: 'center', opacity: m.most1 === 'any' || !m.most2 ? 0.4 : 1 }}>
+                            {m.most1 === 'any' ? '-' : (m.most2 ?? '없음')}
+                          </span>
+                        )}
                       </div>
 
                       <span
@@ -4113,12 +4133,18 @@ function RoomsTab({
     <div>
       <div className="card">
         <div className="card-title">방 만들기</div>
-        <div className="add-row">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <input
             value={newRoomName}
             onChange={e => setNewRoomName(e.target.value)}
             placeholder={`방 이름 (예: ${myName}의 방)`}
-            style={{ flex: 1 }}
+            onKeyDown={e => e.key === 'Enter' && createRoom()}
+          />
+          <input
+            type="password"
+            value={newRoomPassword}
+            onChange={e => setNewRoomPassword(e.target.value)}
+            placeholder="비밀번호 (선택사항, 비워두면 누구나 입장 가능)"
             onKeyDown={e => e.key === 'Enter' && createRoom()}
           />
           <button className="btn btn-gold" onClick={createRoom} disabled={creating}>
@@ -4140,7 +4166,10 @@ function RoomsTab({
               border: '0.5px solid var(--border)'
             }}>
               <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 600, fontSize: 13 }}>{r.name}</div>
+                <div style={{ fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {r.name}
+                  {r.has_password && <span style={{ fontSize: 11 }} title="비밀번호 방">🔒</span>}
+                </div>
                 <div style={{ fontSize: 11, color: 'var(--text3)' }}>방장: {r.host_summoner_name} · {r.members.length}/10명</div>
               </div>
               <button className="btn btn-sm" onClick={() => joinRoom(r)} disabled={r.members.length >= 10}>
