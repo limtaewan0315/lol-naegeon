@@ -143,6 +143,7 @@ function AdminTab({ summoners, summonerScores, records }: { summoners: SummonerM
   const [editingLine, setEditingLine] = useState<Line | ''>('')
   const [editingTier, setEditingTier] = useState('')
   const [error, setError] = useState('')
+  const [inactiveStatusMap, setInactiveStatusMap] = useState<Map<string, boolean>>(new Map())
 
   const allSummoners = Object.keys(summoners).sort()
 
@@ -161,6 +162,21 @@ function AdminTab({ summoners, summonerScores, records }: { summoners: SummonerM
     return result.sort((a, b) => b.days - a.days)
   }, [allSummoners, records])
 
+  // 페이지 로드 시 DB에서 기존 비활성화 상태 읽어오기
+  useEffect(() => {
+    const loadInactiveStatus = async () => {
+      const { data } = await supabase.from('summoners').select('name, is_inactive').eq('is_inactive', true)
+      if (data) {
+        const statusMap = new Map<string, boolean>()
+        for (const record of data) {
+          statusMap.set((record as any).name, true)
+        }
+        setInactiveStatusMap(statusMap)
+      }
+    }
+    loadInactiveStatus()
+  }, [])
+
   const deleteSummoner = async (name: string) => {
     if (!checkPassword()) return
     if (!confirm(`${name}을(를) 완전히 삭제할까요?`)) return
@@ -175,15 +191,20 @@ function AdminTab({ summoners, summonerScores, records }: { summoners: SummonerM
 
   const toggleInactive = async (name: string, currentInactive: boolean) => {
     if (!checkPassword()) return
+    const newInactiveStatus = !currentInactive
+    // 로컬 상태에 즉시 반영 (UI 업데이트)
+    setInactiveStatusMap(prev => new Map(prev).set(name, newInactiveStatus))
+    // DB에 저장
     const { error: err } = await supabase
       .from('summoners')
-      .update({ is_inactive: !currentInactive })
+      .update({ is_inactive: newInactiveStatus })
       .eq('name', name)
     if (err) {
       setError('업데이트 실패: ' + err.message)
+      // 실패 시 로컬 상태 되돌리기
+      setInactiveStatusMap(prev => new Map(prev).set(name, currentInactive))
       return
     }
-    window.location.reload()
   }
 
   const deleteInactivePlayer = async (name: string) => {
@@ -310,10 +331,7 @@ function AdminTab({ summoners, summonerScores, records }: { summoners: SummonerM
               <div className="empty">장기 미접속자가 없어요</div>
             ) : (
               inactiveList.map(({ name, days }: { name: string; days: number }) => {
-                const isInactive = Object.values(summoners[name] ?? {}).some((_, idx) => {
-                  const key = Object.keys(summoners[name] ?? {})[idx]
-                  return false // TODO: actual inactive status from DB
-                })
+                const isInactive = inactiveStatusMap.get(name) ?? false
                 return (
                   <div key={name} style={{
                     marginBottom: 10, padding: '10px 12px', background: 'var(--bg3)',
@@ -322,7 +340,10 @@ function AdminTab({ summoners, summonerScores, records }: { summoners: SummonerM
                   }}>
                     <div>
                       <span style={{ fontWeight: 700 }}>{name}</span>
-                      <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 8 }}>{days}일 미참여</span>
+                      <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 8 }}>
+                        {days}일 미참여
+                        {isInactive && <span style={{ marginLeft: 8, color: 'var(--red)', fontWeight: 700 }}>비활성화</span>}
+                      </span>
                     </div>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button className="btn btn-sm" onClick={() => toggleInactive(name, isInactive)}>
@@ -637,7 +658,7 @@ function TeamTab({
     // 후보 조합들을 모아둠 (점수차이, 라인차이, 총합, 결과)
     const candidates: { diff: number; lineDiff: number; total: number; result: BalanceResult }[] = []
 
-    for (let i = 0; i < 5000; i++) {
+    for (let i = 0; i < 1000; i++) {
       // 1) 각 플레이어 랜덤 라인 배정
       const assigned = players.map(p => {
         const preferredLine = LINE_PREFERENCE[p.name]
@@ -764,7 +785,7 @@ function TeamTab({
       bestDiff = fallbackDiff
     }
 
-    console.log('🟡 5000번 반복 끝, best:', best, 'bestDiff:', bestDiff, 'bestLineDiff:', bestLineDiff, '10점이하 후보수:', goodCandidates.length)
+    console.log('🟡 1000번 반복 끝, best:', best, 'bestDiff:', bestDiff, 'bestLineDiff:', bestLineDiff, '설정값이하 후보수:', goodCandidates.length)
 
     if (best && Math.abs(best.s1 - best.s2) > 15) {
       console.log('🔴 점수차 15 초과로 best를 null 처리:', Math.abs(best.s1 - best.s2))
