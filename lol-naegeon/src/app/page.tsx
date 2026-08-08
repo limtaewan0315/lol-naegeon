@@ -425,7 +425,7 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
         if (name && !cancelled) await loadPendingLineRequests(name)
       }
 
-      // 로그인 아이디로 실제 사용하는 값만 표시 (내부 시스템용 가짜 이메일은 노출하지 않음)
+      // 로그인 아이디로 실제 사용하는 값만 표시 (내부 인증키는 노출하지 않음)
       // 신규 가입자는 본인이 정한 아이디, 예전 방식(전화번호) 계정은 전화번호, 레거시 계정은 소환사명이 곧 아이디
       const loginIdMeta = (user?.user_metadata?.login_id ?? user?.user_metadata?.phone) as string | undefined
       if (!cancelled) setDisplayId(loginIdMeta || name || '')
@@ -512,7 +512,7 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
     setFieldError('')
 
     // 현재 비밀번호 확인 (재로그인 시도로 검증)
-    // 이메일을 추측해서 재구성하지 않고, 지금 로그인된 세션의 실제 이메일을 그대로 사용
+    // 아이디를 추측해서 내부 인증키를 재구성하지 않고, 지금 로그인된 세션에 저장된 실제 값을 그대로 사용
     const { data: { user: currentUser } } = await supabase.auth.getUser()
     if (!currentUser?.email) {
       setFieldError('계정 정보를 확인할 수 없어요. 새로고침 후 다시 시도해주세요.')
@@ -2827,50 +2827,50 @@ function isValidLoginId(raw: string): boolean {
   return LOGIN_ID_REGEX.test(raw.trim())
 }
 
-// Supabase Auth는 이메일 기반이라, 자유 아이디를 내부 전용 가짜 이메일로 변환해서 사용
+// 아이디 → 계정 시스템에 등록할 내부 인증키로 변환
 // (관리자 승인 시 DB 함수(approve_signup_request)가 만드는 계정과 동일한 규칙이어야 함)
-function loginIdToInternalEmail(id: string): string {
+function loginIdToAuthKey(id: string): string {
   return `${id.trim().toLowerCase()}@id.lol-naegeon.local`
 }
 
-// 010/011/016/017/018/019로 시작하는 국내 휴대폰번호 (하이픈 유무 무관)
-// — 예전 방식(전화번호 기반)으로 이미 승인된 계정의 로그인 호환을 위해 유지
-const PHONE_REGEX = /^01[016789]\d{7,8}$/
+// 예전에는 숫자로만 된 아이디 체계를 썼음(010/011/016/017/018/019로 시작하는 11자리 숫자, 하이픈 유무 무관)
+// — 그 시기에 만들어진 계정들의 로그인 호환을 위해 유지
+const OLD_NUMERIC_ID_REGEX = /^01[016789]\d{7,8}$/
 
-function normalizePhone(raw: string): string {
+function normalizeNumericId(raw: string): string {
   return raw.replace(/[^0-9]/g, '')
 }
 
-function isValidPhone(raw: string): boolean {
-  return PHONE_REGEX.test(normalizePhone(raw))
+function isOldNumericId(raw: string): boolean {
+  return OLD_NUMERIC_ID_REGEX.test(normalizeNumericId(raw))
 }
 
-function phoneToInternalEmail(phone: string): string {
-  return `${normalizePhone(phone)}@phone.lol-naegeon.local`
+function oldNumericIdToAuthKey(id: string): string {
+  return `${normalizeNumericId(id)}@phone.lol-naegeon.local`
 }
 
 // 문자열 → UTF-8 hex (Postgres의 encode(convert_to(text,'UTF8'),'hex')와 동일한 결과)
-// 레거시 소환사 계정(아이디=소환사명)을 이메일 형식의 local-part로 안전하게 변환하기 위함
+// 아주 예전 레거시 계정(아이디=소환사명)을 내부 인증키로 안전하게 변환하기 위함
 function toHexUtf8(str: string): string {
   return Array.from(new TextEncoder().encode(str))
     .map(b => b.toString(16).padStart(2, '0'))
     .join('')
 }
 
-// 소환사명(레거시 계정 아이디) → 내부 전용 가짜 이메일
+// 소환사명(레거시 계정 아이디) → 내부 인증키
 // SQL 마이그레이션(create-legacy-accounts.js)에서 생성한 계정과 동일한 규칙(hex 인코딩)을 사용해야 함
-function nameToInternalEmail(name: string): string {
+function nameToAuthKey(name: string): string {
   return `${toHexUtf8(name.trim())}@name.lol-naegeon.local`
 }
 
-// 로그인 화면의 "아이디" 입력값 → 실제 인증에 쓸 이메일
-// 자유 아이디 형식이면 신규 계정 방식으로, 휴대폰번호 형식이면 예전 방식(하위호환)으로,
+// 로그인 화면의 "아이디" 입력값 → 실제 인증에 쓸 내부 키
+// 자유 아이디 형식이면 신규 계정 방식으로, 예전 숫자형 아이디 형식이면 구버전 방식(하위호환)으로,
 // 그 외(소환사명 등)는 레거시 계정 방식으로 변환
-function idToInternalEmail(id: string): string {
+function idToAuthKey(id: string): string {
   const trimmed = id.trim()
-  if (isValidPhone(trimmed)) return phoneToInternalEmail(trimmed)
-  if (isValidLoginId(trimmed)) return loginIdToInternalEmail(trimmed)
-  return nameToInternalEmail(trimmed)
+  if (isOldNumericId(trimmed)) return oldNumericIdToAuthKey(trimmed)
+  if (isValidLoginId(trimmed)) return loginIdToAuthKey(trimmed)
+  return nameToAuthKey(trimmed)
 }
 
 
@@ -2972,7 +2972,7 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
     setError('')
     try {
       const { error: loginErr } = await supabase.auth.signInWithPassword({
-        email: idToInternalEmail(loginId),
+        email: idToAuthKey(loginId),
         password,
       })
       if (loginErr) {
@@ -3570,6 +3570,7 @@ type Room = {
   host_summoner_name: string
   members: RoomMember[]
   status: 'waiting' | 'playing'
+  match_mode: 'line' | 'random'
   result: BalanceResult | null
   pending_result: BalanceResult | null
   balance_started_at: string | null
@@ -3580,12 +3581,14 @@ type Room = {
 function RoomsTab({
   summoners,
   summonerScores,
+  records,
   idPrefixMap,
   pendingLinesMap,
   onRecord,
 }: {
   summoners: SummonerMap
   summonerScores: SummonerScoreMap
+  records: GameRecord[]
   idPrefixMap: Record<string, string>
   pendingLinesMap: Record<string, Line[]>
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
@@ -3711,6 +3714,12 @@ function RoomsTab({
     await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
   }
 
+  // 매칭 방식(라인밸런싱/올랜덤)은 방장만 변경 가능
+  const updateMatchMode = async (mode: 'line' | 'random') => {
+    if (!myRoom || !isHost) return
+    await supabase.from('rooms').update({ match_mode: mode, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
+  }
+
   const [balancing, setBalancing] = useState(false)
   const [balanceError, setBalanceError] = useState('')
 
@@ -3829,7 +3838,8 @@ function RoomsTab({
       const isBetterFallback = diff < fallbackDiff || (diff === fallbackDiff && lineDiff < fallbackLineDiff)
       if (isBetterFallback) { fallbackDiff = diff; fallbackLineDiff = lineDiff; fallback = candidateResult }
 
-      if (maxLineDiff >= 30 || botDiff >= 35) continue
+      // 라인밸런싱 모드에서만 라인별/바텀 격차 필터링 적용. 올랜덤 모드는 팀 총점 차이만 봄.
+      if (myRoom.match_mode === 'line' && (maxLineDiff >= 30 || botDiff >= 35)) continue
 
       candidates.push({ diff, lineDiff, total: s1 + s2, result: candidateResult })
 
@@ -4135,6 +4145,38 @@ function RoomsTab({
                 })}
               </div>
 
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8,
+                padding: '8px 10px', background: 'var(--bg3)', borderRadius: 'var(--radius)',
+                border: '0.5px solid var(--border)'
+              }}>
+                <span style={{ fontSize: 12, color: 'var(--text3)' }}>매칭 방식</span>
+                {isHost ? (
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
+                      <input
+                        type="radio"
+                        checked={myRoom.match_mode === 'line'}
+                        onChange={() => updateMatchMode('line')}
+                      />
+                      라인밸런싱
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
+                      <input
+                        type="radio"
+                        checked={myRoom.match_mode === 'random'}
+                        onChange={() => updateMatchMode('random')}
+                      />
+                      올랜덤
+                    </label>
+                  </div>
+                ) : (
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>
+                    {myRoom.match_mode === 'line' ? '라인밸런싱' : '올랜덤'}
+                  </span>
+                )}
+              </div>
+
               {myMember && (
                 <button
                   className={`btn ${myMember.ready ? '' : 'btn-gold'}`}
@@ -4170,39 +4212,231 @@ function RoomsTab({
           )}
 
           {myRoom.result && (
-            <div>
-              <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, color: 'var(--blue)', marginBottom: 6 }}>🔵 블루팀 ({myRoom.result.s1.toFixed(1)})</div>
-                  {sortByLine(myRoom.result.team1).map(p => (
-                    <div key={p.name} className="player-row" style={{ padding: '6px 10px', marginBottom: 4 }}>
-                      <span className="badge b-line" style={{ width: 48, textAlign: 'center' }}>{p.line}</span>
-                      <span style={{ flex: 1, fontSize: 12 }}><NameWithIdBadge name={p.name} idPrefixMap={idPrefixMap} /></span>
-                      <span className="badge b-tier" style={{ fontSize: 10 }}>{p.tier}</span>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, color: 'var(--red)', marginBottom: 6 }}>🔴 레드팀 ({myRoom.result.s2.toFixed(1)})</div>
-                  {sortByLine(myRoom.result.team2).map(p => (
-                    <div key={p.name} className="player-row" style={{ padding: '6px 10px', marginBottom: 4 }}>
-                      <span className="badge b-line" style={{ width: 48, textAlign: 'center' }}>{p.line}</span>
-                      <span style={{ flex: 1, fontSize: 12 }}><NameWithIdBadge name={p.name} idPrefixMap={idPrefixMap} /></span>
-                      <span className="badge b-tier" style={{ fontSize: 10 }}>{p.tier}</span>
-                    </div>
-                  ))}
-                </div>
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <button className="btn btn-gold" onClick={async () => {
+                  const sortedT1 = sortByLine(myRoom.result!.team1)
+                  const sortedT2 = sortByLine(myRoom.result!.team2)
+                  const t1Lines = sortedT1.map(p => `${p.line} **${p.name}** (${p.tier})`).join('\n')
+                  const t2Lines = sortedT2.map(p => `${p.line} **${p.name}** (${p.tier})`).join('\n')
+                  const diff = Math.abs(myRoom.result!.s1 - myRoom.result!.s2).toFixed(1)
+                  const msg = {
+                    embeds: [{
+                      title: `🎮 팀 편성 결과 (${myRoom.name})`,
+                      color: 0x0bc4e3,
+                      fields: [
+                        { name: `🔵 블루팀 (${myRoom.result!.s1.toFixed(1)}점)`, value: t1Lines, inline: true },
+                        { name: `🔴 레드팀 (${myRoom.result!.s2.toFixed(1)}점)`, value: t2Lines, inline: true },
+                      ],
+                      footer: { text: `점수 차이: ${diff}점` },
+                      timestamp: new Date().toISOString(),
+                    }]
+                  }
+                  try {
+                    const res = await fetch(DISCORD_WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(msg) })
+                    if (res.ok) alert('디스코드에 공유됐어요! 🎉')
+                    else alert(`디스코드 전송 실패 (${res.status}): ${await res.text()}`)
+                  } catch (err) {
+                    alert('디스코드 전송 중 오류 발생: ' + (err as Error).message)
+                  }
+                }}>📢 디스코드 공유</button>
+                {isHost && (
+                  <button className="btn btn-danger" onClick={async () => {
+                    if (!confirm('팀편성을 취소하고 대기 화면으로 돌아갈까요?')) return
+                    await supabase.from('rooms').update({ result: null, pending_result: null, balance_started_at: null, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
+                  }}>🚪 탈주하기</button>
+                )}
               </div>
 
-              {!isRecording ? (
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button className="btn btn-blue" onClick={() => recordWin('blue')} style={{ flex: 1 }}>🔵 블루팀 승리</button>
-                  <button className="btn btn-red" onClick={() => recordWin('red')} style={{ flex: 1 }}>🔴 레드팀 승리</button>
-                </div>
-              ) : (
-                <div className="empty">기록 중...</div>
-              )}
-            </div>
+              <div className="teams-grid">
+                {[
+                  { label: '🔵 블루팀', players: sortByLine(myRoom.result.team1), score: myRoom.result.s1, cls: 'blue' },
+                  { label: '🔴 레드팀', players: sortByLine(myRoom.result.team2), score: myRoom.result.s2, cls: 'red' },
+                ].map(team => (
+                  <div key={team.cls} className={`team-card ${team.cls}`}>
+                    <div className="team-header">
+                      <span style={{ fontWeight: 700 }}>{team.label}</span>
+                      <span style={{ fontSize: 13, color: 'var(--text2)' }}>{team.score.toFixed(1)}점</span>
+                    </div>
+                    {team.players.map(p => (
+                      <div key={p.name} className="team-player">
+                        <span style={{ width: 36, fontSize: 11, fontWeight: 500, color: 'var(--text2)', flexShrink: 0 }}>{p.line}</span>
+                        <span style={{ flex: 1, fontWeight: 500 }}><NameWithIdBadge name={p.name} idPrefixMap={idPrefixMap} /></span>
+                        <span className="badge b-tier" style={{ fontSize: 10 }}>{p.tier}</span>
+                        <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 4 }}>{p.score.toFixed(1)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ textAlign: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 13, color: 'var(--text2)' }}>
+                  점수 차이: <strong style={{ color: 'var(--gold)' }}>{Math.abs(myRoom.result.s1 - myRoom.result.s2).toFixed(1)}점</strong>
+                </span>
+              </div>
+
+              {/* 예상 승률 */}
+              {(() => {
+                const result = myRoom.result!
+                const blue1 = sortByLine(result.team1)
+                const red1 = sortByLine(result.team2)
+                const TIER_SCORE_MAP: Record<string, number> = {}
+                TIERS.forEach((t, i) => { TIER_SCORE_MAP[t] = (TIERS.length - i) * 10 })
+
+                const lineWrs = LINES.map(line => {
+                  const bp = blue1.find(p => p.line === line)
+                  const rp = red1.find(p => p.line === line)
+                  if (!bp || !rp) return null
+                  const matchRecs = records.filter(r => {
+                    const bpInBlue = r.blue.some(p => p.name === bp.name && p.line === line)
+                    const bpInRed = r.red.some(p => p.name === bp.name && p.line === line)
+                    const rpInBlue = r.blue.some(p => p.name === rp.name && p.line === line)
+                    const rpInRed = r.red.some(p => p.name === rp.name && p.line === line)
+                    return (bpInBlue && rpInRed) || (bpInRed && rpInBlue)
+                  })
+                  const total = matchRecs.length
+                  if (total > 0) {
+                    const bpWin = matchRecs.filter(r => {
+                      const bpInBlue = r.blue.some(p => p.name === bp.name && p.line === line)
+                      return (bpInBlue && r.winner === 'blue') || (!bpInBlue && r.winner === 'red')
+                    }).length
+                    return { line, wr: bpWin / total, total, estimated: false }
+                  } else {
+                    const bs = TIER_SCORE_MAP[bp.tier] ?? 50
+                    const rs = TIER_SCORE_MAP[rp.tier] ?? 50
+                    const diff2 = bs - rs
+                    const wr = Math.min(0.9, Math.max(0.1, 0.5 + diff2 * 0.01))
+                    return { line, wr, total: 0, estimated: true }
+                  }
+                }).filter(Boolean) as { line: string; wr: number; total: number; estimated: boolean }[]
+
+                const totalWeight = lineWrs.reduce((s, l) => s + (l.total > 0 ? l.total : 3), 0)
+                const blueWr = lineWrs.reduce((s, l) => s + l.wr * (l.total > 0 ? l.total : 3), 0) / totalWeight
+                const blueWrPct = Math.round(blueWr * 100)
+                const redWrPct = 100 - blueWrPct
+                const hasEstimated = lineWrs.some(l => l.estimated)
+
+                return (
+                  <div className="card">
+                    <div className="card-title">예상 승률</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--blue)' }}>🔵 블루팀</div>
+                      <div style={{ fontSize: 11, color: 'var(--gold)', letterSpacing: 2 }}>VS</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--red)' }}>🔴 레드팀</div>
+                    </div>
+                    <div style={{ position: 'relative', height: 38, background: 'var(--bg)', borderRadius: 'var(--radius)', overflow: 'hidden', marginBottom: 10, border: '1px solid var(--border)' }}>
+                      <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${blueWrPct}%`, background: 'linear-gradient(90deg, rgba(11,196,227,0.35), rgba(11,196,227,0.1))', display: 'flex', alignItems: 'center', paddingLeft: 12 }}>
+                        <span style={{ fontSize: 17, fontWeight: 600, color: 'var(--blue)' }}>{blueWrPct}%</span>
+                      </div>
+                      <div style={{ position: 'absolute', right: 0, top: 0, height: '100%', width: `${redWrPct}%`, background: 'linear-gradient(270deg, rgba(232,64,87,0.35), rgba(232,64,87,0.1))', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 12 }}>
+                        <span style={{ fontSize: 17, fontWeight: 600, color: 'var(--red)' }}>{redWrPct}%</span>
+                      </div>
+                      <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: 'rgba(200,155,60,0.4)' }} />
+                      <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 5, height: 5, background: 'var(--gold)', borderRadius: '50%' }} />
+                    </div>
+                    {hasEstimated && (
+                      <div style={{ fontSize: 10, color: 'var(--gold3)', background: 'rgba(120,90,40,0.08)', border: '1px solid rgba(120,90,40,0.2)', borderRadius: 'var(--radius)', padding: '5px 9px', marginTop: 7 }}>
+                        ⚠ 전적이 없는 라인은 티어 점수로 추정되어 정확도가 낮을 수 있어요
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+
+              {/* 라인별 맞대결 전적 */}
+              <div className="card">
+                <div className="card-title">라인별 맞대결 전적</div>
+                {(() => {
+                  const result = myRoom.result!
+                  const blue1 = sortByLine(result.team1)
+                  const red1 = sortByLine(result.team2)
+                  const matchups = LINES.map(line => {
+                    const bp = blue1.find(p => p.line === line)
+                    const rp = red1.find(p => p.line === line)
+                    if (!bp || !rp) return null
+                    const matchRecords = records.filter(r => {
+                      const bpInBlue = r.blue.some(p => p.name === bp.name && p.line === line)
+                      const bpInRed = r.red.some(p => p.name === bp.name && p.line === line)
+                      const rpInBlue = r.blue.some(p => p.name === rp.name && p.line === line)
+                      const rpInRed = r.red.some(p => p.name === rp.name && p.line === line)
+                      return (bpInBlue && rpInRed) || (bpInRed && rpInBlue)
+                    })
+                    const total = matchRecords.length
+                    const bpWin = matchRecords.filter(r => {
+                      const bpInBlue = r.blue.some(p => p.name === bp.name && p.line === line)
+                      return (bpInBlue && r.winner === 'blue') || (!bpInBlue && r.winner === 'red')
+                    }).length
+                    return { line, bp, rp, total, bpWin, rpWin: total - bpWin }
+                  }).filter(Boolean)
+
+                  return (
+                    <div>
+                      {matchups.map(m => {
+                        if (!m) return null
+                        const bpWr = m.total > 0 ? Math.round(m.bpWin / m.total * 100) : null
+                        const rpWr = m.total > 0 ? Math.round(m.rpWin / m.total * 100) : null
+                        return (
+                          <div key={m.line} style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            padding: '10px 12px', marginBottom: 6,
+                            background: 'var(--bg3)', borderRadius: 'var(--radius)',
+                            border: '0.5px solid var(--border)'
+                          }}>
+                            <div style={{ flex: 1, textAlign: 'right' }}>
+                              <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--blue)' }}>{m.bp.name}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text2)' }}>{m.bp.tier}</div>
+                            </div>
+                            <div style={{ textAlign: 'center', minWidth: 100 }}>
+                              <div style={{ marginBottom: 4 }}>
+                                <span className="badge b-line" style={{ fontSize: 10 }}>{m.line}</span>
+                              </div>
+                              {m.total === 0 ? (
+                                <div style={{ fontSize: 11, color: 'var(--text3)' }}>전적 없음</div>
+                              ) : (
+                                <>
+                                  <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 4 }}>
+                                    <span style={{ color: 'var(--blue)', fontWeight: 600 }}>{m.bpWin}승</span>
+                                    <span style={{ margin: '0 4px' }}>-</span>
+                                    <span style={{ color: 'var(--red)', fontWeight: 600 }}>{m.rpWin}승</span>
+                                    <span style={{ color: 'var(--text3)', marginLeft: 4 }}>({m.total}판)</span>
+                                  </div>
+                                  <div style={{ height: 4, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden', position: 'relative' }}>
+                                    <div style={{ position: 'absolute', left: 0, top: 0, height: '100%', width: `${bpWr}%`, background: 'var(--blue)', borderRadius: 2 }} />
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, marginTop: 2 }}>
+                                    <span style={{ color: bpWr && bpWr >= 50 ? 'var(--blue)' : 'var(--text3)' }}>{bpWr}%</span>
+                                    <span style={{ color: rpWr && rpWr >= 50 ? 'var(--red)' : 'var(--text3)' }}>{rpWr}%</span>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                            <div style={{ flex: 1, textAlign: 'left' }}>
+                              <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--red)' }}>{m.rp.name}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text2)' }}>{m.rp.tier}</div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
+              </div>
+
+              <div className="card" style={{ textAlign: 'center' }}>
+                <div className="card-title" style={{ marginBottom: 8 }}>경기 결과 기록</div>
+                <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 4 }}>어느 팀이 이겼나요?</div>
+                <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>🏆 이긴 팀은 티어 UP, 진 팀은 티어 DOWN</div>
+                {!isRecording ? (
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                    <button className="btn btn-blue" onClick={() => recordWin('blue')}>🔵 블루팀 승리</button>
+                    <button className="btn btn-red" onClick={() => recordWin('red')}>🔴 레드팀 승리</button>
+                  </div>
+                ) : (
+                  <div className="empty">기록 중...</div>
+                )}
+              </div>
+            </>
           )}
 
           <button className="btn btn-danger" onClick={leaveRoom} style={{ width: '100%', marginTop: 12 }}>
@@ -4296,7 +4530,7 @@ function ForcePasswordChangeGate({ onDone }: { onDone: () => void }) {
     setSaving(true)
     setError('')
 
-    // 이메일을 추측해서 재구성하지 않고, 지금 로그인된 세션의 실제 이메일을 그대로 사용
+    // 아이디를 추측해서 내부 인증키를 재구성하지 않고, 지금 로그인된 세션에 저장된 실제 값을 그대로 사용
     const { data: { user: currentUser } } = await supabase.auth.getUser()
     if (!currentUser?.email) {
       setError('계정 정보를 확인할 수 없어요. 새로고침 후 다시 시도해주세요.')
@@ -4670,7 +4904,7 @@ function MainApp() {
             <div className="empty">불러오는 중...</div>
           ) : (
             <>
-              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} idPrefixMap={idPrefixMap} pendingLinesMap={pendingLinesMap} onRecord={addRecord} />}
+              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} pendingLinesMap={pendingLinesMap} onRecord={addRecord} />}
               {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
               {tab === 'ranking' && <RankingTab records={records} />}
               {tab === 'hall' && <HallOfFameTab records={records} />}
