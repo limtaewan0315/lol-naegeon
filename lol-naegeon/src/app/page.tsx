@@ -2527,26 +2527,90 @@ function RankingTab({ records }: { records: GameRecord[] }) {
   )
 }
 
+// ── 휴대폰번호 유틸 ──────────────────────────────────────────────
+// 010/011/016/017/018/019로 시작하는 국내 휴대폰번호 (하이픈 유무 무관)
+const PHONE_REGEX = /^01[016789]\d{7,8}$/
+
+function normalizePhone(raw: string): string {
+  return raw.replace(/[^0-9]/g, '')
+}
+
+function isValidPhone(raw: string): boolean {
+  return PHONE_REGEX.test(normalizePhone(raw))
+}
+
+// Supabase Auth는 이메일 기반이라, 휴대폰번호를 내부 전용 가짜 이메일로 변환해서 사용
+// (실제 전화번호는 user_metadata.phone에 그대로 저장됨)
+function phoneToInternalEmail(phone: string): string {
+  return `${normalizePhone(phone)}@phone.lol-naegeon.local`
+}
+
+// ── 개인정보 수집·이용 동의 상세 내용 ──────────────────────────────────
+const PRIVACY_CONSENT_DETAIL = `[개인정보 수집·이용 동의]
+
+1. 수집하는 개인정보 항목
+   - 필수 항목: 휴대폰번호, 비밀번호(암호화 저장)
+
+2. 개인정보의 수집 및 이용 목적
+   - 회원 식별 및 로그인 인증
+   - 서비스(내전 매니저) 이용에 따른 본인 확인
+   - 부정 이용 방지 및 문의 대응
+
+3. 개인정보의 보유 및 이용 기간
+   - 회원 탈퇴 시까지 보유하며, 탈퇴 즉시 파기합니다.
+   - 단, 관계 법령에 따라 보존할 의무가 있는 경우 해당 법령이 정한 기간 동안 보관합니다.
+
+4. 동의 거부 권리 및 불이익 안내
+   - 귀하는 개인정보 수집·이용에 대한 동의를 거부할 권리가 있습니다.
+   - 다만, 필수 항목에 대한 동의를 거부할 경우 회원가입 및 서비스 이용이 제한될 수 있습니다.
+
+5. 기타
+   - 수집된 개인정보는 명시된 목적 외 다른 용도로 사용되지 않으며, 본인 동의 없이 제3자에게 제공하지 않습니다.`
+
 // ── 로그인 페이지 ──────────────────────────────────────────────
 function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
-  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
   const [isSignUp, setIsSignUp] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [agreed, setAgreed] = useState(false)
+  const [showConsentDetail, setShowConsentDetail] = useState(false)
 
   const handleAuth = async () => {
-    if (!email || !password) {
-      setError('이메일과 비밀번호를 입력해주세요')
+    if (!phone || !password) {
+      setError('휴대폰번호와 비밀번호를 입력해주세요')
       return
     }
+    if (!isValidPhone(phone)) {
+      setError('올바른 휴대폰번호 형식이 아니에요 (예: 01012345678)')
+      return
+    }
+    if (isSignUp && !agreed) {
+      setError('개인정보 수집·이용에 동의해야 회원가입이 가능해요')
+      return
+    }
+
     setLoading(true)
     setError('')
+
+    const internalEmail = phoneToInternalEmail(phone)
+    const normalizedPhone = normalizePhone(phone)
 
     try {
       if (isSignUp) {
         // 회원가입
-        const { error: signUpErr } = await supabase.auth.signUp({ email, password })
+        const { error: signUpErr } = await supabase.auth.signUp({
+          email: internalEmail,
+          password,
+          options: {
+            data: {
+              phone: normalizedPhone,
+              privacy_consent: true,
+              privacy_consent_at: new Date().toISOString(),
+            },
+          },
+        })
         if (signUpErr) {
           setError('회원가입 실패: ' + signUpErr.message)
           setLoading(false)
@@ -2555,13 +2619,17 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
         setError('') // 성공 시 에러 메시지 제거
         alert('회원가입 성공! 이제 로그인해주세요.')
         setIsSignUp(false)
-        setEmail('')
+        setPhone('')
         setPassword('')
+        setAgreed(false)
       } else {
         // 로그인
-        const { error: loginErr } = await supabase.auth.signInWithPassword({ email, password })
+        const { error: loginErr } = await supabase.auth.signInWithPassword({
+          email: internalEmail,
+          password,
+        })
         if (loginErr) {
-          setError('로그인 실패: ' + loginErr.message)
+          setError('로그인 실패: 휴대폰번호 또는 비밀번호를 확인해주세요')
           setLoading(false)
           return
         }
@@ -2590,12 +2658,13 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
           <input
-            type="email"
-            placeholder="이메일"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
+            type="tel"
+            placeholder="휴대폰번호 (예: 01012345678)"
+            value={phone}
+            onChange={e => setPhone(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleAuth()}
             disabled={loading}
+            maxLength={13}
           />
           <input
             type="password"
@@ -2606,6 +2675,43 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
             disabled={loading}
           />
         </div>
+
+        {isSignUp && (
+          <div style={{ marginBottom: 16 }}>
+            <label style={{
+              display: 'flex', alignItems: 'flex-start', gap: 8,
+              fontSize: 12, color: 'var(--text2)', cursor: 'pointer'
+            }}>
+              <input
+                type="checkbox"
+                checked={agreed}
+                onChange={e => setAgreed(e.target.checked)}
+                disabled={loading}
+                style={{ marginTop: 2 }}
+              />
+              <span>
+                (필수) 개인정보 수집·이용에 동의합니다.{' '}
+                <span
+                  onClick={(e) => { e.preventDefault(); setShowConsentDetail(v => !v) }}
+                  style={{ color: 'var(--gold, #d4af37)', textDecoration: 'underline', cursor: 'pointer' }}
+                >
+                  {showConsentDetail ? '내용 접기' : '자세히보기'}
+                </span>
+              </span>
+            </label>
+
+            {showConsentDetail && (
+              <div style={{
+                marginTop: 8, padding: 10, fontSize: 11, lineHeight: 1.5,
+                whiteSpace: 'pre-wrap', color: 'var(--text3)',
+                background: 'var(--bg1, rgba(0,0,0,0.2))', border: '0.5px solid var(--border2)',
+                borderRadius: 6, maxHeight: 180, overflowY: 'auto'
+              }}>
+                {PRIVACY_CONSENT_DETAIL}
+              </div>
+            )}
+          </div>
+        )}
 
         {error && <div className="error" style={{ marginBottom: 12 }}>{error}</div>}
 
@@ -2620,7 +2726,7 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
 
         <button
           className="btn"
-          onClick={() => { setIsSignUp(!isSignUp); setError('') }}
+          onClick={() => { setIsSignUp(!isSignUp); setError(''); setAgreed(false); setShowConsentDetail(false) }}
           disabled={loading}
           style={{ width: '100%', fontSize: 12 }}
         >
