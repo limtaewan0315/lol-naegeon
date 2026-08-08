@@ -3573,9 +3573,17 @@ type Room = {
   match_mode: 'line' | 'random'
   result: BalanceResult | null
   pending_result: BalanceResult | null
+  last_result: BalanceResult | null
   balance_started_at: string | null
   created_at: string
   has_password: boolean
+}
+
+// 팀편성 결과를 blue/red 구분 없이 비교 가능한 시그니처로 변환 (직전 조합과의 완전 동일 여부 판단용)
+function resultSignature(r: BalanceResult): string {
+  const teamSig = (team: TeamPlayer[]) => team.map(p => `${p.name}:${p.line}`).sort().join(',')
+  const sigs = [teamSig(r.team1), teamSig(r.team2)].sort()
+  return sigs.join('|')
 }
 
 function RoomsTab({
@@ -3835,6 +3843,8 @@ function RoomsTab({
     let fallbackDiff = Infinity
     let fallbackLineDiff = Infinity
     const candidates: { diff: number; lineDiff: number; total: number; result: BalanceResult }[] = []
+    // 직전 팀편성과 완전히 동일한 조합은 후보에서 제외 (blue/red가 바뀌어도 같은 것으로 취급)
+    const lastSig = myRoom.last_result ? resultSignature(myRoom.last_result) : null
 
     for (let i = 0; i < 1000; i++) {
       const assigned = players.map(p => {
@@ -3911,6 +3921,9 @@ function RoomsTab({
         team2: t2.map(p => ({ name: p.name, tier: summoners[p.name]?.[p.line] ?? '골드2', line: p.line, score: p.score })),
         s1, s2,
       }
+
+      // 직전 팀편성과 100% 동일한 조합이면 이번 후보에서 완전히 제외
+      if (lastSig && resultSignature(candidateResult) === lastSig) continue
 
       const isBetterFallback = diff < fallbackDiff || (diff === fallbackDiff && lineDiff < fallbackLineDiff)
       if (isBetterFallback) { fallbackDiff = diff; fallbackLineDiff = lineDiff; fallback = candidateResult }
@@ -4046,8 +4059,9 @@ function RoomsTab({
     onRecord({ winner, blue: blueData, red: redData, skipInsert: true })
 
     // 방 초기화: 참가자는 유지하되 전부 준비 해제 (다음 판 위해 다시 준비해야 함)
+    // 방금 진행한 팀편성은 last_result로 저장 — 다음 팀편성 때 완전히 같은 조합이 다시 나오지 않게 하기 위함
     const resetMembers = myRoom.members.map(m => ({ ...m, ready: false }))
-    await supabase.from('rooms').update({ members: resetMembers }).eq('id', myRoom.id)
+    await supabase.from('rooms').update({ members: resetMembers, last_result: result }).eq('id', myRoom.id)
 
     // 디스코드 전송
     try {
@@ -4332,7 +4346,8 @@ function RoomsTab({
                 {isHost && (
                   <button className="btn btn-danger" onClick={async () => {
                     if (!confirm('팀편성을 취소하고 대기 화면으로 돌아갈까요?')) return
-                    await supabase.from('rooms').update({ result: null, pending_result: null, balance_started_at: null, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
+                    // 취소한 조합도 last_result로 남겨서, 다시 팀편성할 때 같은 조합이 반복되지 않게 함
+                    await supabase.from('rooms').update({ result: null, pending_result: null, balance_started_at: null, last_result: myRoom.result, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
                   }}>🚪 탈주하기</button>
                 )}
               </div>
