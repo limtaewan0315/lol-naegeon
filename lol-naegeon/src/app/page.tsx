@@ -135,6 +135,119 @@ const TIER_SCORES: Record<string, number> = {
   '챌린저 15층': 61, '챌린저 16층': 61, '챌린저 17층': 62, '리그오브레전드': 62,
 }
 
+// ── 관리자 탭 ──────────────────────────────────────────────
+function AdminTab({ summoners, summonerScores }: { summoners: SummonerMap; summonerScores: SummonerScoreMap }) {
+  const [editingName, setEditingName] = useState<string | null>(null)
+  const [editingLine, setEditingLine] = useState<Line | ''>('')
+  const [editingTier, setEditingTier] = useState('')
+  const [error, setError] = useState('')
+
+  const allSummoners = Object.keys(summoners).sort()
+
+  const deleteSummoner = async (name: string) => {
+    if (!checkPassword()) return
+    if (!confirm(`${name}을(를) 완전히 삭제할까요?`)) return
+    setError('')
+    
+    // 소환사의 모든 라인 데이터 삭제
+    const lines = Object.keys(summoners[name] ?? {})
+    for (const line of lines) {
+      await supabase.from('summoners').delete().eq('name', name).eq('line', line)
+    }
+    window.location.reload()
+  }
+
+  const startEdit = (name: string, line: Line, tier: string) => {
+    setEditingName(name)
+    setEditingLine(line)
+    setEditingTier(tier)
+    setError('')
+  }
+
+  const saveEdit = async () => {
+    if (!editingName || editingLine === '') return
+    if (!checkPassword()) return
+    setError('')
+
+    const { error: err } = await supabase
+      .from('summoners')
+      .update({ tier: editingTier })
+      .eq('name', editingName)
+      .eq('line', editingLine)
+    
+    if (err) {
+      setError('업데이트 실패: ' + err.message)
+      return
+    }
+
+    setEditingName(null)
+    setEditingLine('')
+    setEditingTier('')
+    window.location.reload()
+  }
+
+  const cancelEdit = () => {
+    setEditingName(null)
+    setEditingLine('')
+    setEditingTier('')
+    setError('')
+  }
+
+  return (
+    <div>
+      <div className="card">
+        <div className="card-title">👨‍💼 소환사 관리</div>
+        {error && <div className="error">{error}</div>}
+        <div style={{ maxHeight: 600, overflowY: 'auto' }}>
+          {allSummoners.length === 0 ? (
+            <div className="empty">등록된 소환사가 없어요</div>
+          ) : (
+            allSummoners.map(name => (
+              <div key={name} style={{ marginBottom: 14, paddingBottom: 10, borderBottom: '0.5px solid var(--border2)' }}>
+                <div style={{ fontWeight: 700, marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>{name}</span>
+                  <button className="btn btn-danger btn-sm" onClick={() => deleteSummoner(name)}>삭제</button>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {Object.entries(summoners[name] ?? {}).map(([line, tier]) => (
+                    <div key={`${name}-${line}`} style={{
+                      background: 'var(--bg3)', padding: '8px 10px', borderRadius: 'var(--radius)',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12
+                    }}>
+                      {editingName === name && editingLine === line ? (
+                        <>
+                          <span style={{ minWidth: 50 }}>{line}</span>
+                          <input
+                            type="text"
+                            value={editingTier}
+                            onChange={e => setEditingTier(e.target.value)}
+                            style={{ flex: 1, margin: '0 8px' }}
+                            placeholder="티어명"
+                          />
+                          <button className="btn btn-sm" style={{ marginRight: 4 }} onClick={saveEdit}>저장</button>
+                          <button className="btn btn-sm" onClick={cancelEdit}>취소</button>
+                        </>
+                      ) : (
+                        <>
+                          <span style={{ minWidth: 50 }}>{line}</span>
+                          <span style={{ color: 'var(--text2)' }}>
+                            {tier} (점수: {summonerScores[name]?.[line as Line] ?? 0})
+                          </span>
+                          <button className="btn btn-sm" onClick={() => startEdit(name, line as Line, tier)}>편집</button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── 소환사 관리 탭 ──────────────────────────────────────────────
 function SummonerTab({ summoners, summonerScores, onRefresh }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; onRefresh: () => void }) {
   const [name, setName] = useState('')
@@ -2302,7 +2415,8 @@ function RankingTab({ records }: { records: GameRecord[] }) {
 
 // ── 메인 페이지 ──────────────────────────────────────────────
 export default function Home() {
-  const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'hall' | 'stats' | 'summoners'>('team')
+  const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'hall' | 'stats' | 'summoners' | 'admin'>('team')
+  const [isAdmin, setIsAdmin] = useState(false)
   const [records, setRecords] = useState<GameRecord[]>([])
   const [summoners, setSummoners] = useState<SummonerMap>({})
   const [summonerScores, setSummonerScores] = useState<SummonerScoreMap>({})
@@ -2535,9 +2649,31 @@ export default function Home() {
         />
       </div>
 
-      <div className="header" style={{ background: 'transparent', backdropFilter: 'none' }}>
-        <div className="header-title">⚔ 내전 매니저</div>
-        <div className="header-sub">티어·라인 기반 팀 균형 매칭 + 전적 기록</div>
+      <div className="header" style={{ background: 'transparent', backdropFilter: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <div className="header-title">⚔ 내전 매니저</div>
+          <div className="header-sub">티어·라인 기반 팀 균형 매칭 + 전적 기록</div>
+        </div>
+        <button
+          className={`btn btn-sm${isAdmin ? ' btn-gold' : ''}`}
+          onClick={() => {
+            if (isAdmin) {
+              setIsAdmin(false)
+              setTab('team')
+            } else {
+              const pwd = prompt('관리자 코드를 입력하세요')
+              if (pwd === ADMIN_PASSWORD) {
+                setIsAdmin(true)
+                setTab('admin')
+              } else if (pwd) {
+                alert('코드가 틀렸어요')
+              }
+            }
+          }}
+          style={{ fontSize: 11, whiteSpace: 'nowrap' }}
+        >
+          {isAdmin ? '🔓 로그아웃' : '🔒 관리자'}
+        </button>
       </div>
 
       <div className="tabs" style={{ background: 'rgba(6,17,31,0.75)' }}>
@@ -2559,6 +2695,12 @@ export default function Home() {
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} summonerScores={summonerScores} tierHistory={tierHistory} />}
 
           {tab === 'summoners' && <SummonerTab summoners={summoners} summonerScores={summonerScores} onRefresh={fetchAll} />}
+
+          {tab === 'admin' && isAdmin && (
+            <div>
+              <AdminTab summoners={summoners} summonerScores={summonerScores} />
+            </div>
+          )}
         </>
       )}
     </div>
