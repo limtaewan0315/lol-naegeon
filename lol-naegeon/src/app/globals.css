@@ -140,6 +140,17 @@ input, select {
 input:focus, select:focus { border-color: var(--gold); }
 select option { background: var(--bg3); }
 
+/* 라디오/체크박스는 위 input 공통 스타일(배경/패딩/테두리)이 적용되면
+   네이티브 체크 표시가 안 보이게 되므로 별도로 초기화함 */
+input[type="radio"], input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+  border: none;
+  background: none;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+
 /* 버튼 */
 .btn {
   padding: 8px 16px;
@@ -294,6 +305,52 @@ select option { background: var(--bg3); }
   .add-row input { grid-column: 1 / -1; }
   .teams-grid { grid-template-columns: 1fr; }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* 내전방 레이아웃: 본문 + 오른쪽 채팅 사이드바 */
+.room-layout {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 12px;
+  align-items: start;
+}
+.room-chat {
+  background: var(--bg2);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  height: 520px;
+  position: sticky;
+  top: 12px;
+}
+.room-chat-header {
+  padding: 10px 12px;
+  border-bottom: 0.5px solid var(--border);
+  font-size: 12px;
+  color: var(--text3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.room-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.room-chat-input {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  border-top: 0.5px solid var(--border);
+}
+.room-chat-input input { flex: 1; }
+
+@media (max-width: 900px) {
+  .room-layout { grid-template-columns: 1fr; }
+  .room-chat { height: 320px; position: static; }
 }
 
 /* 모바일에서 캐릭터 이미지 숨김 */
