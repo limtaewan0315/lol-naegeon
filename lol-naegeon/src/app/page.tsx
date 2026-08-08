@@ -393,7 +393,7 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
     return () => { cancelled = true }
   }, [])
 
-  const myLines = summonerName ? (summoners[summonerName] ?? {}) : {}
+  const myLines: Partial<Record<Line, string>> = summonerName ? (summoners[summonerName] ?? {}) : {}
   const registeredLines = (Object.keys(myLines) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b])
   const availableLines = LINES.filter(l => !registeredLines.includes(l))
   const canAddMore = registeredLines.length < 5 && availableLines.length > 0
@@ -449,9 +449,9 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
             {registeredLines.map(l => (
               <div key={l} className="player-row" style={{ padding: '6px 10px' }}>
                 <span className="badge b-line" style={{ width: 52, textAlign: 'center' }}>{l}</span>
-                <span className="badge b-tier" style={{ flex: 1 }}>{myLines[l]}</span>
+                <span className="badge b-tier" style={{ flex: 1 }}>{myLines[l] ?? '언랭'}</span>
                 <span style={{ fontSize: 11, color: 'var(--text3)' }}>
-                  {summonerScores[summonerName]?.[l] ?? getScoreByTier(myLines[l])}점
+                  {summonerScores[summonerName]?.[l] ?? getScoreByTier(myLines[l] ?? '언랭')}점
                 </span>
               </div>
             ))}
@@ -924,12 +924,12 @@ function TeamTab({
       }
 
       const fmtPlayer = (p: TeamPlayer, isWinner: boolean) => {
-        const h = historyEntries.find(e => e.name===p.name && e.line===p.line)
+        const beforeTier = summoners[p.name]?.[p.line] ?? p.tier
         const beforeScore = summonerScores[p.name]?.[p.line] ?? getScoreByTier(p.tier)
         const afterScore = isWinner ? beforeScore + 1 : beforeScore - 1
         const afterTier = getTierByScore(afterScore)
-        const tierChange = h
-          ? `↳ ${h.tier_before} → ${h.tier_after} ${isWinner?'▲':'▼'}`
+        const tierChange = afterTier !== beforeTier
+          ? `↳ ${beforeTier} → ${afterTier} ${isWinner?'▲':'▼'}`
           : `↳ ${afterTier} (변동없음)`
         const scoreChange = `↳ ${beforeScore}점 → ${afterScore}점 (${isWinner ? '+1' : '-1'})`
         const streak = getStreak(p.name, p.line, updatedRecords)
