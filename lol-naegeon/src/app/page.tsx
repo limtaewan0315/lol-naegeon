@@ -2902,6 +2902,39 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   const [agreed, setAgreed] = useState(false)
   const [showConsentDetail, setShowConsentDetail] = useState(false)
 
+  // 비밀번호 찾기(초기화)
+  const [showFindPassword, setShowFindPassword] = useState(false)
+  const [findLoginId, setFindLoginId] = useState('')
+  const [findSummonerName, setFindSummonerName] = useState('')
+  const [findRiotId, setFindRiotId] = useState('')
+  const [findLoading, setFindLoading] = useState(false)
+  const [findMessage, setFindMessage] = useState('')
+  const [findError, setFindError] = useState('')
+
+  const handleFindPassword = async () => {
+    if (!findLoginId.trim() || !findSummonerName.trim() || !findRiotId.trim()) {
+      setFindError('아이디, 소환사명, 롤계정을 모두 입력해주세요')
+      return
+    }
+    setFindLoading(true)
+    setFindError('')
+    setFindMessage('')
+    const { error: err } = await supabase.rpc('reset_password_to_default', {
+      p_login_id: findLoginId.trim(),
+      p_summoner_name: findSummonerName.trim(),
+      p_riot_id: findRiotId.trim(),
+    })
+    if (err) {
+      setFindError(err.message)
+    } else {
+      setFindMessage('비밀번호가 1234로 초기화됐어요. 로그인 후 반드시 새 비밀번호로 변경해주세요.')
+      setFindLoginId('')
+      setFindSummonerName('')
+      setFindRiotId('')
+    }
+    setFindLoading(false)
+  }
+
   // 가입 신청 시 소환사 연결 정보
   const [summonerName, setSummonerName] = useState('')
   const [riotId, setRiotId] = useState('')
@@ -3035,6 +3068,51 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
               onKeyDown={e => e.key === 'Enter' && handleAuth()}
               disabled={loading}
             />
+            <div style={{ textAlign: 'right' }}>
+              <span
+                onClick={() => { setShowFindPassword(v => !v); setFindError(''); setFindMessage('') }}
+                style={{ fontSize: 11, color: 'var(--text3)', textDecoration: 'underline', cursor: 'pointer' }}
+              >
+                비밀번호를 잊으셨나요?
+              </span>
+            </div>
+
+            {showFindPassword && (
+              <div style={{
+                padding: 10, background: 'var(--bg1, rgba(0,0,0,0.2))', border: '0.5px solid var(--border2)',
+                borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 8
+              }}>
+                <div style={{ fontSize: 11, color: 'var(--text3)' }}>
+                  아이디, 소환사명, 롤계정을 입력하면 비밀번호가 <strong>1234</strong>로 초기화돼요. 로그인 후 반드시 새 비밀번호로 변경해야 해요.
+                </div>
+                <input
+                  type="text"
+                  placeholder="아이디"
+                  value={findLoginId}
+                  onChange={e => setFindLoginId(e.target.value)}
+                  disabled={findLoading}
+                />
+                <input
+                  type="text"
+                  placeholder="소환사명"
+                  value={findSummonerName}
+                  onChange={e => setFindSummonerName(e.target.value)}
+                  disabled={findLoading}
+                />
+                <input
+                  type="text"
+                  placeholder="롤 계정 (예: 임태완#KR1)"
+                  value={findRiotId}
+                  onChange={e => setFindRiotId(e.target.value)}
+                  disabled={findLoading}
+                />
+                <button className="btn btn-gold btn-sm" onClick={handleFindPassword} disabled={findLoading}>
+                  {findLoading ? '처리 중...' : '비밀번호 초기화'}
+                </button>
+                {findError && <div className="error">{findError}</div>}
+                {findMessage && <div style={{ fontSize: 12, color: 'var(--gold, #d4af37)' }}>{findMessage}</div>}
+              </div>
+            )}
           </div>
         )}
 
@@ -4182,10 +4260,92 @@ function RoomsTab({
     </div>
   )
 }
+// ── 비밀번호 강제 변경 화면 (초기화된 계정이 로그인했을 때) ────────────
+function ForcePasswordChangeGate({ onDone }: { onDone: () => void }) {
+  const [displayId, setDisplayId] = useState('')
+  const [oldPassword, setOldPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [newPassword2, setNewPassword2] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      const loginIdMeta = (user?.user_metadata?.login_id ?? user?.user_metadata?.phone) as string | undefined
+      if (loginIdMeta) { setDisplayId(loginIdMeta); return }
+      if (user) {
+        const { data } = await supabase.from('member_accounts').select('summoner_name').eq('user_id', user.id).maybeSingle()
+        setDisplayId(data?.summoner_name ?? '')
+      }
+    })()
+  }, [])
+
+  const save = async () => {
+    if (!oldPassword || !newPassword || !newPassword2) { setError('모든 항목을 입력해주세요'); return }
+    if (newPassword.length < 4) { setError('새 비밀번호가 너무 짧아요'); return }
+    if (newPassword === '1234') { setError('1234는 초기 비밀번호라 다른 값으로 설정해주세요'); return }
+    if (newPassword !== newPassword2) { setError('새 비밀번호가 서로 일치하지 않아요'); return }
+    setSaving(true)
+    setError('')
+
+    const { error: verifyErr } = await supabase.auth.signInWithPassword({
+      email: idToInternalEmail(displayId),
+      password: oldPassword,
+    })
+    if (verifyErr) {
+      setError('현재 비밀번호가 일치하지 않아요')
+      setSaving(false)
+      return
+    }
+
+    const { error: updateErr } = await supabase.auth.updateUser({ password: newPassword })
+    if (updateErr) {
+      setError('변경 실패: ' + updateErr.message)
+      setSaving(false)
+      return
+    }
+
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      await supabase.from('member_accounts').update({ must_change_password: false }).eq('user_id', user.id)
+    }
+
+    setSaving(false)
+    onDone()
+  }
+
+  return (
+    <div style={{ maxWidth: 380, margin: '60px auto', padding: '0 16px' }}>
+      <div className="card">
+        <div className="card-title">비밀번호 변경 필요</div>
+        <div style={{ color: 'var(--red)', fontWeight: 700, fontSize: 13, marginBottom: 14, lineHeight: 1.5 }}>
+          비밀번호가 초기화된 계정이에요. 비밀번호를 변경하지 않으면 이용이 불가합니다.
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <input type="password" placeholder="현재 비밀번호 (1234)" value={oldPassword} onChange={e => setOldPassword(e.target.value)} disabled={saving} />
+          <input type="password" placeholder="새 비밀번호" value={newPassword} onChange={e => setNewPassword(e.target.value)} disabled={saving} />
+          <input type="password" placeholder="새 비밀번호 확인" value={newPassword2} onChange={e => setNewPassword2(e.target.value)} disabled={saving} onKeyDown={e => e.key === 'Enter' && save()} />
+          <button className="btn btn-gold" onClick={save} disabled={saving}>{saving ? '변경 중...' : '비밀번호 변경'}</button>
+        </div>
+        {error && <div className="error" style={{ marginTop: 8 }}>{error}</div>}
+        <button
+          className="btn btn-sm"
+          onClick={async () => { await supabase.auth.signOut(); window.location.reload() }}
+          style={{ width: '100%', marginTop: 12, fontSize: 11 }}
+        >
+          로그아웃
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── 메인 페이지 ──────────────────────────────────────────────
 function MainApp() {
   const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'hall' | 'stats' | 'summoners' | 'requests' | 'admin'>('team')
   const [dbIsAdmin, setDbIsAdmin] = useState(false)
+  const [mustChangePassword, setMustChangePassword] = useState(false)
   const [records, setRecords] = useState<GameRecord[]>([])
   const [summoners, setSummoners] = useState<SummonerMap>({})
   const [summonerScores, setSummonerScores] = useState<SummonerScoreMap>({})
@@ -4273,6 +4433,16 @@ function MainApp() {
     (async () => {
       const { data, error } = await supabase.rpc('is_admin')
       if (!error) setDbIsAdmin(!!data)
+    })()
+  }, [])
+
+  // 비밀번호 강제 변경 필요 여부 확인 (비밀번호 찾기로 초기화된 계정인지)
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+      const { data } = await supabase.from('member_accounts').select('must_change_password').eq('user_id', user.id).maybeSingle()
+      if (data?.must_change_password) setMustChangePassword(true)
     })()
   }, [])
 
@@ -4460,45 +4630,50 @@ function MainApp() {
         </button>
       </div>
 
-      <div className="tabs" style={{ background: 'rgba(6,17,31,0.75)' }}>
-        {(['team', 'record', 'ranking', 'hall', 'stats', 'summoners'] as const).map((t, i) => (
-          <button key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-            {['내전방', '전적 기록', '전체 랭킹', '명예의 전당', '개인 통계', '내 정보'][i]}
-          </button>
-        ))}
-        {dbIsAdmin && (
-          <button className={`tab${tab === 'requests' ? ' active' : ''}`} onClick={() => setTab('requests')}>
-            허가요청
-          </button>
-        )}
-        {dbIsAdmin && (
-          <button className={`tab${tab === 'admin' ? ' active' : ''}`} onClick={() => setTab('admin')}>
-            소환사 관리
-          </button>
-        )}
-      </div>
-
-      {loading ? (
-        <div className="empty">불러오는 중...</div>
+      {mustChangePassword ? (
+        <ForcePasswordChangeGate onDone={() => setMustChangePassword(false)} />
       ) : (
         <>
-          {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} idPrefixMap={idPrefixMap} pendingLinesMap={pendingLinesMap} onRecord={addRecord} />}
-          {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
-          {tab === 'ranking' && <RankingTab records={records} />}
-          {tab === 'hall' && <HallOfFameTab records={records} />}
-          {tab === 'stats' && <StatsTab records={records} summoners={summoners} summonerScores={summonerScores} tierHistory={tierHistory} idPrefixMap={idPrefixMap} />}
+          <div className="tabs" style={{ background: 'rgba(6,17,31,0.75)' }}>
+            {(['team', 'record', 'ranking', 'hall', 'stats', 'summoners'] as const).map((t, i) => (
+              <button key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
+                {['내전방', '전적 기록', '전체 랭킹', '명예의 전당', '개인 통계', '내 정보'][i]}
+              </button>
+            ))}
+            {dbIsAdmin && (
+              <button className={`tab${tab === 'requests' ? ' active' : ''}`} onClick={() => setTab('requests')}>
+                허가요청
+              </button>
+            )}
+            {dbIsAdmin && (
+              <button className={`tab${tab === 'admin' ? ' active' : ''}`} onClick={() => setTab('admin')}>
+                소환사 관리
+              </button>
+            )}
+          </div>
 
-          {tab === 'summoners' && <MyInfoTab summoners={summoners} summonerScores={summonerScores} onRefresh={fetchAll} />}
+          {loading ? (
+            <div className="empty">불러오는 중...</div>
+          ) : (
+            <>
+              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} idPrefixMap={idPrefixMap} pendingLinesMap={pendingLinesMap} onRecord={addRecord} />}
+              {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
+              {tab === 'ranking' && <RankingTab records={records} />}
+              {tab === 'hall' && <HallOfFameTab records={records} />}
+              {tab === 'stats' && <StatsTab records={records} summoners={summoners} summonerScores={summonerScores} tierHistory={tierHistory} idPrefixMap={idPrefixMap} />}
 
-          {tab === 'requests' && dbIsAdmin && <ApprovalRequestsTab onRefresh={fetchAll} />}
+              {tab === 'summoners' && <MyInfoTab summoners={summoners} summonerScores={summonerScores} onRefresh={fetchAll} />}
 
-          {tab === 'admin' && dbIsAdmin && (
-            <div>
-              <AdminTab summoners={summoners} summonerScores={summonerScores} records={records} />
-            </div>
+              {tab === 'requests' && dbIsAdmin && <ApprovalRequestsTab onRefresh={fetchAll} />}
+
+              {tab === 'admin' && dbIsAdmin && (
+                <div>
+                  <AdminTab summoners={summoners} summonerScores={summonerScores} records={records} />
+                </div>
+              )}
+            </>
           )}
         </>
-
       )}
     </div>
   )
