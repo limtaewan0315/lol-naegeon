@@ -377,7 +377,7 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
       setLoading(true)
       const { data: { user } } = await supabase.auth.getUser()
       if (cancelled) return
-      setEmail(user?.email ?? user?.user_metadata?.phone ?? '')
+      setEmail(user?.user_metadata?.phone ?? user?.email ?? '')
 
       if (user) {
         // 본인 계정에 연결된 소환사명만 조회 (RLS로 보호되어 다른 사람 데이터는 조회 불가)
@@ -2503,8 +2503,21 @@ function RankingTab({ records }: { records: GameRecord[] }) {
 }
 
 // ── 계정 ID 유틸 ──────────────────────────────────────────────
-function isValidEmail(raw: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw.trim())
+// 010/011/016/017/018/019로 시작하는 국내 휴대폰번호 (하이픈 유무 무관)
+const PHONE_REGEX = /^01[016789]\d{7,8}$/
+
+function normalizePhone(raw: string): string {
+  return raw.replace(/[^0-9]/g, '')
+}
+
+function isValidPhone(raw: string): boolean {
+  return PHONE_REGEX.test(normalizePhone(raw))
+}
+
+// Supabase Auth는 이메일 기반이라, 휴대폰번호를 내부 전용 가짜 이메일로 변환해서 사용
+// (관리자 승인 시 DB 함수(approve_signup_request)가 만드는 계정과 동일한 규칙이어야 함)
+function phoneToInternalEmail(phone: string): string {
+  return `${normalizePhone(phone)}@phone.lol-naegeon.local`
 }
 
 // 문자열 → UTF-8 hex (Postgres의 encode(convert_to(text,'UTF8'),'hex')와 동일한 결과)
@@ -2522,17 +2535,17 @@ function nameToInternalEmail(name: string): string {
 }
 
 // 로그인 화면의 "아이디" 입력값 → 실제 인증에 쓸 이메일
-// 진짜 이메일 형식이면 그대로 사용(신규 가입자), 아니면(소환사명 등) 레거시 계정 방식으로 변환
+// 휴대폰번호 형식이면 승인된 신규 계정 방식으로, 아니면(소환사명 등) 레거시 계정 방식으로 변환
 function idToInternalEmail(id: string): string {
   const trimmed = id.trim()
-  return isValidEmail(trimmed) ? trimmed : nameToInternalEmail(trimmed)
+  return isValidPhone(trimmed) ? phoneToInternalEmail(trimmed) : nameToInternalEmail(trimmed)
 }
 
 // ── 개인정보 수집·이용 동의 상세 내용 ──────────────────────────────────
 const PRIVACY_CONSENT_DETAIL = `[개인정보 수집·이용 동의]
 
 1. 수집하는 개인정보 항목
-   - 필수 항목: 이메일, 비밀번호(암호화 저장), 소환사명(인게임 닉네임)
+   - 필수 항목: 휴대폰번호, 비밀번호(암호화 저장), 소환사명(인게임 닉네임)
 
 2. 개인정보의 수집 및 이용 목적
    - 회원 식별 및 로그인 인증
@@ -2552,10 +2565,10 @@ const PRIVACY_CONSENT_DETAIL = `[개인정보 수집·이용 동의]
 
 // ── 로그인 페이지 ──────────────────────────────────────────────
 function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
-  // 로그인: 실제 이메일(신규 계정) 또는 소환사명(레거시 계정) 둘 다 "아이디"로 입력 가능
+  // 로그인: 휴대폰번호(승인된 신규 계정) 또는 소환사명(레거시 계정) 둘 다 "아이디"로 입력 가능
   const [loginId, setLoginId] = useState('')
-  // 회원가입: 실제 이메일 필수
-  const [email, setEmail] = useState('')
+  // 회원가입 신청: 휴대폰번호 필수
+  const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
   const [isSignUp, setIsSignUp] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -2563,7 +2576,7 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   const [agreed, setAgreed] = useState(false)
   const [showConsentDetail, setShowConsentDetail] = useState(false)
 
-  // 회원가입 시 소환사 연결 정보
+  // 가입 신청 시 소환사 연결 정보
   const [summonerName, setSummonerName] = useState('')
   const [m1Line, setM1Line] = useState<Line>(LINES[0])
   const [m1Tier, setM1Tier] = useState('골드2')
@@ -2571,7 +2584,7 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   const [m2Tier, setM2Tier] = useState('골드2')
 
   const resetSignUpFields = () => {
-    setEmail('')
+    setPhone('')
     setPassword('')
     setAgreed(false)
     setShowConsentDetail(false)
@@ -2608,12 +2621,12 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
 
   const handleSignUp = async () => {
     const n = summonerName.trim()
-    if (!email || !password || !n) {
-      setError('이메일, 비밀번호, 소환사명을 모두 입력해주세요')
+    if (!phone || !password || !n) {
+      setError('휴대폰번호, 비밀번호, 소환사명을 모두 입력해주세요')
       return
     }
-    if (!isValidEmail(email)) {
-      setError('올바른 이메일 형식이 아니에요')
+    if (!isValidPhone(phone)) {
+      setError('올바른 휴대폰번호 형식이 아니에요 (예: 01012345678)')
       return
     }
     if (m1Line === m2Line) {
@@ -2621,7 +2634,7 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
       return
     }
     if (!agreed) {
-      setError('개인정보 수집·이용에 동의해야 회원가입이 가능해요')
+      setError('개인정보 수집·이용에 동의해야 가입 신청이 가능해요')
       return
     }
 
@@ -2629,71 +2642,23 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
     setError('')
 
     try {
-      // 소환사명이 이미 다른 계정에 연결돼 있는지 확인
-      // (member_accounts는 RLS로 보호돼 있어 직접 조회 대신 안전한 함수를 호출)
-      const { data: isTaken, error: checkErr } = await supabase.rpc('is_summoner_name_taken', { p_name: n })
-      if (checkErr) {
-        setError('중복 확인 중 오류가 발생했어요: ' + checkErr.message)
-        setLoading(false)
-        return
-      }
-      if (isTaken) {
-        setError('이미 계정이 연결된 소환사명이에요. 관리자에게 문의해주세요.')
-        setLoading(false)
-        return
-      }
-
-      // 1) 계정 생성 (실제 이메일 기반 — Supabase 이메일 확인이 켜져 있으면 인증 메일이 실제로 발송됨)
-      const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          data: {
-            summoner_name: n,
-            privacy_consent: true,
-            privacy_consent_at: new Date().toISOString(),
-          },
-        },
+      // 계정을 바로 만들지 않고 "가입 신청"으로 접수 — 관리자 승인 후 실제 계정이 생성됨
+      const { error: reqErr } = await supabase.rpc('submit_signup_request', {
+        p_phone: normalizePhone(phone),
+        p_password: password,
+        p_summoner_name: n,
+        p_m1_line: m1Line,
+        p_m1_tier: m1Tier,
+        p_m2_line: m2Line,
+        p_m2_tier: m2Tier,
       })
-      if (signUpErr || !signUpData.user) {
-        setError('회원가입 실패: ' + (signUpErr?.message ?? '알 수 없는 오류'))
+      if (reqErr) {
+        setError('가입 신청 실패: ' + reqErr.message)
         setLoading(false)
         return
       }
 
-      // 2) 계정 ↔ 소환사 1:1 연결
-      // (아래 3번 소환사 라인 등록은 RLS상 "본인 소환사명"으로만 가능하므로,
-      //  본인 연결(member_accounts)이 먼저 생성되어 있어야 함 — 순서 중요)
-      const { error: linkErr } = await supabase.from('member_accounts').insert({
-        summoner_name: n,
-        user_id: signUpData.user.id,
-        email: email.trim(),
-      })
-      if (linkErr) {
-        setError('계정 생성에 실패했어요: ' + linkErr.message)
-        setLoading(false)
-        return
-      }
-
-      // 3) 소환사 M1/M2 라인·티어 저장
-      const { error: summonerErr } = await supabase.from('summoners').upsert(
-        [
-          { name: n, line: m1Line, tier: m1Tier, score: getScoreByTier(m1Tier) },
-          { name: n, line: m2Line, tier: m2Tier, score: getScoreByTier(m2Tier) },
-        ],
-        { onConflict: 'name,line' }
-      )
-      if (summonerErr) {
-        setError('계정은 생성됐지만 라인 등록에 실패했어요: ' + summonerErr.message)
-        setLoading(false)
-        return
-      }
-
-      alert(
-        signUpData.session
-          ? '회원가입 성공! 이제 로그인해주세요.'
-          : '회원가입 성공! 입력한 이메일로 인증 메일이 발송됐어요. 메일함을 확인하고 인증을 완료한 뒤 로그인해주세요.'
-      )
+      alert('가입 신청이 접수됐어요! 관리자 승인 후 로그인할 수 있어요.')
       setIsSignUp(false)
       resetSignUpFields()
     } catch (err) {
@@ -2715,14 +2680,14 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
       }}>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
           <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 6 }}>⚔ 내전 매니저</div>
-          <div style={{ fontSize: 12, color: 'var(--text3)' }}>로그인 / 회원가입</div>
+          <div style={{ fontSize: 12, color: 'var(--text3)' }}>로그인 / 가입 신청</div>
         </div>
 
         {!isSignUp && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
             <input
               type="text"
-              placeholder="아이디 (이메일 또는 소환사명)"
+              placeholder="아이디 (휴대폰번호 또는 소환사명)"
               value={loginId}
               onChange={e => setLoginId(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleAuth()}
@@ -2742,11 +2707,12 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
         {isSignUp && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
             <input
-              type="email"
-              placeholder="이메일"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
+              type="tel"
+              placeholder="휴대폰번호 (예: 01012345678)"
+              value={phone}
+              onChange={e => setPhone(e.target.value)}
               disabled={loading}
+              maxLength={13}
             />
             <input
               type="password"
@@ -2828,7 +2794,7 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
           disabled={loading}
           style={{ width: '100%', marginBottom: 12 }}
         >
-          {loading ? '처리 중...' : isSignUp ? '회원가입' : '로그인'}
+          {loading ? '처리 중...' : isSignUp ? '가입 신청' : '로그인'}
         </button>
 
         <button
@@ -2837,17 +2803,129 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
           disabled={loading}
           style={{ width: '100%', fontSize: 12 }}
         >
-          {isSignUp ? '로그인 페이지로' : '회원가입 페이지로'}
+          {isSignUp ? '로그인 페이지로' : '가입 신청 페이지로'}
         </button>
       </div>
     </div>
   )
 }
 
+// ── 가입 신청 탭 (관리자 전용) ──────────────────────────────────────
+type SignupRequest = {
+  id: number
+  phone: string
+  summoner_name: string
+  m1_line: string
+  m1_tier: string
+  m2_line: string
+  m2_tier: string
+  status: 'pending' | 'approved' | 'rejected'
+  created_at: string
+}
+
+function SignupRequestsTab({ onRefresh }: { onRefresh: () => void }) {
+  const [requests, setRequests] = useState<SignupRequest[]>([])
+  const [loading, setLoading] = useState(true)
+  const [processingId, setProcessingId] = useState<number | null>(null)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    const { data, error: err } = await supabase
+      .from('signup_requests')
+      .select('*')
+      .order('created_at', { ascending: false })
+    if (err) setError(err.message)
+    else setRequests(data ?? [])
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const approve = async (id: number) => {
+    setProcessingId(id)
+    setError('')
+    const { error: err } = await supabase.rpc('approve_signup_request', { p_request_id: id })
+    if (err) setError('승인 실패: ' + err.message)
+    else { await load(); onRefresh() }
+    setProcessingId(null)
+  }
+
+  const reject = async (id: number) => {
+    if (!confirm('이 가입 신청을 거절할까요?')) return
+    setProcessingId(id)
+    setError('')
+    const { error: err } = await supabase.rpc('reject_signup_request', { p_request_id: id })
+    if (err) setError('거절 실패: ' + err.message)
+    else await load()
+    setProcessingId(null)
+  }
+
+  const pending = requests.filter(r => r.status === 'pending')
+  const reviewed = requests.filter(r => r.status !== 'pending')
+
+  return (
+    <div>
+      <div className="card">
+        <div className="card-title">대기 중인 신청 ({pending.length})</div>
+        {error && <div className="error">{error}</div>}
+        {loading ? (
+          <div className="empty">불러오는 중...</div>
+        ) : pending.length === 0 ? (
+          <div className="empty">대기 중인 가입 신청이 없어요</div>
+        ) : (
+          pending.map(r => (
+            <div key={r.id} style={{
+              marginBottom: 10, padding: '10px 12px', background: 'var(--bg3)',
+              borderRadius: 'var(--radius)', border: '0.5px solid var(--border)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontWeight: 700 }}>{r.summoner_name}</span>
+                <span style={{ fontSize: 11, color: 'var(--text3)' }}>{r.phone}</span>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>
+                M1: {r.m1_line} ({r.m1_tier}) &nbsp;·&nbsp; M2: {r.m2_line} ({r.m2_tier})
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn btn-gold btn-sm" disabled={processingId === r.id} onClick={() => approve(r.id)}>
+                  {processingId === r.id ? '처리 중...' : '승인'}
+                </button>
+                <button className="btn btn-danger btn-sm" disabled={processingId === r.id} onClick={() => reject(r.id)}>
+                  거절
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {reviewed.length > 0 && (
+        <div className="card">
+          <div className="card-title" style={{ fontSize: 12 }}>처리된 신청 ({reviewed.length})</div>
+          <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+            {reviewed.map(r => (
+              <div key={r.id} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '6px 4px', fontSize: 12, borderBottom: '0.5px solid var(--border2)'
+              }}>
+                <span>{r.summoner_name} ({r.phone})</span>
+                <span style={{ color: r.status === 'approved' ? 'var(--gold, #d4af37)' : 'var(--red)' }}>
+                  {r.status === 'approved' ? '승인됨' : '거절됨'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── 메인 페이지 ──────────────────────────────────────────────
 function MainApp() {
-  const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'hall' | 'stats' | 'summoners' | 'admin'>('team')
+  const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'hall' | 'stats' | 'summoners' | 'requests' | 'admin'>('team')
   const [isAdmin, setIsAdmin] = useState(false)
+  const [dbIsAdmin, setDbIsAdmin] = useState(false)
   const [records, setRecords] = useState<GameRecord[]>([])
   const [summoners, setSummoners] = useState<SummonerMap>({})
   const [summonerScores, setSummonerScores] = useState<SummonerScoreMap>({})
@@ -2912,6 +2990,14 @@ function MainApp() {
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+
+  // 진짜 관리자 여부 확인 (DB의 member_accounts.is_admin 기준 — 비밀번호가 아니라 계정 자체의 권한)
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase.rpc('is_admin')
+      if (!error) setDbIsAdmin(!!data)
+    })()
+  }, [])
 
   // 세션 실시간 구독
   useEffect(() => {
@@ -3123,6 +3209,11 @@ function MainApp() {
             {['팀 뽑기', '전적 기록', '전체 랭킹', '명예의 전당', '개인 통계', '내 정보'][i]}
           </button>
         ))}
+        {dbIsAdmin && (
+          <button className={`tab${tab === 'requests' ? ' active' : ''}`} onClick={() => setTab('requests')}>
+            가입 신청
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -3137,12 +3228,15 @@ function MainApp() {
 
           {tab === 'summoners' && <MyInfoTab summoners={summoners} summonerScores={summonerScores} onRefresh={fetchAll} />}
 
+          {tab === 'requests' && dbIsAdmin && <SignupRequestsTab onRefresh={fetchAll} />}
+
           {tab === 'admin' && isAdmin && (
             <div>
               <AdminTab summoners={summoners} summonerScores={summonerScores} records={records} />
             </div>
           )}
         </>
+
       )}
     </div>
   )
