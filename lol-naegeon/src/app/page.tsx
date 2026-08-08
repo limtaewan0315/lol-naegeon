@@ -3470,6 +3470,200 @@ function ApprovalRequestsTab({ onRefresh }: { onRefresh: () => void }) {
   )
 }
 
+// ── 내전방 (로비: 방 생성/목록/입장/퇴장) — 1단계 ──────────────────────
+type Room = {
+  id: number
+  name: string
+  host_user_id: string
+  host_summoner_name: string
+  members: { summoner_name: string }[]
+  status: 'waiting' | 'playing'
+  created_at: string
+}
+
+function RoomsTab() {
+  const [myName, setMyName] = useState<string | null>(null)
+  const [myUserId, setMyUserId] = useState<string | null>(null)
+  const [rooms, setRooms] = useState<Room[]>([])
+  const [loading, setLoading] = useState(true)
+  const [newRoomName, setNewRoomName] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState('')
+
+  const loadRooms = useCallback(async () => {
+    const { data } = await supabase.from('rooms').select('*').order('created_at', { ascending: false })
+    setRooms((data ?? []) as Room[])
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        setMyUserId(user.id)
+        const { data } = await supabase
+          .from('member_accounts')
+          .select('summoner_name')
+          .eq('user_id', user.id)
+          .maybeSingle()
+        if (!cancelled) setMyName(data?.summoner_name ?? null)
+      }
+      await loadRooms()
+      if (!cancelled) setLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [loadRooms])
+
+  // 실시간 구독: 방 생성/삭제/변경(참가·퇴장 포함)이 모든 사용자 화면에 즉시 반영됨
+  useEffect(() => {
+    const channel = supabase
+      .channel('rooms-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => { loadRooms() })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [loadRooms])
+
+  const myRoom = rooms.find(r => r.members.some(m => m.summoner_name === myName))
+  const isHost = !!myRoom && myRoom.host_summoner_name === myName
+
+  const createRoom = async () => {
+    if (!myName || !myUserId) return
+    if (myRoom) { setError('이미 참가 중인 방이 있어요. 먼저 나가주세요.'); return }
+    const name = newRoomName.trim() || `${myName}의 방`
+    setCreating(true)
+    setError('')
+    const { error: err } = await supabase.from('rooms').insert({
+      name,
+      host_user_id: myUserId,
+      host_summoner_name: myName,
+      members: [{ summoner_name: myName }],
+    })
+    if (err) setError('방 생성 실패: ' + err.message)
+    else { setNewRoomName(''); await loadRooms() }
+    setCreating(false)
+  }
+
+  const joinRoom = async (room: Room) => {
+    if (!myName) return
+    if (myRoom) { setError('이미 다른 방에 참가 중이에요. 먼저 나가주세요.'); return }
+    if (room.members.length >= 10) { setError('방이 가득 찼어요.'); return }
+    if (room.members.some(m => m.summoner_name === myName)) return
+    setError('')
+    const newMembers = [...room.members, { summoner_name: myName }]
+    const { error: err } = await supabase
+      .from('rooms')
+      .update({ members: newMembers, updated_at: new Date().toISOString() })
+      .eq('id', room.id)
+    if (err) setError('입장 실패: ' + err.message)
+    else await loadRooms()
+  }
+
+  const leaveRoom = async () => {
+    if (!myRoom || !myName) return
+    if (isHost) {
+      // 방장이 나가면 방 자체가 삭제됨 (요청사항: 방장이 나가면 자동 삭제)
+      if (!confirm('방장이 나가면 방이 삭제돼요. 나갈까요?')) return
+      await supabase.from('rooms').delete().eq('id', myRoom.id)
+    } else {
+      const newMembers = myRoom.members.filter(m => m.summoner_name !== myName)
+      await supabase
+        .from('rooms')
+        .update({ members: newMembers, updated_at: new Date().toISOString() })
+        .eq('id', myRoom.id)
+    }
+    await loadRooms()
+  }
+
+  if (loading) {
+    return <div className="card"><div className="empty">불러오는 중...</div></div>
+  }
+
+  if (!myName) {
+    return (
+      <div className="card">
+        <div className="empty">계정에 연결된 소환사 정보가 없어요. 관리자에게 문의해주세요.</div>
+      </div>
+    )
+  }
+
+  if (myRoom) {
+    return (
+      <div>
+        <div className="card">
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {myRoom.name}
+            {isHost && <span style={{ fontSize: 11, color: 'var(--gold, #d4af37)' }}>👑 방장</span>}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 10 }}>
+            참가자 {myRoom.members.length}/10
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
+            {myRoom.members.map(m => (
+              <div key={m.summoner_name} className="player-row" style={{ padding: '6px 10px' }}>
+                <span style={{ flex: 1 }}>{m.summoner_name}</span>
+                {m.summoner_name === myRoom.host_summoner_name && (
+                  <span style={{ fontSize: 11, color: 'var(--gold, #d4af37)' }}>방장</span>
+                )}
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 10 }}>
+            💡 라인 설정 · 준비완료 · 팀편성 기능은 다음 단계에서 이 방 안에 추가될 예정이에요.
+          </div>
+          <button className="btn btn-danger" onClick={leaveRoom}>
+            {isHost ? '방 삭제하고 나가기' : '나가기'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div className="card">
+        <div className="card-title">방 만들기</div>
+        <div className="add-row">
+          <input
+            value={newRoomName}
+            onChange={e => setNewRoomName(e.target.value)}
+            placeholder={`방 이름 (예: ${myName}의 방)`}
+            style={{ flex: 1 }}
+            onKeyDown={e => e.key === 'Enter' && createRoom()}
+          />
+          <button className="btn btn-gold" onClick={createRoom} disabled={creating}>
+            {creating ? '생성 중...' : '방 만들기'}
+          </button>
+        </div>
+        {error && <div className="error">{error}</div>}
+      </div>
+
+      <div className="card">
+        <div className="card-title">참가 가능한 방 ({rooms.filter(r => r.status === 'waiting').length})</div>
+        {rooms.filter(r => r.status === 'waiting').length === 0 ? (
+          <div className="empty">현재 열린 방이 없어요. 방을 만들어보세요!</div>
+        ) : (
+          rooms.filter(r => r.status === 'waiting').map(r => (
+            <div key={r.id} style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+              background: 'var(--bg3)', borderRadius: 'var(--radius)', marginBottom: 8,
+              border: '0.5px solid var(--border)'
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>{r.name}</div>
+                <div style={{ fontSize: 11, color: 'var(--text3)' }}>방장: {r.host_summoner_name} · {r.members.length}/10명</div>
+              </div>
+              <button className="btn btn-sm" onClick={() => joinRoom(r)} disabled={r.members.length >= 10}>
+                {r.members.length >= 10 ? '가득참' : '입장'}
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── 메인 페이지 ──────────────────────────────────────────────
 function MainApp() {
   const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'hall' | 'stats' | 'summoners' | 'requests' | 'admin'>('team')
@@ -3751,7 +3945,7 @@ function MainApp() {
       <div className="tabs" style={{ background: 'rgba(6,17,31,0.75)' }}>
         {(['team', 'record', 'ranking', 'hall', 'stats', 'summoners'] as const).map((t, i) => (
           <button key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-            {['팀 뽑기', '전적 기록', '전체 랭킹', '명예의 전당', '개인 통계', '내 정보'][i]}
+            {['내전방', '전적 기록', '전체 랭킹', '명예의 전당', '개인 통계', '내 정보'][i]}
           </button>
         ))}
         {dbIsAdmin && (
@@ -3770,7 +3964,7 @@ function MainApp() {
         <div className="empty">불러오는 중...</div>
       ) : (
         <>
-          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} summonerScores={summonerScores} idPrefixMap={idPrefixMap} pendingLinesMap={pendingLinesMap} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} countdown={countdown} setCountdown={setCountdown} setBalanceStartedAt={setBalanceStartedAt} />}
+          {tab === 'team' && <RoomsTab />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'hall' && <HallOfFameTab records={records} />}
