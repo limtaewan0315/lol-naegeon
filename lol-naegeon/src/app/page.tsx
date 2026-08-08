@@ -3586,6 +3586,7 @@ function RoomsTab({
   pendingLinesMap,
   onRecord,
   dbIsAdmin,
+  inactiveNames,
 }: {
   summoners: SummonerMap
   summonerScores: SummonerScoreMap
@@ -3594,6 +3595,7 @@ function RoomsTab({
   pendingLinesMap: Record<string, Line[]>
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
   dbIsAdmin: boolean
+  inactiveNames: Set<string>
 }) {
   const [myName, setMyName] = useState<string | null>(null)
   const [myUserId, setMyUserId] = useState<string | null>(null)
@@ -3739,9 +3741,9 @@ function RoomsTab({
       if (m.most1 !== 'any') lineCount[m.most1 as Line] = (lineCount[m.most1 as Line] ?? 0) + 1
     })
 
-    // 후보 풀: 아직 방에 없는 등록된 소환사 전부 + 각자 등록된 라인 목록
+    // 후보 풀: 아직 방에 없는 + 비활성화되지 않은 등록된 소환사 + 각자 등록된 라인 목록
     let pool = Object.keys(summoners)
-      .filter(n => !existingNames.has(n))
+      .filter(n => !existingNames.has(n) && !inactiveNames.has(n))
       .map(n => ({ name: n, lines: getSummonerLines(n) }))
       .filter(c => c.lines.length > 0)
 
@@ -4688,6 +4690,7 @@ function MainApp() {
   const [tierHistory, setTierHistory] = useState<{ record_id: number; name: string; line: string; tier_before: string; tier_after: string }[]>([])
   const [idPrefixMap, setIdPrefixMap] = useState<Record<string, string>>({})
   const [pendingLinesMap, setPendingLinesMap] = useState<Record<string, Line[]>>({})
+  const [inactiveNames, setInactiveNames] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   // 팀뽑기 상태 유지 (탭 이동해도 안 날아감)
   const [teamPlayers, setTeamPlayers] = useState<PlayerEntry[]>([])
@@ -4723,9 +4726,11 @@ function MainApp() {
     if (sums) {
       const map: SummonerMap = {}
       const scoreMap: SummonerScoreMap = {}
-      sums.forEach((s: { name: string; tier: string; line: Line; score?: number }) => {
+      const inactiveSet = new Set<string>()
+      sums.forEach((s: { name: string; tier: string; line: Line; score?: number; is_inactive?: boolean }) => {
         if (!map[s.name]) map[s.name] = {} as Record<Line, string>
         if (!scoreMap[s.name]) scoreMap[s.name] = {} as Record<Line, number>
+        if (s.is_inactive) inactiveSet.add(s.name)
         // score 컬럼이 있으면 그걸로 티어명 재계산, 없으면(마이그레이션 전) 기존 tier 그대로 사용
         const score = s.score ?? getScoreByTier(s.tier)
         scoreMap[s.name][s.line] = score
@@ -4733,6 +4738,7 @@ function MainApp() {
       })
       setSummoners(map)
       setSummonerScores(scoreMap)
+      setInactiveNames(inactiveSet)
     }
     if (sess) {
       setTeamPlayers(sess.players ?? [])
@@ -4991,7 +4997,7 @@ function MainApp() {
             <div className="empty">불러오는 중...</div>
           ) : (
             <>
-              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} pendingLinesMap={pendingLinesMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} />}
+              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} pendingLinesMap={pendingLinesMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} inactiveNames={inactiveNames} />}
               {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
               {tab === 'ranking' && <RankingTab records={records} />}
               {tab === 'hall' && <HallOfFameTab records={records} />}
