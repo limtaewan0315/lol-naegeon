@@ -189,7 +189,6 @@ function AdminTab({ summoners, summonerScores, records }: { summoners: SummonerM
   }, [])
 
   const deleteSummoner = async (name: string) => {
-    if (!checkPassword()) return
     if (!confirm(`${name}을(를) 완전히 삭제할까요?`)) return
     setError('')
     
@@ -201,7 +200,6 @@ function AdminTab({ summoners, summonerScores, records }: { summoners: SummonerM
   }
 
   const toggleInactive = async (name: string, currentInactive: boolean) => {
-    if (!checkPassword()) return
     const newInactiveStatus = !currentInactive
     // 로컬 상태에 즉시 반영 (UI 업데이트)
     setInactiveStatusMap(prev => new Map(prev).set(name, newInactiveStatus))
@@ -219,7 +217,6 @@ function AdminTab({ summoners, summonerScores, records }: { summoners: SummonerM
   }
 
   const deleteInactivePlayer = async (name: string) => {
-    if (!checkPassword()) return
     if (!confirm(`${name}을(를) 완전히 삭제할까요?`)) return
     setError('')
     
@@ -239,7 +236,6 @@ function AdminTab({ summoners, summonerScores, records }: { summoners: SummonerM
 
   const saveEdit = async () => {
     if (!editingName || editingLine === '') return
-    if (!checkPassword()) return
     setError('')
 
     const { error: err } = await supabase
@@ -3206,7 +3202,6 @@ function SignupRequestsTab({ onRefresh }: { onRefresh: () => void }) {
 // ── 메인 페이지 ──────────────────────────────────────────────
 function MainApp() {
   const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'hall' | 'stats' | 'summoners' | 'requests' | 'admin'>('team')
-  const [isAdmin, setIsAdmin] = useState(false)
   const [dbIsAdmin, setDbIsAdmin] = useState(false)
   const [records, setRecords] = useState<GameRecord[]>([])
   const [summoners, setSummoners] = useState<SummonerMap>({})
@@ -3461,26 +3456,6 @@ function MainApp() {
           <div className="header-sub">티어·라인 기반 팀 균형 매칭 + 전적 기록</div>
         </div>
         <button
-          className={`btn btn-sm${isAdmin ? ' btn-gold' : ''}`}
-          onClick={() => {
-            if (isAdmin) {
-              setIsAdmin(false)
-              setTab('team')
-            } else {
-              const pwd = prompt('관리자 코드를 입력하세요')
-              if (pwd === ADMIN_PASSWORD) {
-                setIsAdmin(true)
-                setTab('admin')
-              } else if (pwd) {
-                alert('코드가 틀렸어요')
-              }
-            }
-          }}
-          style={{ fontSize: 11, whiteSpace: 'nowrap' }}
-        >
-          {isAdmin ? '🔓 로그아웃' : '🔒 관리자'}
-        </button>
-        <button
           className="btn btn-sm"
           onClick={async () => {
             await supabase.auth.signOut()
@@ -3503,6 +3478,11 @@ function MainApp() {
             가입 신청
           </button>
         )}
+        {dbIsAdmin && (
+          <button className={`tab${tab === 'admin' ? ' active' : ''}`} onClick={() => setTab('admin')}>
+            소환사 관리
+          </button>
+        )}
       </div>
 
       {loading ? (
@@ -3519,7 +3499,7 @@ function MainApp() {
 
           {tab === 'requests' && dbIsAdmin && <SignupRequestsTab onRefresh={fetchAll} />}
 
-          {tab === 'admin' && isAdmin && (
+          {tab === 'admin' && dbIsAdmin && (
             <div>
               <AdminTab summoners={summoners} summonerScores={summonerScores} records={records} />
             </div>
