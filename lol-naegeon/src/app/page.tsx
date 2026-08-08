@@ -3471,17 +3471,39 @@ function ApprovalRequestsTab({ onRefresh }: { onRefresh: () => void }) {
 }
 
 // ── 내전방 (로비: 방 생성/목록/입장/퇴장) — 1단계 ──────────────────────
+type RoomMember = {
+  summoner_name: string
+  most1: Line | 'any'
+  most2: Line | 'any' | null
+  ready: boolean
+}
+
 type Room = {
   id: number
   name: string
   host_user_id: string
   host_summoner_name: string
-  members: { summoner_name: string }[]
+  members: RoomMember[]
   status: 'waiting' | 'playing'
+  result: BalanceResult | null
+  pending_result: BalanceResult | null
+  balance_started_at: string | null
   created_at: string
 }
 
-function RoomsTab() {
+function RoomsTab({
+  summoners,
+  summonerScores,
+  idPrefixMap,
+  pendingLinesMap,
+  onRecord,
+}: {
+  summoners: SummonerMap
+  summonerScores: SummonerScoreMap
+  idPrefixMap: Record<string, string>
+  pendingLinesMap: Record<string, Line[]>
+  onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
+}) {
   const [myName, setMyName] = useState<string | null>(null)
   const [myUserId, setMyUserId] = useState<string | null>(null)
   const [rooms, setRooms] = useState<Room[]>([])
@@ -3515,7 +3537,7 @@ function RoomsTab() {
     return () => { cancelled = true }
   }, [loadRooms])
 
-  // 실시간 구독: 방 생성/삭제/변경(참가·퇴장 포함)이 모든 사용자 화면에 즉시 반영됨
+  // 실시간 구독: 방 생성/삭제/변경(참가·퇴장·라인설정·준비·팀편성 포함)이 모든 사용자 화면에 즉시 반영됨
   useEffect(() => {
     const channel = supabase
       .channel('rooms-realtime')
@@ -3524,8 +3546,19 @@ function RoomsTab() {
     return () => { supabase.removeChannel(channel) }
   }, [loadRooms])
 
-  const myRoom = rooms.find(r => r.members.some(m => m.summoner_name === myName))
+  const myRoom = rooms.find(r => r.members.some(m => m.summoner_name === myName)) ?? null
   const isHost = !!myRoom && myRoom.host_summoner_name === myName
+
+  // 소환사의 등록된 라인 목록 (LINE_ORDER 순)
+  const getSummonerLines = (n: string): Line[] => {
+    if (!summoners[n]) return []
+    return (Object.keys(summoners[n]) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b])
+  }
+
+  const defaultMostFor = (n: string): { most1: Line | 'any'; most2: Line | 'any' | null } => {
+    const lines = getSummonerLines(n)
+    return { most1: (lines[0] ?? '탑') as Line, most2: lines.length >= 2 ? lines[1] : null }
+  }
 
   const createRoom = async () => {
     if (!myName || !myUserId) return
@@ -3537,7 +3570,7 @@ function RoomsTab() {
       name,
       host_user_id: myUserId,
       host_summoner_name: myName,
-      members: [{ summoner_name: myName }],
+      members: [{ summoner_name: myName, ...defaultMostFor(myName), ready: false }],
     })
     if (err) setError('방 생성 실패: ' + err.message)
     else { setNewRoomName(''); await loadRooms() }
@@ -3550,7 +3583,7 @@ function RoomsTab() {
     if (room.members.length >= 10) { setError('방이 가득 찼어요.'); return }
     if (room.members.some(m => m.summoner_name === myName)) return
     setError('')
-    const newMembers = [...room.members, { summoner_name: myName }]
+    const newMembers = [...room.members, { summoner_name: myName, ...defaultMostFor(myName), ready: false }]
     const { error: err } = await supabase
       .from('rooms')
       .update({ members: newMembers, updated_at: new Date().toISOString() })
@@ -3562,7 +3595,7 @@ function RoomsTab() {
   const leaveRoom = async () => {
     if (!myRoom || !myName) return
     if (isHost) {
-      // 방장이 나가면 방 자체가 삭제됨 (요청사항: 방장이 나가면 자동 삭제)
+      // 방장이 나가면 방 자체가 삭제됨
       if (!confirm('방장이 나가면 방이 삭제돼요. 나갈까요?')) return
       await supabase.from('rooms').delete().eq('id', myRoom.id)
     } else {
@@ -3575,19 +3608,354 @@ function RoomsTab() {
     await loadRooms()
   }
 
+  const updateMyMost = async (field: 'most1' | 'most2', value: string) => {
+    if (!myRoom || !myName) return
+    const newMembers = myRoom.members.map(m => {
+      if (m.summoner_name !== myName) return m
+      if (field === 'most1') {
+        if (value === 'any') return { ...m, most1: 'any' as const, most2: null }
+        return { ...m, most1: value as Line }
+      }
+      return { ...m, most2: (value || null) as Line | 'any' | null }
+    })
+    await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
+  }
+
+  const toggleReady = async () => {
+    if (!myRoom || !myName) return
+    const newMembers = myRoom.members.map(m => m.summoner_name === myName ? { ...m, ready: !m.ready } : m)
+    await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
+  }
+
+  const [balancing, setBalancing] = useState(false)
+  const [balanceError, setBalanceError] = useState('')
+
+  // 팀 편성 (기존 팀뽑기 로직과 동일한 알고리즘을 방 단위로 재사용)
+  const runBalance = async () => {
+    if (!myRoom) return
+    setBalanceError('')
+    const players: PlayerEntry[] = myRoom.members.map(m => ({ name: m.summoner_name, most1: m.most1, most2: m.most2 }))
+    if (players.length !== 10) { setBalanceError(`정확히 10명이 필요해요. (현재 ${players.length}명)`); return }
+    if (!myRoom.members.every(m => m.ready)) { setBalanceError('모든 참가자가 준비완료 상태여야 해요.'); return }
+
+    setBalancing(true)
+
+    const getOptions = (p: PlayerEntry): Line[] => {
+      const allLines = getSummonerLines(p.name)
+      const opts: Line[] = []
+      if (p.most1 === 'any') opts.push(...allLines)
+      else opts.push(p.most1 as Line)
+      if (p.most2 && p.most2 !== 'any' && !opts.includes(p.most2 as Line)) opts.push(p.most2 as Line)
+      return opts.length > 0 ? opts : allLines
+    }
+
+    const getAdjustedScore = (name: string, line: Line, tier: string): number => {
+      return summonerScores[name]?.[line] ?? getScoreByTier(tier)
+    }
+
+    const LINE_PREFERENCE: Record<string, Line> = { '공민규': '정글' }
+    const PREFERENCE_RATE = 0.95
+    const LINE_AVOID: Record<string, Line[]> = { '강재현': ['미드', '원딜'] }
+    const AVOID_RATE = 0.1
+
+    let best: BalanceResult | null = null
+    let bestDiff = Infinity
+    let bestLineDiff = Infinity
+    let fallback: BalanceResult | null = null
+    let fallbackDiff = Infinity
+    let fallbackLineDiff = Infinity
+    const candidates: { diff: number; lineDiff: number; total: number; result: BalanceResult }[] = []
+
+    for (let i = 0; i < 1000; i++) {
+      const assigned = players.map(p => {
+        const preferredLine = LINE_PREFERENCE[p.name]
+        const allLines = getSummonerLines(p.name)
+        if (preferredLine && allLines.includes(preferredLine) && Math.random() < PREFERENCE_RATE) {
+          const tier = summoners[p.name]?.[preferredLine] ?? '골드2'
+          const score = getAdjustedScore(p.name, preferredLine, tier)
+          return { name: p.name, line: preferredLine, score }
+        }
+        let line: Line
+        let isM2 = false
+        if (p.most1 === 'any') {
+          line = allLines[Math.floor(Math.random() * allLines.length)]
+        } else if (!p.most2 || p.most2 === 'any') {
+          line = p.most1 as Line
+        } else {
+          isM2 = Math.random() >= 0.7
+          line = isM2 ? p.most2 as Line : p.most1 as Line
+        }
+        const avoidLines = LINE_AVOID[p.name]
+        if (avoidLines && avoidLines.includes(line) && Math.random() >= AVOID_RATE) {
+          const altLines = allLines.filter(l => !avoidLines.includes(l))
+          if (altLines.length > 0) line = altLines[Math.floor(Math.random() * altLines.length)]
+        }
+        const tier = summoners[p.name]?.[line] ?? '골드2'
+        const score = getAdjustedScore(p.name, line, tier)
+        return { name: p.name, line, score }
+      })
+
+      const lineCounts: Record<string, number> = {}
+      assigned.forEach(p => { lineCounts[p.line] = (lineCounts[p.line] ?? 0) + 1 })
+      const valid = LINES.every(l => (lineCounts[l] ?? 0) >= 2)
+      if (!valid) continue
+
+      const t1: typeof assigned = [], t2: typeof assigned = []
+      let ok = true
+      for (const l of LINES) {
+        const pool = shuffle(assigned.filter(p => p.line === l))
+        if (pool.length < 2) { ok = false; break }
+        t1.push(pool[0]); t2.push(pool[1])
+      }
+      if (!ok) continue
+
+      const used = new Set([...t1, ...t2])
+      const rest = shuffle(assigned.filter(p => !used.has(p)))
+      const half = Math.ceil(rest.length / 2)
+      rest.slice(0, half).forEach(p => t1.push(p))
+      rest.slice(half).forEach(p => t2.push(p))
+      if (t1.length !== 5 || t2.length !== 5) continue
+
+      const s1 = t1.reduce((a, p) => a + p.score, 0)
+      const s2 = t2.reduce((a, p) => a + p.score, 0)
+      const diff = Math.abs(s1 - s2)
+
+      let lineDiff = 0
+      let maxLineDiff = 0
+      for (const l of LINES) {
+        const p1 = t1.find(p => p.line === l)
+        const p2 = t2.find(p => p.line === l)
+        if (p1 && p2) {
+          const d = Math.abs(p1.score - p2.score)
+          lineDiff += d
+          if (d > maxLineDiff) maxLineDiff = d
+        }
+      }
+
+      const t1Bot = t1.filter(p => p.line === '원딜' || p.line === '서포터').reduce((a, p) => a + p.score, 0)
+      const t2Bot = t2.filter(p => p.line === '원딜' || p.line === '서포터').reduce((a, p) => a + p.score, 0)
+      const botDiff = Math.abs(t1Bot - t2Bot)
+
+      const candidateResult: BalanceResult = {
+        team1: t1.map(p => ({ name: p.name, tier: summoners[p.name]?.[p.line] ?? '골드2', line: p.line, score: p.score })),
+        team2: t2.map(p => ({ name: p.name, tier: summoners[p.name]?.[p.line] ?? '골드2', line: p.line, score: p.score })),
+        s1, s2,
+      }
+
+      const isBetterFallback = diff < fallbackDiff || (diff === fallbackDiff && lineDiff < fallbackLineDiff)
+      if (isBetterFallback) { fallbackDiff = diff; fallbackLineDiff = lineDiff; fallback = candidateResult }
+
+      if (maxLineDiff >= 30 || botDiff >= 35) continue
+
+      candidates.push({ diff, lineDiff, total: s1 + s2, result: candidateResult })
+
+      const isBetter = diff < bestDiff || (diff === bestDiff && lineDiff < bestLineDiff)
+      if (isBetter) { bestDiff = diff; bestLineDiff = lineDiff; best = candidateResult }
+    }
+
+    const goodCandidates = candidates.filter(c => c.diff <= 10)
+    if (goodCandidates.length > 0) {
+      goodCandidates.sort((a, b) => b.total - a.total)
+      const top10 = goodCandidates.slice(0, 10)
+      const picked = top10[Math.floor(Math.random() * top10.length)]
+      best = picked.result
+      bestDiff = picked.diff
+    }
+    if (!best && fallback) { best = fallback; bestDiff = fallbackDiff }
+
+    if (best && Math.abs(best.s1 - best.s2) > 15) {
+      setBalanceError(`팀 편성이 불가능해요. 최선의 조합도 ${Math.abs(best.s1 - best.s2).toFixed(1)}점 차이가 나요. 참가자 구성을 변경해주세요.`)
+      best = null
+    }
+
+    if (best) {
+      const startedAt = new Date().toISOString()
+      await supabase.from('rooms').update({ pending_result: best, balance_started_at: startedAt }).eq('id', myRoom.id)
+    } else {
+      const linePossible: Record<string, number> = {}
+      LINES.forEach(l => { linePossible[l] = 0 })
+      players.forEach(p => {
+        const allLines = getSummonerLines(p.name)
+        if (p.most1 === 'any') allLines.forEach(l => { linePossible[l] = (linePossible[l] ?? 0) + 1 })
+        else linePossible[p.most1] = (linePossible[p.most1] ?? 0) + 1
+        if (p.most2 === 'any') allLines.forEach(l => { linePossible[l] = (linePossible[l] ?? 0) + 1 })
+        else if (p.most2) linePossible[p.most2] = (linePossible[p.most2] ?? 0) + 1
+      })
+      const shortLines = LINES.filter(l => (linePossible[l] ?? 0) < 2)
+      if (shortLines.length > 0) {
+        const msg = shortLines.map(l => `${l} (${linePossible[l] ?? 0}명 → 2명 필요)`).join(', ')
+        setBalanceError(`팀 구성 실패. 다음 라인 인원이 부족해요: ${msg}`)
+      } else {
+        const lineOptions = players.map(p => ({ name: p.name, options: getOptions(p) }))
+        const problematic = lineOptions.filter(p => p.options.length === 0)
+        if (problematic.length > 0) {
+          setBalanceError(`팀 구성 실패. ${problematic.map(p => p.name).join(', ')}의 라인 설정을 확인해주세요.`)
+        } else {
+          setBalanceError('팀 구성 실패. 라인 조합이 너무 치우쳐 있어요. M1/M2를 다양하게 설정해보세요.')
+        }
+      }
+    }
+    setBalancing(false)
+  }
+
+  // 팀편성 결과 공개 카운트다운 (10초) — balance_started_at 기준으로 모든 참가자 화면에서 동일하게 진행
+  const [countdown, setCountdown] = useState<number | null>(null)
+  useEffect(() => {
+    if (!myRoom?.balance_started_at || myRoom.result) { setCountdown(null); return }
+    const startedAt = myRoom.balance_started_at
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)
+      const remaining = 10 - elapsed
+      setCountdown(remaining > 0 ? remaining : 0)
+    }
+    tick()
+    const timer = setInterval(tick, 1000)
+    return () => clearInterval(timer)
+  }, [myRoom?.balance_started_at, myRoom?.result])
+
+  useEffect(() => {
+    if (countdown === 0 && myRoom?.pending_result && myRoom.result === null) {
+      supabase.from('rooms')
+        .update({ result: myRoom.pending_result, pending_result: null, balance_started_at: null })
+        .eq('id', myRoom.id)
+        .is('result', null)
+        .then(() => {})
+    }
+  }, [countdown, myRoom?.id])
+
+  const [isRecording, setIsRecording] = useState(false)
+  const recordingRef = useRef(false)
+
+  const recordWin = async (winner: 'blue' | 'red') => {
+    if (!myRoom?.result || recordingRef.current) return
+    recordingRef.current = true
+    setIsRecording(true)
+
+    // 동시 클릭 방지: DB에서 원자적으로 선점 (이미 result가 null이면 다른 사람이 처리한 것)
+    const { data: claimed } = await supabase
+      .from('rooms')
+      .update({ result: null, pending_result: null, balance_started_at: null, updated_at: new Date().toISOString() })
+      .eq('id', myRoom.id)
+      .not('result', 'is', null)
+      .select()
+
+    if (!claimed || claimed.length === 0) {
+      recordingRef.current = false
+      setIsRecording(false)
+      return
+    }
+
+    const result = myRoom.result
+    const winners = winner === 'blue' ? result.team1 : result.team2
+    const losers = winner === 'blue' ? result.team2 : result.team1
+    const now = new Date()
+    const time = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
+    const blueData = result.team1.map(p => ({ name: p.name, line: p.line }))
+    const redData = result.team2.map(p => ({ name: p.name, line: p.line }))
+
+    const { data: newRecord } = await supabase.from('records').insert([{ winner, blue: blueData, red: redData, time }]).select()
+    const recId = newRecord?.[0]?.id
+
+    const { data: latestRecs } = await supabase.from('records').select('*').order('created_at', { ascending: false })
+    const updatedRecords = (latestRecs ?? []) as GameRecord[]
+
+    if (recId) {
+      for (const p of winners) {
+        if (!summoners[p.name]?.[p.line]) continue
+        const { error: rpcErr } = await supabase.rpc('apply_match_score_delta', { p_record_id: recId, p_name: p.name, p_line: p.line, p_delta: 1 })
+        if (rpcErr) console.error('점수 반영 실패:', p.name, p.line, rpcErr.message)
+      }
+      for (const p of losers) {
+        if (!summoners[p.name]?.[p.line]) continue
+        const { error: rpcErr } = await supabase.rpc('apply_match_score_delta', { p_record_id: recId, p_name: p.name, p_line: p.line, p_delta: -1 })
+        if (rpcErr) console.error('점수 반영 실패:', p.name, p.line, rpcErr.message)
+      }
+    }
+
+    onRecord({ winner, blue: blueData, red: redData, skipInsert: true })
+
+    // 방 초기화: 참가자는 유지하되 전부 준비 해제 (다음 판 위해 다시 준비해야 함)
+    const resetMembers = myRoom.members.map(m => ({ ...m, ready: false }))
+    await supabase.from('rooms').update({ members: resetMembers }).eq('id', myRoom.id)
+
+    // 디스코드 전송
+    try {
+      const now2 = new Date()
+      const dateStr = `${now2.getFullYear()}년 ${now2.getMonth() + 1}월 ${now2.getDate()}일 ${String(now2.getHours()).padStart(2, '0')}:${String(now2.getMinutes()).padStart(2, '0')}`
+      const sortedWinners = [...winners].sort((a, b) => (LINE_ORDER[a.line] ?? 9) - (LINE_ORDER[b.line] ?? 9))
+      const sortedLosers = [...losers].sort((a, b) => (LINE_ORDER[a.line] ?? 9) - (LINE_ORDER[b.line] ?? 9))
+
+      const getStreak = (name: string, line: Line, recs: GameRecord[]) => {
+        const lr = recs.filter(r => r.blue.some(p => p.name === name && p.line === line) || r.red.some(p => p.name === name && p.line === line))
+        if (lr.length < 2) return 0
+        const first = lr[0]
+        const isWin = (first.blue.some(p => p.name === name && p.line === line) && first.winner === 'blue') ||
+                      (first.red.some(p => p.name === name && p.line === line) && first.winner === 'red')
+        let s = 0
+        for (const r of lr) {
+          const inBlue = r.blue.some(p => p.name === name && p.line === line)
+          const w = (inBlue && r.winner === 'blue') || (!inBlue && r.winner === 'red')
+          if (w === isWin) s++; else break
+        }
+        return isWin ? s : -s
+      }
+
+      const fmtPlayer = (p: TeamPlayer, isWinner: boolean) => {
+        const beforeTier = summoners[p.name]?.[p.line] ?? p.tier
+        const beforeScore = summonerScores[p.name]?.[p.line] ?? getScoreByTier(p.tier)
+        const afterScore = isWinner ? beforeScore + 1 : beforeScore - 1
+        const afterTier = getTierByScore(afterScore)
+        const tierChange = afterTier !== beforeTier
+          ? `↳ ${beforeTier} → ${afterTier} ${isWinner ? '▲' : '▼'}`
+          : `↳ ${afterTier} (변동없음)`
+        const scoreChange = `↳ ${beforeScore}점 → ${afterScore}점 (${isWinner ? '+1' : '-1'})`
+        const streak = getStreak(p.name, p.line, updatedRecords)
+        const abs = Math.abs(streak)
+        const streakStr = abs >= 2 ? (streak > 0 ? ` 🔥${abs}연승` : ` 💧${abs}연패`) : ''
+        const line1 = `\`${p.line}\` **${p.name}**${streakStr}`
+        return [line1, tierChange, scoreChange].join('\n')
+      }
+
+      const winLabel = winner === 'blue' ? '🔵 블루팀' : '🔴 레드팀'
+      const loseLabel = winner === 'blue' ? '🔴 레드팀' : '🔵 블루팀'
+      const payload = {
+        username: '내전 매니저',
+        embeds: [{
+          title: `🏆 ${winLabel} 승리! (${myRoom.name})`,
+          color: winner === 'blue' ? 0x0bc4e3 : 0xe84057,
+          fields: [
+            { name: `${winLabel} (승)`, value: sortedWinners.map(p => fmtPlayer(p, true)).join('\n'), inline: true },
+            { name: `${loseLabel} (패)`, value: sortedLosers.map(p => fmtPlayer(p, false)).join('\n'), inline: true },
+          ],
+          footer: { text: `lol-naegeon.vercel.app · ${dateStr}` }
+        }]
+      }
+      const discordRes = await fetch(DISCORD_WEBHOOK_URL, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      })
+      if (!discordRes.ok) console.error('Discord webhook failed:', discordRes.status, await discordRes.text())
+    } catch (e) { console.error('Discord webhook error:', e) }
+
+    setIsRecording(false)
+    recordingRef.current = false
+    window.location.reload()
+  }
+
+  const sortByLine = (arr: TeamPlayer[]) => [...arr].sort((a, b) => (LINE_ORDER[a.line] ?? 9) - (LINE_ORDER[b.line] ?? 9))
+
   if (loading) {
     return <div className="card"><div className="empty">불러오는 중...</div></div>
   }
 
   if (!myName) {
-    return (
-      <div className="card">
-        <div className="empty">계정에 연결된 소환사 정보가 없어요. 관리자에게 문의해주세요.</div>
-      </div>
-    )
+    return <div className="card"><div className="empty">계정에 연결된 소환사 정보가 없어요. 관리자에게 문의해주세요.</div></div>
   }
 
+  // ── 방 안 화면 ──────────────────────────────────────────────
   if (myRoom) {
+    const myMember = myRoom.members.find(m => m.summoner_name === myName)
+    const allReady = myRoom.members.length === 10 && myRoom.members.every(m => m.ready)
+
     return (
       <div>
         <div className="card">
@@ -3595,23 +3963,144 @@ function RoomsTab() {
             {myRoom.name}
             {isHost && <span style={{ fontSize: 11, color: 'var(--gold, #d4af37)' }}>👑 방장</span>}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 10 }}>
-            참가자 {myRoom.members.length}/10
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
-            {myRoom.members.map(m => (
-              <div key={m.summoner_name} className="player-row" style={{ padding: '6px 10px' }}>
-                <span style={{ flex: 1 }}>{m.summoner_name}</span>
-                {m.summoner_name === myRoom.host_summoner_name && (
-                  <span style={{ fontSize: 11, color: 'var(--gold, #d4af37)' }}>방장</span>
-                )}
+          <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 10 }}>참가자 {myRoom.members.length}/10</div>
+
+          {!myRoom.result && countdown === null && (
+            <>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
+                {myRoom.members.map(m => {
+                  const isMe = m.summoner_name === myName
+                  const lines = getSummonerLines(m.summoner_name)
+                  const pendingLines = pendingLinesMap[m.summoner_name] ?? []
+                  const selectableLines = [...lines, ...pendingLines.filter(l => !lines.includes(l))]
+                  return (
+                    <div key={m.summoner_name} className="player-row" style={{ padding: '8px 10px', flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 600, fontSize: 13, minWidth: 80 }}>
+                        <NameWithIdBadge name={m.summoner_name} idPrefixMap={idPrefixMap} />
+                        {m.summoner_name === myRoom.host_summoner_name && <span style={{ fontSize: 10, color: 'var(--gold, #d4af37)', marginLeft: 4 }}>방장</span>}
+                      </span>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontSize: 11, color: m.most1 === 'any' ? 'var(--text2)' : 'var(--gold)', fontWeight: 600 }}>M1</span>
+                        <select
+                          value={m.most1}
+                          onChange={e => isMe && updateMyMost('most1', e.target.value)}
+                          disabled={!isMe}
+                          style={{ width: 95, padding: '4px 8px', fontSize: 12 }}
+                        >
+                          {lines.length >= 2 && <option value="any">상관없음</option>}
+                          {selectableLines.map(l => (
+                            <option key={l} value={l} disabled={pendingLines.includes(l)}>
+                              {l}{pendingLines.includes(l) ? ' (허가신청)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>M2</span>
+                        <select
+                          value={m.most2 ?? ''}
+                          onChange={e => isMe && updateMyMost('most2', e.target.value)}
+                          disabled={!isMe || m.most1 === 'any'}
+                          style={{ width: 95, padding: '4px 8px', fontSize: 12, opacity: m.most1 === 'any' ? 0.4 : 1 }}
+                        >
+                          <option value=''>없음</option>
+                          {selectableLines.filter(l => l !== m.most1 && m.most1 !== 'any').map(l => (
+                            <option key={l} value={l} disabled={pendingLines.includes(l)}>
+                              {l}{pendingLines.includes(l) ? ' (허가신청)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <span
+                        className="badge"
+                        style={{
+                          marginLeft: 'auto', fontSize: 11, padding: '3px 10px', borderRadius: 999,
+                          background: m.ready ? 'rgba(212,175,55,0.15)' : 'var(--bg3)',
+                          color: m.ready ? 'var(--gold, #d4af37)' : 'var(--text3)',
+                          border: `0.5px solid ${m.ready ? 'var(--gold, #d4af37)' : 'var(--border2)'}`
+                        }}
+                      >
+                        {m.ready ? '✓ 준비완료' : '대기중'}
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
-            ))}
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 10 }}>
-            💡 라인 설정 · 준비완료 · 팀편성 기능은 다음 단계에서 이 방 안에 추가될 예정이에요.
-          </div>
-          <button className="btn btn-danger" onClick={leaveRoom}>
+
+              {myMember && (
+                <button
+                  className={`btn ${myMember.ready ? '' : 'btn-gold'}`}
+                  onClick={toggleReady}
+                  style={{ width: '100%', marginBottom: 8 }}
+                >
+                  {myMember.ready ? '준비 취소' : '준비완료'}
+                </button>
+              )}
+
+              {isHost && (
+                <button
+                  className="btn btn-gold"
+                  onClick={runBalance}
+                  disabled={!allReady || balancing}
+                  style={{ width: '100%' }}
+                >
+                  {balancing ? '편성 중...' : allReady ? '팀편성' : `모든 참가자가 준비완료 해야 팀편성 가능 (${myRoom.members.filter(m => m.ready).length}/${myRoom.members.length})`}
+                </button>
+              )}
+              {balanceError && <div className="error" style={{ marginTop: 8 }}>{balanceError}</div>}
+            </>
+          )}
+
+          {!myRoom.result && countdown !== null && (
+            <div style={{ textAlign: 'center', padding: '20px 0' }}>
+              <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 8 }}>팀 편성 완료! 공개까지</div>
+              <div style={{ fontSize: 64, fontWeight: 700, color: 'var(--blue)', lineHeight: 1, marginBottom: 16 }}>{countdown}</div>
+              <div style={{ height: 4, background: 'var(--bg3)', borderRadius: 2, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${(10 - countdown) / 10 * 100}%`, background: 'var(--blue)', borderRadius: 2, transition: 'width 0.9s linear' }} />
+              </div>
+            </div>
+          )}
+
+          {myRoom.result && (
+            <div>
+              <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, color: 'var(--blue)', marginBottom: 6 }}>🔵 블루팀 ({myRoom.result.s1.toFixed(1)})</div>
+                  {sortByLine(myRoom.result.team1).map(p => (
+                    <div key={p.name} className="player-row" style={{ padding: '6px 10px', marginBottom: 4 }}>
+                      <span className="badge b-line" style={{ width: 48, textAlign: 'center' }}>{p.line}</span>
+                      <span style={{ flex: 1, fontSize: 12 }}><NameWithIdBadge name={p.name} idPrefixMap={idPrefixMap} /></span>
+                      <span className="badge b-tier" style={{ fontSize: 10 }}>{p.tier}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, color: 'var(--red)', marginBottom: 6 }}>🔴 레드팀 ({myRoom.result.s2.toFixed(1)})</div>
+                  {sortByLine(myRoom.result.team2).map(p => (
+                    <div key={p.name} className="player-row" style={{ padding: '6px 10px', marginBottom: 4 }}>
+                      <span className="badge b-line" style={{ width: 48, textAlign: 'center' }}>{p.line}</span>
+                      <span style={{ flex: 1, fontSize: 12 }}><NameWithIdBadge name={p.name} idPrefixMap={idPrefixMap} /></span>
+                      <span className="badge b-tier" style={{ fontSize: 10 }}>{p.tier}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {!isRecording ? (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-blue" onClick={() => recordWin('blue')} style={{ flex: 1 }}>🔵 블루팀 승리</button>
+                  <button className="btn btn-red" onClick={() => recordWin('red')} style={{ flex: 1 }}>🔴 레드팀 승리</button>
+                </div>
+              ) : (
+                <div className="empty">기록 중...</div>
+              )}
+            </div>
+          )}
+
+          <button className="btn btn-danger" onClick={leaveRoom} style={{ width: '100%', marginTop: 12 }}>
             {isHost ? '방 삭제하고 나가기' : '나가기'}
           </button>
         </div>
@@ -3619,6 +4108,7 @@ function RoomsTab() {
     )
   }
 
+  // ── 로비 화면 (방 만들기 / 목록) ──────────────────────────────
   return (
     <div>
       <div className="card">
@@ -3663,7 +4153,6 @@ function RoomsTab() {
     </div>
   )
 }
-
 // ── 메인 페이지 ──────────────────────────────────────────────
 function MainApp() {
   const [tab, setTab] = useState<'team' | 'record' | 'ranking' | 'hall' | 'stats' | 'summoners' | 'requests' | 'admin'>('team')
@@ -3964,7 +4453,7 @@ function MainApp() {
         <div className="empty">불러오는 중...</div>
       ) : (
         <>
-          {tab === 'team' && <RoomsTab />}
+          {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} idPrefixMap={idPrefixMap} pendingLinesMap={pendingLinesMap} onRecord={addRecord} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'hall' && <HallOfFameTab records={records} />}
