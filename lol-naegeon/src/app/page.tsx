@@ -382,11 +382,18 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
 
-  // 롤 계정(소환사이름#태그) — 기존 계정은 비어있을 수 있고, 직접 입력해서 채울 수 있음
   const [riotId, setRiotId] = useState('')
-  const [riotIdInput, setRiotIdInput] = useState('')
-  const [savingRiotId, setSavingRiotId] = useState(false)
-  const [riotIdError, setRiotIdError] = useState('')
+
+  // 인라인 편집 상태: 지금 어떤 필드를 수정 중인지 (한 번에 하나만)
+  const [editingField, setEditingField] = useState<'id' | 'password' | 'riot' | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [fieldError, setFieldError] = useState('')
+
+  const [idInput, setIdInput] = useState('')
+  const [riotInput, setRiotInput] = useState('')
+  const [oldPassword, setOldPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [newPassword2, setNewPassword2] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -407,7 +414,6 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
         if (!cancelled) {
           setSummonerName(name)
           setRiotId(data?.riot_id ?? '')
-          setRiotIdInput(data?.riot_id ?? '')
         }
       }
 
@@ -421,26 +427,101 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
     return () => { cancelled = true }
   }, [])
 
-  const saveRiotId = async () => {
-    const trimmed = riotIdInput.trim()
-    if (!trimmed.includes('#')) {
-      setRiotIdError('롤 계정을 "소환사이름#태그" 형식으로 입력해주세요 (예: 임태완#KR1)')
+  const startEdit = (field: 'id' | 'password' | 'riot') => {
+    setEditingField(field)
+    setFieldError('')
+    setIdInput(displayId)
+    setRiotInput(riotId)
+    setOldPassword('')
+    setNewPassword('')
+    setNewPassword2('')
+  }
+
+  const cancelEdit = () => {
+    setEditingField(null)
+    setFieldError('')
+  }
+
+  const saveId = async () => {
+    const trimmed = idInput.trim()
+    if (!isValidLoginId(trimmed)) {
+      setFieldError('아이디는 영문/숫자/언더스코어(_)로 5~20자여야 해요')
       return
     }
-    setSavingRiotId(true)
-    setRiotIdError('')
+    if (trimmed.toLowerCase() === displayId.toLowerCase()) {
+      setEditingField(null)
+      return
+    }
+    setSaving(true)
+    setFieldError('')
+    const { error: err } = await supabase.rpc('change_own_login_id', { p_new_login_id: trimmed })
+    if (err) {
+      setFieldError('변경 실패: ' + err.message)
+    } else {
+      setDisplayId(trimmed.toLowerCase())
+      setEditingField(null)
+    }
+    setSaving(false)
+  }
+
+  const saveRiotId = async () => {
+    const trimmed = riotInput.trim()
+    if (!trimmed.includes('#')) {
+      setFieldError('롤 계정을 "소환사이름#태그" 형식으로 입력해주세요 (예: 임태완#KR1)')
+      return
+    }
+    setSaving(true)
+    setFieldError('')
     const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setSavingRiotId(false); return }
+    if (!user) { setSaving(false); return }
     const { error: err } = await supabase
       .from('member_accounts')
       .update({ riot_id: trimmed })
       .eq('user_id', user.id)
     if (err) {
-      setRiotIdError('저장 실패: ' + err.message)
+      setFieldError('저장 실패: ' + err.message)
     } else {
       setRiotId(trimmed)
+      setEditingField(null)
     }
-    setSavingRiotId(false)
+    setSaving(false)
+  }
+
+  const savePassword = async () => {
+    if (!oldPassword || !newPassword || !newPassword2) {
+      setFieldError('모든 비밀번호 항목을 입력해주세요')
+      return
+    }
+    if (newPassword.length < 4) {
+      setFieldError('새 비밀번호가 너무 짧아요')
+      return
+    }
+    if (newPassword !== newPassword2) {
+      setFieldError('새 비밀번호가 서로 일치하지 않아요')
+      return
+    }
+    setSaving(true)
+    setFieldError('')
+
+    // 현재 비밀번호 확인 (재로그인 시도로 검증)
+    const { error: verifyErr } = await supabase.auth.signInWithPassword({
+      email: idToInternalEmail(displayId),
+      password: oldPassword,
+    })
+    if (verifyErr) {
+      setFieldError('현재 비밀번호가 일치하지 않아요')
+      setSaving(false)
+      return
+    }
+
+    const { error: updateErr } = await supabase.auth.updateUser({ password: newPassword })
+    if (updateErr) {
+      setFieldError('변경 실패: ' + updateErr.message)
+    } else {
+      setEditingField(null)
+      alert('비밀번호가 변경됐어요.')
+    }
+    setSaving(false)
   }
 
   const myLines: Partial<Record<Line, string>> = summonerName ? (summoners[summonerName] ?? {}) : {}
@@ -480,38 +561,82 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
     )
   }
 
+  const rowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, minHeight: 30 }
+  const labelStyle: React.CSSProperties = { color: 'var(--text3)', width: 62, flexShrink: 0 }
+  const editBtnStyle: React.CSSProperties = { width: 'auto', flexShrink: 0, whiteSpace: 'nowrap', padding: '2px 10px', fontSize: 11 }
+
   return (
     <div>
       <div className="card">
         <div className="card-title">내 정보</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
-          <div><span style={{ color: 'var(--text3)' }}>아이디: </span>{displayId}</div>
-          <div><span style={{ color: 'var(--text3)' }}>비밀번호: </span><span style={{ color: 'var(--text3)' }}>보안을 위해 표시되지 않아요</span></div>
-          <div><span style={{ color: 'var(--text3)' }}>소환사명: </span><strong>{summonerName}</strong></div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ color: 'var(--text3)' }}>롤 계정: </span>
-            {riotId ? <strong>{riotId}</strong> : <span style={{ color: 'var(--text3)' }}>미입력</span>}
+          {/* 아이디 */}
+          {editingField === 'id' ? (
+            <div style={rowStyle}>
+              <span style={labelStyle}>아이디:</span>
+              <input value={idInput} onChange={e => setIdInput(e.target.value)} disabled={saving} style={{ flex: 1 }} />
+              <button className="btn btn-gold btn-sm" onClick={saveId} disabled={saving} style={editBtnStyle}>{saving ? '저장 중...' : '저장'}</button>
+              <button className="btn btn-sm" onClick={cancelEdit} disabled={saving} style={editBtnStyle}>취소</button>
+            </div>
+          ) : (
+            <div style={rowStyle}>
+              <span style={labelStyle}>아이디:</span>
+              <span style={{ flex: 1 }}>{displayId}</span>
+              <button className="btn btn-sm" onClick={() => startEdit('id')} style={editBtnStyle}>수정</button>
+            </div>
+          )}
+
+          {/* 비밀번호 */}
+          {editingField === 'password' ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={rowStyle}>
+                <span style={labelStyle}>비밀번호:</span>
+                <span style={{ flex: 1, color: 'var(--text3)' }}>변경 중</span>
+                <button className="btn btn-gold btn-sm" onClick={savePassword} disabled={saving} style={editBtnStyle}>{saving ? '저장 중...' : '저장'}</button>
+                <button className="btn btn-sm" onClick={cancelEdit} disabled={saving} style={editBtnStyle}>취소</button>
+              </div>
+              <input type="password" placeholder="현재 비밀번호" value={oldPassword} onChange={e => setOldPassword(e.target.value)} disabled={saving} style={{ marginLeft: 70 }} />
+              <input type="password" placeholder="새 비밀번호" value={newPassword} onChange={e => setNewPassword(e.target.value)} disabled={saving} style={{ marginLeft: 70 }} />
+              <input type="password" placeholder="새 비밀번호 확인" value={newPassword2} onChange={e => setNewPassword2(e.target.value)} disabled={saving} style={{ marginLeft: 70 }} />
+            </div>
+          ) : (
+            <div style={rowStyle}>
+              <span style={labelStyle}>비밀번호:</span>
+              <span style={{ flex: 1, color: 'var(--text3)' }}>보안을 위해 표시되지 않아요</span>
+              <button className="btn btn-sm" onClick={() => startEdit('password')} style={editBtnStyle}>변경</button>
+            </div>
+          )}
+
+          {/* 소환사명 (수정 불가 — 경기 기록 등 여러 곳에서 식별자로 쓰여서 바꾸면 데이터가 꼬임) */}
+          <div style={rowStyle}>
+            <span style={labelStyle}>소환사명:</span>
+            <strong style={{ flex: 1 }}>{summonerName}</strong>
           </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
-            <input
-              type="text"
-              placeholder="소환사이름#태그 (예: 임태완#KR1)"
-              value={riotIdInput}
-              onChange={e => setRiotIdInput(e.target.value)}
-              disabled={savingRiotId}
-              style={{ flex: 1 }}
-            />
-            <button
-              className="btn btn-gold"
-              onClick={saveRiotId}
-              disabled={savingRiotId || !riotIdInput.trim() || riotIdInput.trim() === riotId}
-              style={{ width: 'auto', flexShrink: 0, whiteSpace: 'nowrap', padding: '0 16px' }}
-            >
-              {savingRiotId ? '저장 중...' : riotId ? '수정' : '저장'}
-            </button>
-          </div>
-          {riotIdError && <div className="error" style={{ marginTop: 2 }}>{riotIdError}</div>}
+
+          {/* 롤 계정 */}
+          {editingField === 'riot' ? (
+            <div style={rowStyle}>
+              <span style={labelStyle}>롤 계정:</span>
+              <input
+                value={riotInput}
+                onChange={e => setRiotInput(e.target.value)}
+                placeholder="소환사이름#태그 (예: 임태완#KR1)"
+                disabled={saving}
+                style={{ flex: 1 }}
+              />
+              <button className="btn btn-gold btn-sm" onClick={saveRiotId} disabled={saving} style={editBtnStyle}>{saving ? '저장 중...' : '저장'}</button>
+              <button className="btn btn-sm" onClick={cancelEdit} disabled={saving} style={editBtnStyle}>취소</button>
+            </div>
+          ) : (
+            <div style={rowStyle}>
+              <span style={labelStyle}>롤 계정:</span>
+              <span style={{ flex: 1 }}>{riotId ? <strong>{riotId}</strong> : <span style={{ color: 'var(--text3)' }}>미입력</span>}</span>
+              <button className="btn btn-sm" onClick={() => startEdit('riot')} style={editBtnStyle}>{riotId ? '수정' : '입력'}</button>
+            </div>
+          )}
+
+          {fieldError && <div className="error">{fieldError}</div>}
         </div>
       </div>
 
