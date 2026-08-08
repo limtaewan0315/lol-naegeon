@@ -3585,6 +3585,7 @@ function RoomsTab({
   idPrefixMap,
   pendingLinesMap,
   onRecord,
+  dbIsAdmin,
 }: {
   summoners: SummonerMap
   summonerScores: SummonerScoreMap
@@ -3592,6 +3593,7 @@ function RoomsTab({
   idPrefixMap: Record<string, string>
   pendingLinesMap: Record<string, Line[]>
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
+  dbIsAdmin: boolean
 }) {
   const [myName, setMyName] = useState<string | null>(null)
   const [myUserId, setMyUserId] = useState<string | null>(null)
@@ -3718,6 +3720,30 @@ function RoomsTab({
   const updateMatchMode = async (mode: 'line' | 'random') => {
     if (!myRoom || !isHost) return
     await supabase.from('rooms').update({ match_mode: mode, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
+  }
+
+  // 관리자 전용 테스트 기능: 등록된 다른 소환사들로 방을 10명까지 자동으로 채우고
+  // 전부 준비완료 상태로 만들어서, 혼자서도 매칭 테스트를 해볼 수 있게 함
+  const fillTestMembers = async () => {
+    if (!myRoom || !isHost || !dbIsAdmin) return
+    const existingNames = new Set(myRoom.members.map(m => m.summoner_name))
+    const candidates = Object.keys(summoners).filter(n => !existingNames.has(n))
+    const need = 10 - myRoom.members.length
+    if (need <= 0) return
+    const picked = shuffle(candidates).slice(0, need)
+    const newMembers = [
+      ...myRoom.members,
+      ...picked.map(n => {
+        const lines = getSummonerLines(n)
+        return {
+          summoner_name: n,
+          most1: (lines[0] ?? '탑') as Line,
+          most2: lines.length >= 2 ? lines[1] : null,
+          ready: true,
+        }
+      }),
+    ]
+    await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
   }
 
   const [balancing, setBalancing] = useState(false)
@@ -4148,34 +4174,46 @@ function RoomsTab({
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8,
                 padding: '8px 10px', background: 'var(--bg3)', borderRadius: 'var(--radius)',
-                border: '0.5px solid var(--border)'
+                border: '0.5px solid var(--border)', flexWrap: 'nowrap', overflowX: 'auto'
               }}>
-                <span style={{ fontSize: 12, color: 'var(--text3)' }}>매칭 방식</span>
+                <span style={{ fontSize: 12, color: 'var(--text3)', whiteSpace: 'nowrap', flexShrink: 0 }}>매칭 방식</span>
                 {isHost ? (
-                  <div style={{ display: 'flex', gap: 12 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'nowrap' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
                       <input
                         type="radio"
                         checked={myRoom.match_mode === 'line'}
                         onChange={() => updateMatchMode('line')}
+                        style={{ width: 'auto', flexShrink: 0 }}
                       />
                       라인밸런싱
                     </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
                       <input
                         type="radio"
                         checked={myRoom.match_mode === 'random'}
                         onChange={() => updateMatchMode('random')}
+                        style={{ width: 'auto', flexShrink: 0 }}
                       />
                       올랜덤
                     </label>
                   </div>
                 ) : (
-                  <span style={{ fontSize: 12, fontWeight: 600 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
                     {myRoom.match_mode === 'line' ? '라인밸런싱' : '올랜덤'}
                   </span>
                 )}
               </div>
+
+              {isHost && dbIsAdmin && myRoom.members.length < 10 && (
+                <button
+                  className="btn"
+                  onClick={fillTestMembers}
+                  style={{ width: '100%', marginBottom: 8, fontSize: 12 }}
+                >
+                  🧪 테스트 인원 채우기 (등록된 소환사로 {10 - myRoom.members.length}명 자동 추가 + 준비완료)
+                </button>
+              )}
 
               {myMember && (
                 <button
@@ -4904,7 +4942,7 @@ function MainApp() {
             <div className="empty">불러오는 중...</div>
           ) : (
             <>
-              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} pendingLinesMap={pendingLinesMap} onRecord={addRecord} />}
+              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} pendingLinesMap={pendingLinesMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} />}
               {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
               {tab === 'ranking' && <RankingTab records={records} />}
               {tab === 'hall' && <HallOfFameTab records={records} />}
