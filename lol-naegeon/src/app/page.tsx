@@ -545,6 +545,30 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
     setAdding(false)
   }
 
+  const [deletingLine, setDeletingLine] = useState<Line | null>(null)
+
+  const deleteLine = async (line: Line) => {
+    if (!summonerName) return
+    if (registeredLines.length <= 2) {
+      setError('라인은 최소 2개는 유지해야 해요.')
+      return
+    }
+    if (!confirm(`${line} 라인을 삭제할까요?`)) return
+    setDeletingLine(line)
+    setError('')
+    const { error: err } = await supabase
+      .from('summoners')
+      .delete()
+      .eq('name', summonerName)
+      .eq('line', line)
+    if (err) {
+      setError('라인 삭제 실패: ' + err.message)
+    } else {
+      onRefresh()
+    }
+    setDeletingLine(null)
+  }
+
   if (loading) {
     return <div className="card"><div className="empty">불러오는 중...</div></div>
   }
@@ -649,6 +673,16 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
                 <span style={{ fontSize: 11, color: 'var(--text3)' }}>
                   {summonerScores[summonerName]?.[l] ?? getScoreByTier(myLines[l] ?? '언랭')}점
                 </span>
+                {registeredLines.length > 2 && (
+                  <button
+                    className="btn btn-danger btn-sm"
+                    onClick={() => deleteLine(l)}
+                    disabled={deletingLine === l}
+                    style={{ width: 'auto', flexShrink: 0, padding: '2px 8px', fontSize: 10, marginLeft: 6 }}
+                  >
+                    {deletingLine === l ? '삭제 중...' : '삭제'}
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -1057,6 +1091,24 @@ function TeamTab({
     recordingRef.current = true
     setIsRecording(true)
 
+    // 동시 클릭 방지: 팀원 두 명이 거의 동시에 승리 버튼을 눌러도 실제로는
+    // "세션의 result를 먼저 비우는 데 성공한 사람"만 기록이 진행되도록
+    // DB에서 원자적으로 선점(claim)함. 실패하면 이미 다른 사람이 처리한 것.
+    const { data: claimed } = await supabase
+      .from('session')
+      .update({ result: null, balance_started_at: null, pending_result: null, updated_at: new Date().toISOString() })
+      .eq('id', 1)
+      .not('result', 'is', null)
+      .select()
+
+    if (!claimed || claimed.length === 0) {
+      // 이미 다른 사람이 이 경기를 기록했어요 — 중복 등록 방지
+      setResult(null)
+      recordingRef.current = false
+      setIsRecording(false)
+      return
+    }
+
     const winners = winner === 'blue' ? result.team1 : result.team2
     const losers = winner === 'blue' ? result.team2 : result.team1
     const now = new Date()
@@ -1077,6 +1129,7 @@ function TeamTab({
 
     // 점수/티어 변경은 서버(RPC)에서 처리 — 클라이언트는 ±1만 요청 가능하고
     // 실제 계산·티어산출·이력기록은 DB 함수 안에서 검증되며 이뤄짐 (직접 update 금지)
+    // apply_match_score_delta 자체도 record_id+name+line 조합 중복 적용을 막아서 이중 안전장치임
     if (recId) {
       for (const p of winners) {
         if (!summoners[p.name]?.[p.line]) continue
@@ -1095,9 +1148,8 @@ function TeamTab({
     }
 
     onRecord({ winner, blue: blueData, red: redData, skipInsert: true })
-    // 팀 편성 초기화 (참가자만 유지)
+    // 팀 편성 초기화 (참가자만 유지) — session.result 등은 위 claim 단계에서 이미 비웠음
     setResult(null)
-    await supabase.from('session').update({ result: null, balance_started_at: null, pending_result: null, updated_at: new Date().toISOString() }).eq('id', 1)
 
     // 디스코드 전송
     try {
@@ -1591,10 +1643,11 @@ function TeamTab({
 }
 
 // ── 전적 기록 탭 ──────────────────────────────────────────────
-function RecordTab({ records, onDelete, onClear }: {
+function RecordTab({ records, onDelete, onClear, isAdmin }: {
   records: GameRecord[]
   onDelete: (id: number) => void
   onClear: () => void
+  isAdmin: boolean
 }) {
   const [page, setPage] = useState(1)
   const PAGE_SIZE = 10
@@ -1661,7 +1714,7 @@ function RecordTab({ records, onDelete, onClear }: {
                 </span>
 
                 <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text3)' }}>{r.time}</span>
-                <button className="btn btn-danger btn-sm" onClick={() => { if (checkPassword()) onDelete(r.id) }}>삭제</button>
+                {isAdmin && <button className="btn btn-danger btn-sm" onClick={() => onDelete(r.id)}>삭제</button>}
               </div>
               {/* 블루팀 */}
               <div style={{ padding: '6px 12px', borderBottom: '0.5px solid var(--border)' }}>
@@ -3490,7 +3543,7 @@ function MainApp() {
       ) : (
         <>
           {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} summonerScores={summonerScores} idPrefixMap={idPrefixMap} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} countdown={countdown} setCountdown={setCountdown} setBalanceStartedAt={setBalanceStartedAt} />}
-          {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
+          {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'hall' && <HallOfFameTab records={records} />}
           {tab === 'stats' && <StatsTab records={records} summoners={summoners} summonerScores={summonerScores} tierHistory={tierHistory} idPrefixMap={idPrefixMap} />}
