@@ -365,7 +365,7 @@ function AdminTab({ summoners, summonerScores, records }: { summoners: SummonerM
 // ── 소환사 관리 탭 ──────────────────────────────────────────────
 function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; onRefresh: () => void }) {
   const [loading, setLoading] = useState(true)
-  const [email, setEmail] = useState('')
+  const [displayId, setDisplayId] = useState('')
   const [summonerName, setSummonerName] = useState<string | null>(null)
   const [selectedNewLine, setSelectedNewLine] = useState<Line | ''>('')
   const [adding, setAdding] = useState(false)
@@ -377,8 +377,8 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
       setLoading(true)
       const { data: { user } } = await supabase.auth.getUser()
       if (cancelled) return
-      setEmail(user?.user_metadata?.phone ?? user?.email ?? '')
 
+      let name: string | null = null
       if (user) {
         // 본인 계정에 연결된 소환사명만 조회 (RLS로 보호되어 다른 사람 데이터는 조회 불가)
         const { data } = await supabase
@@ -386,8 +386,15 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
           .select('summoner_name')
           .eq('user_id', user.id)
           .maybeSingle()
-        if (!cancelled) setSummonerName(data?.summoner_name ?? null)
+        name = data?.summoner_name ?? null
+        if (!cancelled) setSummonerName(name)
       }
+
+      // 로그인 아이디로 실제 사용하는 값만 표시 (내부 시스템용 가짜 이메일은 노출하지 않음)
+      // 휴대폰 가입자는 전화번호가 곧 아이디, 레거시 계정은 소환사명이 곧 아이디
+      const phone = user?.user_metadata?.phone as string | undefined
+      if (!cancelled) setDisplayId(phone || name || '')
+
       if (!cancelled) setLoading(false)
     })()
     return () => { cancelled = true }
@@ -435,7 +442,8 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
       <div className="card">
         <div className="card-title">내 정보</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 13 }}>
-          <div><span style={{ color: 'var(--text3)' }}>계정: </span>{email}</div>
+          <div><span style={{ color: 'var(--text3)' }}>아이디: </span>{displayId}</div>
+          <div><span style={{ color: 'var(--text3)' }}>비밀번호: </span><span style={{ color: 'var(--text3)' }}>보안을 위해 표시되지 않아요</span></div>
           <div><span style={{ color: 'var(--text3)' }}>소환사명: </span><strong>{summonerName}</strong></div>
         </div>
       </div>
@@ -459,13 +467,13 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
         )}
 
         {canAddMore ? (
-          <div className="add-row">
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <select value={selectedNewLine} onChange={e => setSelectedNewLine(e.target.value as Line)} style={{ flex: 1 }}>
               <option value="">추가할 라인 선택</option>
               {availableLines.map(l => <option key={l} value={l}>{l}</option>)}
             </select>
-            <button className="btn btn-gold" onClick={addLine} disabled={!selectedNewLine || adding}>
-              {adding ? '추가 중...' : '언랭으로 라인 추가'}
+            <button className="btn btn-gold" onClick={addLine} disabled={!selectedNewLine || adding} style={{ width: 'auto', flexShrink: 0, whiteSpace: 'nowrap', padding: '0 16px' }}>
+              {adding ? '추가 중...' : '라인추가'}
             </button>
           </div>
         ) : registeredLines.length >= 5 ? (
