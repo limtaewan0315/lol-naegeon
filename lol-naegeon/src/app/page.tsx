@@ -50,6 +50,17 @@ function checkPassword(): boolean {
   return false
 }
 
+// 동명이인 구분용: 이름 옆에 아이디 앞 4자리를 작은 회색 글씨로 붙여서 표시
+function NameWithIdBadge({ name, idPrefixMap }: { name: string; idPrefixMap: Record<string, string> }) {
+  const prefix = idPrefixMap[name]
+  return (
+    <>
+      {name}
+      {prefix && <span style={{ fontSize: 10, color: 'var(--text3)', marginLeft: 4 }}>{prefix}</span>}
+    </>
+  )
+}
+
 // 점수 기반 티어 시스템 헬퍼
 function tierUp(tier: string): string {
   // 호환용: 기존 코드에서 호출하는 곳이 있다면 다음 티어명 반환 (점수 무관)
@@ -401,9 +412,9 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
       }
 
       // 로그인 아이디로 실제 사용하는 값만 표시 (내부 시스템용 가짜 이메일은 노출하지 않음)
-      // 휴대폰 가입자는 전화번호가 곧 아이디, 레거시 계정은 소환사명이 곧 아이디
-      const phone = user?.user_metadata?.phone as string | undefined
-      if (!cancelled) setDisplayId(phone || name || '')
+      // 신규 가입자는 본인이 정한 아이디, 예전 방식(전화번호) 계정은 전화번호, 레거시 계정은 소환사명이 곧 아이디
+      const loginIdMeta = (user?.user_metadata?.login_id ?? user?.user_metadata?.phone) as string | undefined
+      if (!cancelled) setDisplayId(loginIdMeta || name || '')
 
       if (!cancelled) setLoading(false)
     })()
@@ -552,6 +563,7 @@ function TeamTab({
   onRecord,
   summoners,
   summonerScores,
+  idPrefixMap,
   players, setPlayers,
   result, setResult,
   records,
@@ -567,6 +579,7 @@ function TeamTab({
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
   summoners: SummonerMap
   summonerScores: SummonerScoreMap
+  idPrefixMap: Record<string, string>
   players: PlayerEntry[]
   setPlayers: React.Dispatch<React.SetStateAction<PlayerEntry[]>>
   result: BalanceResult | null
@@ -1069,7 +1082,7 @@ function TeamTab({
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg2)')}
                     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                   >
-                    <span style={{ flex: 1, fontWeight: 500 }}>{s}</span>
+                    <span style={{ flex: 1, fontWeight: 500 }}><NameWithIdBadge name={s} idPrefixMap={idPrefixMap} /></span>
                     <span style={{ fontSize: 11, color: 'var(--text2)' }}>
                       {lines.map(l => `${l} ${summoners[s][l]}`).join(' / ')}
                     </span>
@@ -1581,11 +1594,12 @@ function RecordTab({ records, onDelete, onClear }: {
 }
 
 // ── 개인 통계 탭 ──────────────────────────────────────────────
-function StatsTab({ records, summoners, summonerScores, tierHistory }: {
+function StatsTab({ records, summoners, summonerScores, tierHistory, idPrefixMap }: {
   records: GameRecord[]
   summoners: SummonerMap
   summonerScores: SummonerScoreMap
   tierHistory: { record_id: number; name: string; line: string; tier_before: string; tier_after: string }[]
+  idPrefixMap: Record<string, string>
 }) {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
@@ -1807,7 +1821,7 @@ function StatsTab({ records, summoners, summonerScores, tierHistory }: {
                 <div key={s} onClick={() => selectName(s)} style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg2)')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                  {s}
+                  <NameWithIdBadge name={s} idPrefixMap={idPrefixMap} />
                 </div>
               ))}
             </div>
@@ -2053,7 +2067,7 @@ function StatsTab({ records, summoners, summonerScores, tierHistory }: {
                         <div key={s} onClick={() => { setOppSelected(s); setOppSearch(s); setOppSuggestions([]) }}
                           style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13 }}
                           onMouseEnter={e2 => (e2.currentTarget.style.background = 'var(--bg2)')}
-                          onMouseLeave={e2 => (e2.currentTarget.style.background = 'transparent')}>{s}</div>
+                          onMouseLeave={e2 => (e2.currentTarget.style.background = 'transparent')}><NameWithIdBadge name={s} idPrefixMap={idPrefixMap} /></div>
                       ))}
                     </div>
                   )}
@@ -2567,7 +2581,21 @@ function RankingTab({ records }: { records: GameRecord[] }) {
 }
 
 // ── 계정 ID 유틸 ──────────────────────────────────────────────
+// 자유 아이디: 영문/숫자/언더스코어, 5~20자
+const LOGIN_ID_REGEX = /^[A-Za-z0-9_]{5,20}$/
+
+function isValidLoginId(raw: string): boolean {
+  return LOGIN_ID_REGEX.test(raw.trim())
+}
+
+// Supabase Auth는 이메일 기반이라, 자유 아이디를 내부 전용 가짜 이메일로 변환해서 사용
+// (관리자 승인 시 DB 함수(approve_signup_request)가 만드는 계정과 동일한 규칙이어야 함)
+function loginIdToInternalEmail(id: string): string {
+  return `${id.trim().toLowerCase()}@id.lol-naegeon.local`
+}
+
 // 010/011/016/017/018/019로 시작하는 국내 휴대폰번호 (하이픈 유무 무관)
+// — 예전 방식(전화번호 기반)으로 이미 승인된 계정의 로그인 호환을 위해 유지
 const PHONE_REGEX = /^01[016789]\d{7,8}$/
 
 function normalizePhone(raw: string): string {
@@ -2578,8 +2606,6 @@ function isValidPhone(raw: string): boolean {
   return PHONE_REGEX.test(normalizePhone(raw))
 }
 
-// Supabase Auth는 이메일 기반이라, 휴대폰번호를 내부 전용 가짜 이메일로 변환해서 사용
-// (관리자 승인 시 DB 함수(approve_signup_request)가 만드는 계정과 동일한 규칙이어야 함)
 function phoneToInternalEmail(phone: string): string {
   return `${normalizePhone(phone)}@phone.lol-naegeon.local`
 }
@@ -2599,17 +2625,21 @@ function nameToInternalEmail(name: string): string {
 }
 
 // 로그인 화면의 "아이디" 입력값 → 실제 인증에 쓸 이메일
-// 휴대폰번호 형식이면 승인된 신규 계정 방식으로, 아니면(소환사명 등) 레거시 계정 방식으로 변환
+// 자유 아이디 형식이면 신규 계정 방식으로, 휴대폰번호 형식이면 예전 방식(하위호환)으로,
+// 그 외(소환사명 등)는 레거시 계정 방식으로 변환
 function idToInternalEmail(id: string): string {
   const trimmed = id.trim()
-  return isValidPhone(trimmed) ? phoneToInternalEmail(trimmed) : nameToInternalEmail(trimmed)
+  if (isValidPhone(trimmed)) return phoneToInternalEmail(trimmed)
+  if (isValidLoginId(trimmed)) return loginIdToInternalEmail(trimmed)
+  return nameToInternalEmail(trimmed)
 }
+
 
 // ── 개인정보 수집·이용 동의 상세 내용 ──────────────────────────────────
 const PRIVACY_CONSENT_DETAIL = `[개인정보 수집·이용 동의]
 
 1. 수집하는 개인정보 항목
-   - 필수 항목: 휴대폰번호, 비밀번호(암호화 저장), 소환사명(인게임 닉네임), 롤 계정(소환사이름#태그)
+   - 필수 항목: 아이디, 비밀번호(암호화 저장), 소환사명(인게임 닉네임), 롤 계정(소환사이름#태그)
 
 2. 개인정보의 수집 및 이용 목적
    - 회원 식별 및 로그인 인증
@@ -2629,10 +2659,10 @@ const PRIVACY_CONSENT_DETAIL = `[개인정보 수집·이용 동의]
 
 // ── 로그인 페이지 ──────────────────────────────────────────────
 function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
-  // 로그인: 휴대폰번호(승인된 신규 계정) 또는 소환사명(레거시 계정) 둘 다 "아이디"로 입력 가능
+  // 로그인: 자유 아이디(승인된 신규 계정) 또는 소환사명(레거시 계정) 둘 다 입력 가능
   const [loginId, setLoginId] = useState('')
-  // 회원가입 신청: 휴대폰번호 필수
-  const [phone, setPhone] = useState('')
+  // 가입 신청 시 사용할 아이디 (영문/숫자/언더스코어 5~20자)
+  const [newLoginId, setNewLoginId] = useState('')
   const [password, setPassword] = useState('')
   const [isSignUp, setIsSignUp] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -2649,7 +2679,7 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   const [m2Tier, setM2Tier] = useState('골드2')
 
   const resetSignUpFields = () => {
-    setPhone('')
+    setNewLoginId('')
     setPassword('')
     setAgreed(false)
     setShowConsentDetail(false)
@@ -2688,12 +2718,12 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   const handleSignUp = async () => {
     const n = summonerName.trim()
     const r = riotId.trim()
-    if (!phone || !password || !n || !r) {
-      setError('휴대폰번호, 비밀번호, 소환사명, 롤 계정을 모두 입력해주세요')
+    if (!newLoginId || !password || !n || !r) {
+      setError('아이디, 비밀번호, 소환사명, 롤 계정을 모두 입력해주세요')
       return
     }
-    if (!isValidPhone(phone)) {
-      setError('올바른 휴대폰번호 형식이 아니에요 (예: 01012345678)')
+    if (!isValidLoginId(newLoginId)) {
+      setError('아이디는 영문/숫자/언더스코어(_)로 5~20자여야 해요')
       return
     }
     if (!r.includes('#')) {
@@ -2715,7 +2745,7 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
     try {
       // 계정을 바로 만들지 않고 "가입 신청"으로 접수 — 관리자가 롤 계정을 확인하고 승인 후 실제 계정이 생성됨
       const { error: reqErr } = await supabase.rpc('submit_signup_request', {
-        p_phone: normalizePhone(phone),
+        p_login_id: newLoginId.trim(),
         p_password: password,
         p_summoner_name: n,
         p_riot_id: r,
@@ -2759,7 +2789,7 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
             <input
               type="text"
-              placeholder="아이디 (휴대폰번호 또는 소환사명)"
+              placeholder="아이디 (또는 소환사명)"
               value={loginId}
               onChange={e => setLoginId(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleAuth()}
@@ -2779,12 +2809,12 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
         {isSignUp && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
             <input
-              type="tel"
-              placeholder="휴대폰번호 (예: 01012345678)"
-              value={phone}
-              onChange={e => setPhone(e.target.value)}
+              type="text"
+              placeholder="아이디 (영문/숫자/_ 5~20자)"
+              value={newLoginId}
+              onChange={e => setNewLoginId(e.target.value)}
               disabled={loading}
-              maxLength={13}
+              maxLength={20}
             />
             <input
               type="password"
@@ -2892,7 +2922,7 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
 // ── 가입 신청 탭 (관리자 전용) ──────────────────────────────────────
 type SignupRequest = {
   id: number
-  phone: string
+  login_id: string
   summoner_name: string
   riot_id: string | null
   m1_line: string
@@ -2980,7 +3010,7 @@ function SignupRequestsTab({ onRefresh }: { onRefresh: () => void }) {
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                   <span style={{ fontWeight: 700 }}>{r.summoner_name}</span>
-                  <span style={{ fontSize: 11, color: 'var(--text3)' }}>{r.phone}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text3)' }}>{r.login_id}</span>
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>
                   롤 계정: <strong>{r.riot_id || '미입력'}</strong>
@@ -3035,7 +3065,7 @@ function SignupRequestsTab({ onRefresh }: { onRefresh: () => void }) {
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '6px 4px', fontSize: 12, borderBottom: '0.5px solid var(--border2)'
               }}>
-                <span>{r.summoner_name} ({r.phone})</span>
+                <span>{r.summoner_name} ({r.login_id})</span>
                 <span style={{ color: r.status === 'approved' ? 'var(--gold, #d4af37)' : 'var(--red)' }}>
                   {r.status === 'approved' ? '승인됨' : '거절됨'}
                 </span>
@@ -3058,6 +3088,7 @@ function MainApp() {
   const [summonerScores, setSummonerScores] = useState<SummonerScoreMap>({})
 
   const [tierHistory, setTierHistory] = useState<{ record_id: number; name: string; line: string; tier_before: string; tier_after: string }[]>([])
+  const [idPrefixMap, setIdPrefixMap] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   // 팀뽑기 상태 유지 (탭 이동해도 안 날아감)
   const [teamPlayers, setTeamPlayers] = useState<PlayerEntry[]>([])
@@ -3067,14 +3098,20 @@ function MainApp() {
   const [countdown, setCountdown] = useState<number | null>(null)
 
   const fetchAll = useCallback(async () => {
-    const [{ data: recs }, { data: sums }, { data: sess }, { data: hist }] = await Promise.all([
+    const [{ data: recs }, { data: sums }, { data: sess }, { data: hist }, { data: prefixes }] = await Promise.all([
       supabase.from('records').select('*').order('created_at', { ascending: false }),
       supabase.from('summoners').select('*'),
       supabase.from('session').select('*').eq('id', 1).single(),
       supabase.from('tier_history').select('*').order('id', { ascending: true }),
+      supabase.rpc('summoner_id_prefixes'),
     ])
     if (recs) setRecords(recs)
     if (hist) setTierHistory(hist)
+    if (prefixes) {
+      const pm: Record<string, string> = {}
+      prefixes.forEach((p: { summoner_name: string; id_prefix: string }) => { pm[p.summoner_name] = p.id_prefix })
+      setIdPrefixMap(pm)
+    }
     if (sums) {
       const map: SummonerMap = {}
       const scoreMap: SummonerScoreMap = {}
@@ -3347,11 +3384,11 @@ function MainApp() {
         <div className="empty">불러오는 중...</div>
       ) : (
         <>
-          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} summonerScores={summonerScores} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} countdown={countdown} setCountdown={setCountdown} setBalanceStartedAt={setBalanceStartedAt} />}
+          {tab === 'team' && <TeamTab onRecord={addRecord} summoners={summoners} summonerScores={summonerScores} idPrefixMap={idPrefixMap} players={teamPlayers} setPlayers={setTeamPlayers} result={teamResult} setResult={setTeamResult} records={records} onSessionUpdate={updateSession} fetchAll={fetchAll} balanceStartedAt={balanceStartedAt} pendingResult={pendingResult} setPendingResult={setPendingResult} countdown={countdown} setCountdown={setCountdown} setBalanceStartedAt={setBalanceStartedAt} />}
           {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} />}
           {tab === 'ranking' && <RankingTab records={records} />}
           {tab === 'hall' && <HallOfFameTab records={records} />}
-          {tab === 'stats' && <StatsTab records={records} summoners={summoners} summonerScores={summonerScores} tierHistory={tierHistory} />}
+          {tab === 'stats' && <StatsTab records={records} summoners={summoners} summonerScores={summonerScores} tierHistory={tierHistory} idPrefixMap={idPrefixMap} />}
 
           {tab === 'summoners' && <MyInfoTab summoners={summoners} summonerScores={summonerScores} onRefresh={fetchAll} />}
 
