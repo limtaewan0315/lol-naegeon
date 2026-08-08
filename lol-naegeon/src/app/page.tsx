@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { TIERS, LINES, getScore, getTierByScore, getScoreByTier, shuffle } from '@/lib/data'
 import type { Line } from '@/lib/data'
@@ -136,7 +136,9 @@ const TIER_SCORES: Record<string, number> = {
 }
 
 // ── 관리자 탭 ──────────────────────────────────────────────
-function AdminTab({ summoners, summonerScores }: { summoners: SummonerMap; summonerScores: SummonerScoreMap }) {
+// ── 관리자 탭 ──────────────────────────────────────────────
+function AdminTab({ summoners, summonerScores, records }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; records: GameRecord[] }) {
+  const [subTab, setSubTab] = useState<'summoners' | 'inactive'>('summoners')
   const [editingName, setEditingName] = useState<string | null>(null)
   const [editingLine, setEditingLine] = useState<Line | ''>('')
   const [editingTier, setEditingTier] = useState('')
@@ -144,12 +146,51 @@ function AdminTab({ summoners, summonerScores }: { summoners: SummonerMap; summo
 
   const allSummoners = Object.keys(summoners).sort()
 
+  // 14일 이상 미참여자 목록
+  const inactiveList = useMemo(() => {
+    const now = Date.now()
+    const result: { name: string; days: number }[] = []
+    for (const name of allSummoners) {
+      const lastGame = records.find(r => r.blue.some(p => p.name === name) || r.red.some(p => p.name === name))
+      if (!lastGame) continue
+      const lastDate = new Date((lastGame as any).created_at ?? '')
+      if (isNaN(lastDate.getTime())) continue
+      const days = Math.floor((now - lastDate.getTime()) / (1000 * 60 * 60 * 24))
+      if (days >= 14) result.push({ name, days })
+    }
+    return result.sort((a, b) => b.days - a.days)
+  }, [allSummoners, records])
+
   const deleteSummoner = async (name: string) => {
     if (!checkPassword()) return
     if (!confirm(`${name}을(를) 완전히 삭제할까요?`)) return
     setError('')
     
-    // 소환사의 모든 라인 데이터 삭제
+    const lines = Object.keys(summoners[name] ?? {})
+    for (const line of lines) {
+      await supabase.from('summoners').delete().eq('name', name).eq('line', line)
+    }
+    window.location.reload()
+  }
+
+  const toggleInactive = async (name: string, currentInactive: boolean) => {
+    if (!checkPassword()) return
+    const { error: err } = await supabase
+      .from('summoners')
+      .update({ is_inactive: !currentInactive })
+      .eq('name', name)
+    if (err) {
+      setError('업데이트 실패: ' + err.message)
+      return
+    }
+    window.location.reload()
+  }
+
+  const deleteInactivePlayer = async (name: string) => {
+    if (!checkPassword()) return
+    if (!confirm(`${name}을(를) 완전히 삭제할까요?`)) return
+    setError('')
+    
     const lines = Object.keys(summoners[name] ?? {})
     for (const line of lines) {
       await supabase.from('summoners').delete().eq('name', name).eq('line', line)
@@ -196,53 +237,105 @@ function AdminTab({ summoners, summonerScores }: { summoners: SummonerMap; summo
   return (
     <div>
       <div className="card">
-        <div className="card-title">👨‍💼 소환사 관리</div>
-        {error && <div className="error">{error}</div>}
-        <div style={{ maxHeight: 600, overflowY: 'auto' }}>
-          {allSummoners.length === 0 ? (
-            <div className="empty">등록된 소환사가 없어요</div>
-          ) : (
-            allSummoners.map(name => (
-              <div key={name} style={{ marginBottom: 14, paddingBottom: 10, borderBottom: '0.5px solid var(--border2)' }}>
-                <div style={{ fontWeight: 700, marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>{name}</span>
-                  <button className="btn btn-danger btn-sm" onClick={() => deleteSummoner(name)}>삭제</button>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {Object.entries(summoners[name] ?? {}).map(([line, tier]) => (
-                    <div key={`${name}-${line}`} style={{
-                      background: 'var(--bg3)', padding: '8px 10px', borderRadius: 'var(--radius)',
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12
-                    }}>
-                      {editingName === name && editingLine === line ? (
-                        <>
-                          <span style={{ minWidth: 50 }}>{line}</span>
-                          <input
-                            type="text"
-                            value={editingTier}
-                            onChange={e => setEditingTier(e.target.value)}
-                            style={{ flex: 1, margin: '0 8px' }}
-                            placeholder="티어명"
-                          />
-                          <button className="btn btn-sm" style={{ marginRight: 4 }} onClick={saveEdit}>저장</button>
-                          <button className="btn btn-sm" onClick={cancelEdit}>취소</button>
-                        </>
-                      ) : (
-                        <>
-                          <span style={{ minWidth: 50 }}>{line}</span>
-                          <span style={{ color: 'var(--text2)' }}>
-                            {tier} (점수: {summonerScores[name]?.[line as Line] ?? 0})
-                          </span>
-                          <button className="btn btn-sm" onClick={() => startEdit(name, line as Line, tier)}>편집</button>
-                        </>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))
-          )}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <button
+            className={`btn btn-sm${subTab === 'summoners' ? ' btn-gold' : ''}`}
+            onClick={() => setSubTab('summoners')}
+          >
+            소환사 관리
+          </button>
+          <button
+            className={`btn btn-sm${subTab === 'inactive' ? ' btn-gold' : ''}`}
+            onClick={() => setSubTab('inactive')}
+          >
+            장기미접속자 ({inactiveList.length})
+          </button>
         </div>
+
+        {error && <div className="error">{error}</div>}
+
+        {subTab === 'summoners' && (
+          <div style={{ maxHeight: 600, overflowY: 'auto' }}>
+            <div className="card-title" style={{ fontSize: 12, marginBottom: 8 }}>모든 소환사</div>
+            {allSummoners.length === 0 ? (
+              <div className="empty">등록된 소환사가 없어요</div>
+            ) : (
+              allSummoners.map(name => (
+                <div key={name} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '0.5px solid var(--border2)' }}>
+                  <div style={{ fontWeight: 700, marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>{name}</span>
+                    <button className="btn btn-danger btn-sm" onClick={() => deleteSummoner(name)}>삭제</button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {Object.entries(summoners[name] ?? {}).map(([line, tier]) => (
+                      <div key={`${name}-${line}`} style={{
+                        background: 'var(--bg3)', padding: '8px 10px', borderRadius: 'var(--radius)',
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12
+                      }}>
+                        {editingName === name && editingLine === line ? (
+                          <>
+                            <span style={{ minWidth: 50 }}>{line}</span>
+                            <input
+                              type="text"
+                              value={editingTier}
+                              onChange={e => setEditingTier(e.target.value)}
+                              style={{ flex: 1, margin: '0 8px' }}
+                              placeholder="티어명"
+                            />
+                            <button className="btn btn-sm" style={{ marginRight: 4 }} onClick={saveEdit}>저장</button>
+                            <button className="btn btn-sm" onClick={cancelEdit}>취소</button>
+                          </>
+                        ) : (
+                          <>
+                            <span style={{ minWidth: 50 }}>{line}</span>
+                            <span style={{ color: 'var(--text2)' }}>
+                              {tier} (점수: {summonerScores[name]?.[line as Line] ?? 0})
+                            </span>
+                            <button className="btn btn-sm" onClick={() => startEdit(name, line as Line, tier)}>편집</button>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {subTab === 'inactive' && (
+          <div style={{ maxHeight: 600, overflowY: 'auto' }}>
+            <div className="card-title" style={{ fontSize: 12, marginBottom: 8 }}>14일 이상 미참여 ({inactiveList.length}명)</div>
+            {inactiveList.length === 0 ? (
+              <div className="empty">장기 미접속자가 없어요</div>
+            ) : (
+              inactiveList.map(({ name, days }: { name: string; days: number }) => {
+                const isInactive = Object.values(summoners[name] ?? {}).some((_, idx) => {
+                  const key = Object.keys(summoners[name] ?? {})[idx]
+                  return false // TODO: actual inactive status from DB
+                })
+                return (
+                  <div key={name} style={{
+                    marginBottom: 10, padding: '10px 12px', background: 'var(--bg3)',
+                    borderRadius: 'var(--radius)', display: 'flex', justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <div>
+                      <span style={{ fontWeight: 700 }}>{name}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 8 }}>{days}일 미참여</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button className="btn btn-sm" onClick={() => toggleInactive(name, isInactive)}>
+                        {isInactive ? '활성화' : '비활성화'}
+                      </button>
+                      <button className="btn btn-danger btn-sm" onClick={() => deleteInactivePlayer(name)}>삭제</button>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -2698,7 +2791,7 @@ export default function Home() {
 
           {tab === 'admin' && isAdmin && (
             <div>
-              <AdminTab summoners={summoners} summonerScores={summonerScores} />
+              <AdminTab summoners={summoners} summonerScores={summonerScores} records={records} />
             </div>
           )}
         </>
