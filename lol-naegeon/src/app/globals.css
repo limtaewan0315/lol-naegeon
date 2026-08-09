@@ -151,6 +151,15 @@ input[type="radio"], input[type="checkbox"] {
   cursor: pointer;
 }
 
+/* range 슬라이더도 같은 이유로 배경/패딩 초기화 */
+input[type="range"] {
+  padding: 0;
+  border: none;
+  background: none;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+
 /* 버튼 */
 .btn {
   padding: 8px 16px;
