@@ -3281,6 +3281,15 @@ function SignupRequestsTab({ onRefresh }: { onRefresh: () => void }) {
 
   useEffect(() => { load() }, [load])
 
+  // 실시간 구독: 새 가입 신청이 들어오면 관리자 화면에 자동으로 반영
+  useEffect(() => {
+    const channel = supabase
+      .channel('signup-requests-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'signup_requests' }, () => { load() })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [load])
+
   const approve = async (id: number) => {
     setProcessingId(id)
     setError('')
@@ -3435,6 +3444,15 @@ function LineChangeRequestsTab({ onRefresh }: { onRefresh: () => void }) {
 
   useEffect(() => { load() }, [load])
 
+  // 실시간 구독: 새 라인변경신청이 들어오면 관리자 화면에 자동으로 반영
+  useEffect(() => {
+    const channel = supabase
+      .channel('room-linechange-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'line_change_requests' }, () => { load() })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [load])
+
   const approve = async (id: number) => {
     setProcessingId(id)
     setError('')
@@ -3571,6 +3589,7 @@ type Room = {
   members: RoomMember[]
   status: 'waiting' | 'playing'
   match_mode: 'line' | 'random'
+  max_score_diff: number
   result: BalanceResult | null
   pending_result: BalanceResult | null
   last_result: BalanceResult | null
@@ -3760,6 +3779,19 @@ function RoomsTab({
   const myRoom = rooms.find(r => r.members.some(m => m.summoner_name === myName)) ?? null
   const isHost = !!myRoom && myRoom.host_summoner_name === myName
 
+  // 경기 기록 시점에 방의 나머지 참가자 전원에게 "새로고침해" 신호를 즉시 쏴주는 채널.
+  // 폴링(주기적 재조회) 대신 이벤트 발생 시점에만 딱 한 번 신호를 보내는 방식이라
+  // 인원이 10명이든 20명이든 부하가 늘지 않음.
+  const reloadChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  useEffect(() => {
+    if (!myRoom?.id) { reloadChannelRef.current = null; return }
+    const channel = supabase.channel(`room-events-${myRoom.id}`)
+    channel.on('broadcast', { event: 'reload' }, () => { window.location.reload() })
+    channel.subscribe()
+    reloadChannelRef.current = channel
+    return () => { supabase.removeChannel(channel); reloadChannelRef.current = null }
+  }, [myRoom?.id])
+
   // 소환사의 등록된 라인 목록 (LINE_ORDER 순)
   const getSummonerLines = (n: string): Line[] => {
     if (!summoners[n]) return []
@@ -3840,6 +3872,13 @@ function RoomsTab({
     await supabase.from('rooms').update({ match_mode: mode, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
   }
 
+  // 팀 간 최대 점수차(0~10점)도 방장만 변경 가능
+  const updateMaxScoreDiff = async (value: number) => {
+    if (!myRoom || !isHost) return
+    const clamped = Math.min(10, Math.max(0, value))
+    await supabase.from('rooms').update({ max_score_diff: clamped, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
+  }
+
   // 관리자 전용 테스트 기능: 등록된 다른 소환사들로 방을 10명까지 자동으로 채우고
   // 전부 준비완료 상태로 만들어서, 혼자서도 매칭 테스트를 해볼 수 있게 함.
   // 무작위로 뽑으면 라인이 한쪽으로 쏠려서 밸런싱이 실패할 수 있으므로,
@@ -3857,9 +3896,10 @@ function RoomsTab({
       if (m.most1 !== 'any') lineCount[m.most1 as Line] = (lineCount[m.most1 as Line] ?? 0) + 1
     })
 
-    // 후보 풀: 아직 방에 없는 + 비활성화되지 않은 등록된 소환사 + 각자 등록된 라인 목록
+    // 후보 풀: 아직 방에 없는 + 비활성화되지 않은 + 실제 로그인 계정이 연결된 등록 소환사만
+    // (summoners 테이블엔 있지만 member_accounts에 연결된 계정이 없는 "유령 데이터"는 제외)
     let pool = Object.keys(summoners)
-      .filter(n => !existingNames.has(n) && !inactiveNames.has(n))
+      .filter(n => !existingNames.has(n) && !inactiveNames.has(n) && idPrefixMap[n])
       .map(n => ({ name: n, lines: getSummonerLines(n) }))
       .filter(c => c.lines.length > 0)
 
@@ -4045,7 +4085,9 @@ function RoomsTab({
       if (isBetter) { bestDiff = diff; bestLineDiff = lineDiff; best = candidateResult }
     }
 
-    const goodCandidates = candidates.filter(c => c.diff <= 10)
+    // 방장이 설정한 "최대 점수차"(0~10점) 이내인 후보만 우선 사용
+    const maxDiff = myRoom.max_score_diff ?? 10
+    const goodCandidates = candidates.filter(c => c.diff <= maxDiff)
     if (goodCandidates.length > 0) {
       goodCandidates.sort((a, b) => b.total - a.total)
       const top10 = goodCandidates.slice(0, 10)
@@ -4229,6 +4271,13 @@ function RoomsTab({
       if (!discordRes.ok) console.error('Discord webhook failed:', discordRes.status, await discordRes.text())
     } catch (e) { console.error('Discord webhook error:', e) }
 
+    // 나머지 참가자들에게 "지금 새로고침해" 신호를 즉시 전송 (폴링 없이 그 순간 바로 반영됨)
+    if (reloadChannelRef.current) {
+      try {
+        await reloadChannelRef.current.send({ type: 'broadcast', event: 'reload', payload: {} })
+      } catch (e) { console.error('reload broadcast 실패:', e) }
+    }
+
     setIsRecording(false)
     recordingRef.current = false
     window.location.reload()
@@ -4398,6 +4447,32 @@ function RoomsTab({
                   {myMember.ready ? '준비 취소' : '준비완료'}
                 </button>
               )}
+
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8,
+                padding: '8px 10px', background: 'var(--bg3)', borderRadius: 'var(--radius)',
+                border: '0.5px solid var(--border)'
+              }}>
+                <span style={{ fontSize: 12, color: 'var(--text3)', whiteSpace: 'nowrap', flexShrink: 0 }}>팀 간 최대 점수차</span>
+                {isHost ? (
+                  <>
+                    <input
+                      type="range"
+                      min={0}
+                      max={10}
+                      step={1}
+                      value={myRoom.max_score_diff ?? 10}
+                      onChange={e => updateMaxScoreDiff(Number(e.target.value))}
+                      style={{ flex: 1, width: 'auto' }}
+                    />
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--gold)', minWidth: 32, textAlign: 'right', flexShrink: 0 }}>
+                      {myRoom.max_score_diff ?? 10}점
+                    </span>
+                  </>
+                ) : (
+                  <span style={{ fontSize: 12, fontWeight: 600, marginLeft: 'auto' }}>{myRoom.max_score_diff ?? 10}점</span>
+                )}
+              </div>
 
               {isHost && (
                 <button
