@@ -4919,18 +4919,11 @@ function MainApp() {
   const [pendingLinesMap, setPendingLinesMap] = useState<Record<string, Line[]>>({})
   const [inactiveNames, setInactiveNames] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
-  // 팀뽑기 상태 유지 (탭 이동해도 안 날아감)
-  const [teamPlayers, setTeamPlayers] = useState<PlayerEntry[]>([])
-  const [teamResult, setTeamResult] = useState<BalanceResult | null>(null)
-  const [balanceStartedAt, setBalanceStartedAt] = useState<string | null>(null)
-  const [pendingResult, setPendingResult] = useState<BalanceResult | null>(null)
-  const [countdown, setCountdown] = useState<number | null>(null)
 
   const fetchAll = useCallback(async () => {
-    const [{ data: recs }, { data: sums }, { data: sess }, { data: hist }, { data: prefixes }, { data: pendingLines }] = await Promise.all([
+    const [{ data: recs }, { data: sums }, { data: hist }, { data: prefixes }, { data: pendingLines }] = await Promise.all([
       supabase.from('records').select('*').order('created_at', { ascending: false }),
       supabase.from('summoners').select('*'),
-      supabase.from('session').select('*').eq('id', 1).single(),
       supabase.from('tier_history').select('*').order('id', { ascending: true }),
       supabase.rpc('summoner_id_prefixes'),
       supabase.rpc('pending_line_requests'),
@@ -4967,30 +4960,6 @@ function MainApp() {
       setSummonerScores(scoreMap)
       setInactiveNames(inactiveSet)
     }
-    if (sess) {
-      setTeamPlayers(sess.players ?? [])
-      setTeamResult(sess.result ?? null)
-      // 카운트다운 복원
-      if (sess.balance_started_at && !sess.result) {
-        const elapsed = Math.floor((Date.now() - new Date(sess.balance_started_at).getTime()) / 1000)
-        const remaining = 10 - elapsed
-        if (sess.pending_result) setPendingResult(sess.pending_result)
-        if (remaining > 0) {
-          setBalanceStartedAt(sess.balance_started_at)
-          setCountdown(remaining)
-        } else {
-          setBalanceStartedAt(null)
-          setCountdown(null)
-          if (sess.pending_result) {
-            setTeamResult(sess.pending_result)
-            supabase.from('session').update({ result: sess.pending_result, balance_started_at: null, pending_result: null }).eq('id', 1)
-          }
-        }
-      } else {
-        setBalanceStartedAt(null)
-        setCountdown(null)
-      }
-    }
     setLoading(false)
   }, [])
 
@@ -5013,62 +4982,6 @@ function MainApp() {
       if (data?.must_change_password) setMustChangePassword(true)
     })()
   }, [])
-
-  // 세션 실시간 구독
-  useEffect(() => {
-    const channel = supabase
-      .channel('session-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'session', filter: 'id=eq.1' }, payload => {
-        const sess = payload.new as any
-        if (sess) {
-          setTeamPlayers(sess.players ?? [])
-          setTeamResult(sess.result ?? null)
-          if (sess.balance_started_at && !sess.result) {
-            const elapsed = Math.floor((Date.now() - new Date(sess.balance_started_at).getTime()) / 1000)
-            const remaining = 10 - elapsed
-            if (sess.pending_result) setPendingResult(sess.pending_result)
-            if (remaining > 0) {
-              setBalanceStartedAt(sess.balance_started_at)
-              setCountdown(remaining)
-            } else {
-              setBalanceStartedAt(null)
-              setCountdown(null)
-            }
-          } else {
-            setBalanceStartedAt(null)
-            setCountdown(null)
-          }
-        }
-      })
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [])
-
-  // 카운트다운 타이머 (Home에서 관리)
-  useEffect(() => {
-    if (countdown === null || !pendingResult) return
-    if (countdown <= 0) {
-      const resultToSave = pendingResult
-      setCountdown(null)
-      setBalanceStartedAt(null)
-      setTeamResult(resultToSave)
-      setPendingResult(null)
-      supabase.from('session').update({ result: resultToSave, balance_started_at: null, pending_result: null }).eq('id', 1)
-        .then(({ error }) => {
-          if (error) console.error('세션 result 저장 실패:', error)
-        })
-      return
-    }
-    const timer = setTimeout(() => setCountdown(c => c !== null ? c - 1 : null), 1000)
-    return () => clearTimeout(timer)
-  }, [countdown, pendingResult])
-
-  // 세션 업데이트 함수 (팀편성 관련만 업데이트, 투표 상태 유지)
-  const updateSession = async (players: PlayerEntry[], result: BalanceResult | null) => {
-    await supabase.from('session').update({ players, result, updated_at: new Date().toISOString() }).eq('id', 1)
-  }
-
-
 
 
 
