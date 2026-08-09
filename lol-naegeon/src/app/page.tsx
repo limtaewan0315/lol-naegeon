@@ -3747,7 +3747,22 @@ function RoomsTab({
 
   const [loadError, setLoadError] = useState('')
 
-  const loadRooms = useCallback(async () => {
+  // onlyRoomId를 주면 그 방 하나만 갱신(가벼움), 안 주면 전체 방 목록 조회(로비용)
+  const loadRooms = useCallback(async (onlyRoomId?: number) => {
+    if (onlyRoomId) {
+      const { data, error } = await supabase.from('rooms_public').select('*').eq('id', onlyRoomId).maybeSingle()
+      if (error) {
+        console.error('방 정보 조회 실패:', error)
+        return
+      }
+      setLoadError('')
+      setRooms(prev => {
+        if (!data) return prev.filter(r => r.id !== onlyRoomId) // 방이 삭제됨
+        const exists = prev.some(r => r.id === (data as Room).id)
+        return exists ? prev.map(r => (r.id === (data as Room).id ? (data as Room) : r)) : [...prev, data as Room]
+      })
+      return
+    }
     // password_hash가 없는 공개용 뷰에서만 조회 (비밀번호 해시는 절대 클라이언트로 내려오지 않음)
     const { data, error } = await supabase.from('rooms_public').select('*').order('created_at', { ascending: false })
     if (error) {
@@ -3765,7 +3780,7 @@ function RoomsTab({
       setLoading(true)
       try {
         const { data: { session } } = await supabase.auth.getSession()
-      const user = session?.user ?? null
+        const user = session?.user ?? null
         if (user) {
           setMyUserId(user.id)
           const { data, error: maErr } = await supabase
@@ -3787,17 +3802,25 @@ function RoomsTab({
     return () => { cancelled = true }
   }, [loadRooms])
 
-  // 실시간 구독: 방 생성/삭제/변경(참가·퇴장·라인설정·준비·팀편성 포함)이 모든 사용자 화면에 즉시 반영됨
-  useEffect(() => {
-    const channel = supabase
-      .channel('rooms-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => { loadRooms() })
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [loadRooms])
-
   const myRoom = rooms.find(r => r.members.some(m => m.summoner_name === myName)) ?? null
   const isHost = !!myRoom && myRoom.host_summoner_name === myName
+
+  // 실시간 구독: 로비(방 목록)에 있을 땐 방 전체를 넓게 구독하고,
+  // 내가 특정 방에 들어가 있을 땐 "그 방 하나"만 좁혀서 구독함.
+  // 다른 방에서 일어나는 일(라인 변경, 준비완료 등) 때문에 불필요하게 전체를 다시 불러오지 않도록 하기 위함
+  // — 카운트다운 중 버벅임의 원인이었음.
+  useEffect(() => {
+    const roomId = myRoom?.id
+    const channelName = roomId ? `rooms-realtime-room-${roomId}` : 'rooms-realtime-lobby'
+    const filterConfig: any = { event: '*', schema: 'public', table: 'rooms' }
+    if (roomId) filterConfig.filter = `id=eq.${roomId}`
+
+    const channel = supabase
+      .channel(channelName)
+      .on('postgres_changes', filterConfig, () => { loadRooms(roomId) })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [loadRooms, myRoom?.id])
 
   // 경기 기록 시점에 방의 나머지 참가자 전원에게 "새로고침해" 신호를 즉시 쏴주는 채널.
   // 폴링(주기적 재조회) 대신 이벤트 발생 시점에만 딱 한 번 신호를 보내는 방식이라
@@ -3869,6 +3892,8 @@ function RoomsTab({
 
   const updateMyMost = async (field: 'most1' | 'most2', value: string) => {
     if (!myRoom || !myName) return
+    const myEntry = myRoom.members.find(m => m.summoner_name === myName)
+    if (myEntry?.ready) return // 준비완료 상태에서는 라인 변경 불가 (UI에서도 비활성화되어 있지만 이중 확인)
     const newMembers = myRoom.members.map(m => {
       if (m.summoner_name !== myName) return m
       if (field === 'most1') {
@@ -4321,7 +4346,7 @@ function RoomsTab({
     return (
       <div className="card">
         <div className="error">내전방 정보를 불러오지 못했어요: {loadError}</div>
-        <button className="btn btn-gold" onClick={loadRooms} style={{ width: '100%', marginTop: 8 }}>다시 시도</button>
+        <button className="btn btn-gold" onClick={() => loadRooms()} style={{ width: '100%', marginTop: 8 }}>다시 시도</button>
       </div>
     )
   }
@@ -4359,8 +4384,8 @@ function RoomsTab({
                       className="player-row"
                       style={{
                         padding: '8px 10px', flexWrap: 'wrap',
-                        background: isMe ? 'rgba(212,175,55,0.12)' : undefined,
-                        border: isMe ? '0.5px solid var(--gold, #d4af37)' : undefined,
+                        background: isMe ? (m.ready ? 'rgba(212,175,55,0.28)' : 'rgba(212,175,55,0.12)') : undefined,
+                        border: isMe ? `${m.ready ? 1 : 0.5}px solid var(--gold, #d4af37)` : undefined,
                         borderRadius: isMe ? 'var(--radius)' : undefined,
                       }}
                     >
@@ -4376,7 +4401,8 @@ function RoomsTab({
                           <select
                             value={m.most1}
                             onChange={e => updateMyMost('most1', e.target.value)}
-                            style={{ width: 95, padding: '4px 8px', fontSize: 12 }}
+                            disabled={m.ready}
+                            style={{ width: 95, padding: '4px 8px', fontSize: 12, opacity: m.ready ? 0.5 : 1, cursor: m.ready ? 'not-allowed' : 'pointer' }}
                           >
                             {lines.length >= 2 && <option value="any">상관없음</option>}
                             {selectableLines.map(l => (
@@ -4398,8 +4424,8 @@ function RoomsTab({
                           <select
                             value={m.most2 ?? ''}
                             onChange={e => updateMyMost('most2', e.target.value)}
-                            disabled={m.most1 === 'any'}
-                            style={{ width: 95, padding: '4px 8px', fontSize: 12, opacity: m.most1 === 'any' ? 0.4 : 1 }}
+                            disabled={m.most1 === 'any' || m.ready}
+                            style={{ width: 95, padding: '4px 8px', fontSize: 12, opacity: (m.most1 === 'any' || m.ready) ? 0.4 : 1, cursor: m.ready ? 'not-allowed' : 'pointer' }}
                           >
                             <option value=''>없음</option>
                             {selectableLines.filter(l => l !== m.most1 && m.most1 !== 'any').map(l => (
@@ -4418,13 +4444,15 @@ function RoomsTab({
                       <span
                         className="badge"
                         style={{
-                          marginLeft: 'auto', fontSize: 11, padding: '3px 10px', borderRadius: 999,
-                          background: m.ready ? 'rgba(212,175,55,0.15)' : 'var(--bg3)',
+                          marginLeft: 'auto', fontSize: m.ready ? 9 : 11, padding: '3px 8px', borderRadius: 999,
+                          background: m.ready ? 'rgba(212,175,55,0.2)' : 'var(--bg3)',
                           color: m.ready ? 'var(--gold, #d4af37)' : 'var(--text3)',
-                          border: `0.5px solid ${m.ready ? 'var(--gold, #d4af37)' : 'var(--border2)'}`
+                          border: `0.5px solid ${m.ready ? 'var(--gold, #d4af37)' : 'var(--border2)'}`,
+                          fontWeight: m.ready ? 600 : 400,
+                          whiteSpace: 'nowrap',
                         }}
                       >
-                        {m.ready ? '✓ 준비완료' : '대기중'}
+                        {m.ready ? '✓준비완료' : '대기중'}
                       </span>
 
                       {isHost && m.summoner_name !== myRoom.host_summoner_name && (
