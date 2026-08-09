@@ -3866,6 +3866,14 @@ function RoomsTab({
     await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
   }
 
+  // 방장이 다른 참가자를 강퇴 (본인 나가기와 동일하게 members 배열에서 제거)
+  const kickMember = async (name: string) => {
+    if (!myRoom || !isHost || name === myRoom.host_summoner_name) return
+    if (!confirm(`${name}님을 강퇴할까요?`)) return
+    const newMembers = myRoom.members.filter(m => m.summoner_name !== name)
+    await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
+  }
+
   // 매칭 방식(라인밸런싱/올랜덤)은 방장만 변경 가능
   const updateMatchMode = async (mode: 'line' | 'random') => {
     if (!myRoom || !isHost) return
@@ -4389,9 +4397,45 @@ function RoomsTab({
                       >
                         {m.ready ? '✓ 준비완료' : '대기중'}
                       </span>
+
+                      {isHost && m.summoner_name !== myRoom.host_summoner_name && (
+                        <button
+                          className="btn btn-danger btn-sm"
+                          onClick={() => kickMember(m.summoner_name)}
+                          style={{ width: 'auto', flexShrink: 0, padding: '2px 8px', fontSize: 10, marginLeft: 4 }}
+                        >
+                          강퇴
+                        </button>
+                      )}
                     </div>
                   )
                 })}
+              </div>
+
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8,
+                padding: '8px 10px', background: 'var(--bg3)', borderRadius: 'var(--radius)',
+                border: '0.5px solid var(--border)'
+              }}>
+                <span style={{ fontSize: 12, color: 'var(--text3)', whiteSpace: 'nowrap', flexShrink: 0 }}>팀 간 최대 점수차</span>
+                {isHost ? (
+                  <>
+                    <input
+                      type="range"
+                      min={0}
+                      max={10}
+                      step={1}
+                      value={myRoom.max_score_diff ?? 10}
+                      onChange={e => updateMaxScoreDiff(Number(e.target.value))}
+                      style={{ flex: 1, width: 'auto' }}
+                    />
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--gold)', minWidth: 32, textAlign: 'right', flexShrink: 0 }}>
+                      {myRoom.max_score_diff ?? 10}점
+                    </span>
+                  </>
+                ) : (
+                  <span style={{ fontSize: 12, fontWeight: 600, marginLeft: 'auto' }}>{myRoom.max_score_diff ?? 10}점</span>
+                )}
               </div>
 
               <div style={{
@@ -4448,42 +4492,21 @@ function RoomsTab({
                 </button>
               )}
 
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8,
-                padding: '8px 10px', background: 'var(--bg3)', borderRadius: 'var(--radius)',
-                border: '0.5px solid var(--border)'
-              }}>
-                <span style={{ fontSize: 12, color: 'var(--text3)', whiteSpace: 'nowrap', flexShrink: 0 }}>팀 간 최대 점수차</span>
-                {isHost ? (
-                  <>
-                    <input
-                      type="range"
-                      min={0}
-                      max={10}
-                      step={1}
-                      value={myRoom.max_score_diff ?? 10}
-                      onChange={e => updateMaxScoreDiff(Number(e.target.value))}
-                      style={{ flex: 1, width: 'auto' }}
-                    />
-                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--gold)', minWidth: 32, textAlign: 'right', flexShrink: 0 }}>
-                      {myRoom.max_score_diff ?? 10}점
-                    </span>
-                  </>
-                ) : (
-                  <span style={{ fontSize: 12, fontWeight: 600, marginLeft: 'auto' }}>{myRoom.max_score_diff ?? 10}점</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-danger" onClick={leaveRoom} style={{ flex: 1 }}>
+                  나가기
+                </button>
+                {isHost && (
+                  <button
+                    className="btn btn-gold"
+                    onClick={runBalance}
+                    disabled={!allReady || balancing}
+                    style={{ flex: 1 }}
+                  >
+                    {balancing ? '편성 중...' : `팀편성 (${myRoom.members.filter(m => m.ready).length}/${myRoom.members.length})`}
+                  </button>
                 )}
               </div>
-
-              {isHost && (
-                <button
-                  className="btn btn-gold"
-                  onClick={runBalance}
-                  disabled={!allReady || balancing}
-                  style={{ width: '100%' }}
-                >
-                  {balancing ? '편성 중...' : allReady ? '팀편성' : `모든 참가자가 준비완료 해야 팀편성 가능 (${myRoom.members.filter(m => m.ready).length}/${myRoom.members.length})`}
-                </button>
-              )}
               {balanceError && <div className="error" style={{ marginTop: 8 }}>{balanceError}</div>}
             </>
           )}
@@ -4727,9 +4750,11 @@ function RoomsTab({
             </>
           )}
 
-          <button className="btn btn-danger" onClick={leaveRoom} style={{ width: '100%', marginTop: 12 }}>
-            {isHost ? '방 삭제하고 나가기' : '나가기'}
-          </button>
+          {(myRoom.result || countdown !== null) && (
+            <button className="btn btn-danger" onClick={leaveRoom} style={{ width: '100%', marginTop: 12 }}>
+              나가기
+            </button>
+          )}
         </div>
         </div>
 
