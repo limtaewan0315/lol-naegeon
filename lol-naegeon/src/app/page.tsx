@@ -406,7 +406,8 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
     let cancelled = false
     ;(async () => {
       setLoading(true)
-      const { data: { user } } = await supabase.auth.getUser()
+      const { data: { session } } = await supabase.auth.getSession()
+      const user = session?.user ?? null
       if (cancelled) return
 
       let name: string | null = null
@@ -480,7 +481,8 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
     }
     setSaving(true)
     setFieldError('')
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { session } } = await supabase.auth.getSession()
+      const user = session?.user ?? null
     if (!user) { setSaving(false); return }
     const { error: err } = await supabase
       .from('member_accounts')
@@ -513,7 +515,8 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
 
     // 현재 비밀번호 확인 (재로그인 시도로 검증)
     // 아이디를 추측해서 내부 인증키를 재구성하지 않고, 지금 로그인된 세션에 저장된 실제 값을 그대로 사용
-    const { data: { user: currentUser } } = await supabase.auth.getUser()
+    const { data: { session: currentSession } } = await supabase.auth.getSession()
+    const currentUser = currentSession?.user ?? null
     if (!currentUser?.email) {
       setFieldError('계정 정보를 확인할 수 없어요. 새로고침 후 다시 시도해주세요.')
       setSaving(false)
@@ -3654,7 +3657,8 @@ function RoomChat({ roomId, myName }: { roomId: number; myName: string }) {
     const text = input.trim()
     if (!text || sending) return
     setSending(true)
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { session } } = await supabase.auth.getSession()
+      const user = session?.user ?? null
     if (!user) { setSending(false); return }
     const { error } = await supabase.from('room_messages').insert({
       room_id: roomId,
@@ -3760,7 +3764,8 @@ function RoomsTab({
     ;(async () => {
       setLoading(true)
       try {
-        const { data: { user } } = await supabase.auth.getUser()
+        const { data: { session } } = await supabase.auth.getSession()
+      const user = session?.user ?? null
         if (user) {
           setMyUserId(user.id)
           const { data, error: maErr } = await supabase
@@ -4852,7 +4857,8 @@ function ForcePasswordChangeGate({ onDone }: { onDone: () => void }) {
 
   useEffect(() => {
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser()
+      const { data: { session } } = await supabase.auth.getSession()
+      const user = session?.user ?? null
       const loginIdMeta = (user?.user_metadata?.login_id ?? user?.user_metadata?.phone) as string | undefined
       if (loginIdMeta) { setDisplayId(loginIdMeta); return }
       if (user) {
@@ -4871,7 +4877,8 @@ function ForcePasswordChangeGate({ onDone }: { onDone: () => void }) {
     setError('')
 
     // 아이디를 추측해서 내부 인증키를 재구성하지 않고, 지금 로그인된 세션에 저장된 실제 값을 그대로 사용
-    const { data: { user: currentUser } } = await supabase.auth.getUser()
+    const { data: { session: currentSession } } = await supabase.auth.getSession()
+    const currentUser = currentSession?.user ?? null
     if (!currentUser?.email) {
       setError('계정 정보를 확인할 수 없어요. 새로고침 후 다시 시도해주세요.')
       setSaving(false)
@@ -4894,7 +4901,8 @@ function ForcePasswordChangeGate({ onDone }: { onDone: () => void }) {
       return
     }
 
-    const { data: { user } } = await supabase.auth.getUser()
+    const { data: { session } } = await supabase.auth.getSession()
+      const user = session?.user ?? null
     if (user) {
       await supabase.from('member_accounts').update({ must_change_password: false }).eq('user_id', user.id)
     }
@@ -5000,7 +5008,8 @@ function MainApp() {
   // 비밀번호 강제 변경 필요 여부 확인 (비밀번호 찾기로 초기화된 계정인지)
   useEffect(() => {
     (async () => {
-      const { data: { user } } = await supabase.auth.getUser()
+      const { data: { session } } = await supabase.auth.getSession()
+      const user = session?.user ?? null
       if (!user) return
       const { data } = await supabase.from('member_accounts').select('must_change_password').eq('user_id', user.id).maybeSingle()
       if (data?.must_change_password) setMustChangePassword(true)
