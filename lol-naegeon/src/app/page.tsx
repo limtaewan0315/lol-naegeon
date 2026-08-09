@@ -3741,9 +3741,17 @@ function RoomsTab({
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
 
+  const [loadError, setLoadError] = useState('')
+
   const loadRooms = useCallback(async () => {
     // password_hash가 없는 공개용 뷰에서만 조회 (비밀번호 해시는 절대 클라이언트로 내려오지 않음)
-    const { data } = await supabase.from('rooms_public').select('*').order('created_at', { ascending: false })
+    const { data, error } = await supabase.from('rooms_public').select('*').order('created_at', { ascending: false })
+    if (error) {
+      console.error('방 목록 조회 실패:', error)
+      setLoadError(error.message)
+      return
+    }
+    setLoadError('')
     setRooms((data ?? []) as Room[])
   }, [])
 
@@ -3751,18 +3759,25 @@ function RoomsTab({
     let cancelled = false
     ;(async () => {
       setLoading(true)
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        setMyUserId(user.id)
-        const { data } = await supabase
-          .from('member_accounts')
-          .select('summoner_name')
-          .eq('user_id', user.id)
-          .maybeSingle()
-        if (!cancelled) setMyName(data?.summoner_name ?? null)
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          setMyUserId(user.id)
+          const { data, error: maErr } = await supabase
+            .from('member_accounts')
+            .select('summoner_name')
+            .eq('user_id', user.id)
+            .maybeSingle()
+          if (maErr) console.error('내 소환사 정보 조회 실패:', maErr)
+          if (!cancelled) setMyName(data?.summoner_name ?? null)
+        }
+        await loadRooms()
+      } catch (e) {
+        console.error('내전방 초기 로딩 실패:', e)
+        if (!cancelled) setLoadError((e as Error).message ?? '알 수 없는 오류')
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-      await loadRooms()
-      if (!cancelled) setLoading(false)
     })()
     return () => { cancelled = true }
   }, [loadRooms])
@@ -4295,6 +4310,15 @@ function RoomsTab({
 
   if (loading) {
     return <div className="card"><div className="empty">불러오는 중...</div></div>
+  }
+
+  if (loadError) {
+    return (
+      <div className="card">
+        <div className="error">내전방 정보를 불러오지 못했어요: {loadError}</div>
+        <button className="btn btn-gold" onClick={loadRooms} style={{ width: '100%', marginTop: 8 }}>다시 시도</button>
+      </div>
+    )
   }
 
   if (!myName) {
