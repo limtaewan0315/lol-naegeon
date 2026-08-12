@@ -3703,15 +3703,22 @@ function RoomChat({ roomId, myName }: { roomId: number; myName: string }) {
         )}
       </div>
       <div className="room-chat-input">
-        <input
+        <textarea
           value={input}
           onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && send()}
-          placeholder="메시지 입력..."
+          onKeyDown={e => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              send()
+            }
+          }}
+          placeholder="메시지 입력... (Shift+Enter 줄바꿈)"
           disabled={sending}
           maxLength={300}
+          rows={2}
+          style={{ resize: 'none', overflowY: 'auto', maxHeight: 72, fontFamily: 'inherit', lineHeight: 1.4 }}
         />
-        <button className="btn btn-gold btn-sm" onClick={send} disabled={sending || !input.trim()}>전송</button>
+        <button className="btn btn-gold btn-sm" onClick={send} disabled={sending || !input.trim()} style={{ alignSelf: 'flex-end' }}>전송</button>
       </div>
     </div>
   )
@@ -4821,12 +4828,13 @@ function RoomsTab({
           <RoomChat roomId={myRoom.id} myName={myName} />
 
           <div className="room-chat" style={{ height: 'auto', position: 'static' }}>
-            <div className="room-chat-header">라인별 인원 (M1+M2 합산)</div>
+            <div className="room-chat-header">라인별 인원 (M1+M2 합산, 상관없음 포함)</div>
             <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
               {LINES.map(l => {
                 const count = myRoom.members.reduce((acc, m) => {
                   let c = acc
                   if (m.most1 === l) c++
+                  else if (m.most1 === 'any' && getSummonerLines(m.summoner_name).includes(l)) c++
                   if (m.most2 === l) c++
                   return c
                 }, 0)
