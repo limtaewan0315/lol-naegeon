@@ -4185,14 +4185,14 @@ function RoomsTab({
     setBalancing(false)
   }
 
-  // 팀편성 결과 공개 카운트다운 (10초) — balance_started_at 기준으로 모든 참가자 화면에서 동일하게 진행
+  // 팀편성 결과 공개 카운트다운 (3초) — balance_started_at 기준으로 모든 참가자 화면에서 동일하게 진행
   const [countdown, setCountdown] = useState<number | null>(null)
   useEffect(() => {
     if (!myRoom?.balance_started_at || myRoom.result) { setCountdown(null); return }
     const startedAt = myRoom.balance_started_at
     const tick = () => {
       const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)
-      const remaining = 10 - elapsed
+      const remaining = 3 - elapsed
       setCountdown(remaining > 0 ? remaining : 0)
     }
     tick()
@@ -4214,7 +4214,7 @@ function RoomsTab({
   const recordingRef = useRef(false)
 
   const recordWin = async (winner: 'blue' | 'red') => {
-    if (!myRoom?.result || recordingRef.current) return
+    if (!myRoom?.result || recordingRef.current || !isHost) return
     recordingRef.current = true
     setIsRecording(true)
 
@@ -4573,7 +4573,7 @@ function RoomsTab({
               <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 8 }}>팀 편성 완료! 공개까지</div>
               <div style={{ fontSize: 64, fontWeight: 700, color: 'var(--blue)', lineHeight: 1, marginBottom: 16 }}>{countdown}</div>
               <div style={{ height: 4, background: 'var(--bg3)', borderRadius: 2, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${(10 - countdown) / 10 * 100}%`, background: 'var(--blue)', borderRadius: 2, transition: 'width 0.9s linear' }} />
+                <div style={{ height: '100%', width: `${(3 - countdown) / 3 * 100}%`, background: 'var(--blue)', borderRadius: 2, transition: 'width 0.9s linear' }} />
               </div>
             </div>
           )}
@@ -4795,7 +4795,9 @@ function RoomsTab({
                 <div className="card-title" style={{ marginBottom: 8 }}>경기 결과 기록</div>
                 <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 4 }}>어느 팀이 이겼나요?</div>
                 <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>🏆 이긴 팀은 티어 UP, 진 팀은 티어 DOWN</div>
-                {!isRecording ? (
+                {!isHost ? (
+                  <div className="empty">방장만 경기 결과를 기록할 수 있어요</div>
+                ) : !isRecording ? (
                   <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
                     <button className="btn btn-blue" onClick={() => recordWin('blue')}>🔵 블루팀 승리</button>
                     <button className="btn btn-red" onClick={() => recordWin('red')}>🔴 레드팀 승리</button>
