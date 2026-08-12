@@ -4817,7 +4817,33 @@ function RoomsTab({
         </div>
         </div>
 
-        <RoomChat roomId={myRoom.id} myName={myName} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <RoomChat roomId={myRoom.id} myName={myName} />
+
+          <div className="room-chat" style={{ height: 'auto', position: 'static' }}>
+            <div className="room-chat-header">라인별 인원 (M1+M2 합산)</div>
+            <div style={{ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {LINES.map(l => {
+                const count = myRoom.members.reduce((acc, m) => {
+                  let c = acc
+                  if (m.most1 === l) c++
+                  if (m.most2 === l) c++
+                  return c
+                }, 0)
+                const pct = myRoom.members.length > 0 ? Math.min(100, (count / myRoom.members.length) * 100) : 0
+                return (
+                  <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="badge b-line" style={{ width: 44, textAlign: 'center', flexShrink: 0 }}>{l}</span>
+                    <div style={{ flex: 1, height: 6, background: 'var(--bg)', borderRadius: 3, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${pct}%`, background: 'var(--gold)', borderRadius: 3 }} />
+                    </div>
+                    <span style={{ fontSize: 12, color: 'var(--text2)', minWidth: 28, textAlign: 'right', flexShrink: 0 }}>{count}명</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
       </div>
     )
   }
