@@ -3694,6 +3694,7 @@ function RoomChat({ roomId, myName }: { roomId: number; myName: string }) {
                   background: isMe ? 'rgba(212,175,55,0.15)' : 'var(--bg3)',
                   border: `0.5px solid ${isMe ? 'var(--gold, #d4af37)' : 'var(--border2)'}`,
                   wordBreak: 'break-word',
+                  whiteSpace: 'pre-wrap',
                 }}>
                   {m.message}
                 </div>
@@ -3830,8 +3831,6 @@ function RoomsTab({
   }, [loadRooms, myRoom?.id])
 
   // 경기 기록 시점에 방의 나머지 참가자 전원에게 "새로고침해" 신호를 즉시 쏴주는 채널.
-  // 폴링(주기적 재조회) 대신 이벤트 발생 시점에만 딱 한 번 신호를 보내는 방식이라
-  // 인원이 10명이든 20명이든 부하가 늘지 않음.
   const reloadChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
   useEffect(() => {
     if (!myRoom?.id) { reloadChannelRef.current = null; return }
@@ -3841,6 +3840,16 @@ function RoomsTab({
     reloadChannelRef.current = channel
     return () => { supabase.removeChannel(channel); reloadChannelRef.current = null }
   }, [myRoom?.id])
+
+  // 위 신호(broadcast)가 어떤 이유로든 전달 안 됐을 때를 대비한 보험.
+  // 결과 화면이 떠 있는 동안만 짧은 주기로 방 상태를 재확인해서,
+  // 신호를 못 받았어도 결국엔 자동으로 참가자 목록으로 돌아가게 함
+  // (평소 대기실 화면에서는 작동 안 하니까 부하는 거의 없음).
+  useEffect(() => {
+    if (!myRoom?.result) return
+    const interval = setInterval(() => { loadRooms(myRoom.id) }, 4000)
+    return () => clearInterval(interval)
+  }, [loadRooms, myRoom?.id, !!myRoom?.result])
 
   // 소환사의 등록된 라인 목록 (LINE_ORDER 순)
   const getSummonerLines = (n: string): Line[] => {
@@ -3909,13 +3918,18 @@ function RoomsTab({
       }
       return { ...m, most2: (value || null) as Line | 'any' | null }
     })
-    await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
+    const roomId = myRoom.id
+    // 낙관적 업데이트: 서버 응답(왕복)을 기다리지 않고 화면을 즉시 반영해서 클릭 반응성을 높임
+    setRooms(prev => prev.map(r => (r.id === roomId ? { ...r, members: newMembers } : r)))
+    await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', roomId)
   }
 
   const toggleReady = async () => {
     if (!myRoom || !myName) return
     const newMembers = myRoom.members.map(m => m.summoner_name === myName ? { ...m, ready: !m.ready } : m)
-    await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
+    const roomId = myRoom.id
+    setRooms(prev => prev.map(r => (r.id === roomId ? { ...r, members: newMembers } : r)))
+    await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', roomId)
   }
 
   // 방장이 다른 참가자를 강퇴 (본인 나가기와 동일하게 members 배열에서 제거)
@@ -3923,20 +3937,26 @@ function RoomsTab({
     if (!myRoom || !isHost || name === myRoom.host_summoner_name) return
     if (!confirm(`${name}님을 강퇴할까요?`)) return
     const newMembers = myRoom.members.filter(m => m.summoner_name !== name)
-    await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
+    const roomId = myRoom.id
+    setRooms(prev => prev.map(r => (r.id === roomId ? { ...r, members: newMembers } : r)))
+    await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', roomId)
   }
 
   // 매칭 방식(라인밸런싱/올랜덤)은 방장만 변경 가능
   const updateMatchMode = async (mode: 'line' | 'random') => {
     if (!myRoom || !isHost) return
-    await supabase.from('rooms').update({ match_mode: mode, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
+    const roomId = myRoom.id
+    setRooms(prev => prev.map(r => (r.id === roomId ? { ...r, match_mode: mode } : r)))
+    await supabase.from('rooms').update({ match_mode: mode, updated_at: new Date().toISOString() }).eq('id', roomId)
   }
 
   // 팀 간 최대 점수차(0~10점)도 방장만 변경 가능
   const updateMaxScoreDiff = async (value: number) => {
     if (!myRoom || !isHost) return
     const clamped = Math.min(10, Math.max(0, value))
-    await supabase.from('rooms').update({ max_score_diff: clamped, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
+    const roomId = myRoom.id
+    setRooms(prev => prev.map(r => (r.id === roomId ? { ...r, max_score_diff: clamped } : r)))
+    await supabase.from('rooms').update({ max_score_diff: clamped, updated_at: new Date().toISOString() }).eq('id', roomId)
   }
 
   // 관리자 전용 테스트 기능: 등록된 다른 소환사들로 방을 10명까지 자동으로 채우고
@@ -4205,7 +4225,7 @@ function RoomsTab({
     tick()
     const timer = setInterval(tick, 1000)
     return () => clearInterval(timer)
-  }, [myRoom?.balance_started_at, myRoom?.result])
+  }, [myRoom?.balance_started_at, !!myRoom?.result])
 
   useEffect(() => {
     if (countdown === 0 && myRoom?.pending_result && myRoom.result === null) {
