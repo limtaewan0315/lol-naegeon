@@ -2969,7 +2969,9 @@ function RoomsTab({
       if (m.summoner_name !== myName) return m
       if (field === 'most1') {
         if (value === 'any') return { ...m, most1: 'any' as const, most2: null }
-        return { ...m, most1: value as Line }
+        // M1을 M2와 같은 라인으로 바꾸면, 겹치는 M2는 자동으로 비워줌 (안 그러면 데이터상 M1=M2로 중복 저장됨)
+        const clearedMost2 = m.most2 === value ? null : m.most2
+        return { ...m, most1: value as Line, most2: clearedMost2 }
       }
       return { ...m, most2: (value || null) as Line | 'any' | null }
     })
@@ -3116,8 +3118,6 @@ function RoomsTab({
 
     const LINE_PREFERENCE: Record<string, Line> = { '공민규': '정글' }
     const PREFERENCE_RATE = 0.95
-    const LINE_AVOID: Record<string, Line[]> = { '강재현': ['미드', '원딜'] }
-    const AVOID_RATE = 0.1
 
     let best: BalanceResult | null = null
     let bestDiff = Infinity
@@ -3148,11 +3148,6 @@ function RoomsTab({
         } else {
           isM2 = Math.random() >= 0.7
           line = isM2 ? p.most2 as Line : p.most1 as Line
-        }
-        const avoidLines = LINE_AVOID[p.name]
-        if (avoidLines && avoidLines.includes(line) && Math.random() >= AVOID_RATE) {
-          const altLines = allLines.filter(l => !avoidLines.includes(l))
-          if (altLines.length > 0) line = altLines[Math.floor(Math.random() * altLines.length)]
         }
         const tier = summoners[p.name]?.[line] ?? '골드2'
         const score = getAdjustedScore(p.name, line, tier)
