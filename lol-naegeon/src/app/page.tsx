@@ -374,6 +374,7 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
   const [loading, setLoading] = useState(true)
   const [displayId, setDisplayId] = useState('')
   const [summonerName, setSummonerName] = useState<string | null>(null)
+  const [myUserId, setMyUserId] = useState<string | null>(null)
   const [selectedNewLine, setSelectedNewLine] = useState<Line | ''>('')
   const [selectedNewTier, setSelectedNewTier] = useState('언랭')
   const [adding, setAdding] = useState(false)
@@ -412,6 +413,7 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
 
       let name: string | null = null
       if (user) {
+        setMyUserId(user.id)
         // 본인 계정에 연결된 소환사명/롤계정만 조회 (RLS로 보호되어 다른 사람 데이터는 조회 불가)
         const { data } = await supabase
           .from('member_accounts')
