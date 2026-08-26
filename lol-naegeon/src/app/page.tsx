@@ -148,7 +148,7 @@ const TIER_SCORES: Record<string, number> = {
 
 // ── 관리자 탭 ──────────────────────────────────────────────
 // ── 관리자 탭 ──────────────────────────────────────────────
-function AdminTab({ summoners, summonerScores, records }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; records: GameRecord[] }) {
+function AdminTab({ summoners, summonerScores, records, nameByUserId }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; records: GameRecord[]; nameByUserId: Record<string, string> }) {
   const [subTab, setSubTab] = useState<'summoners' | 'inactive'>('summoners')
   const [editingName, setEditingName] = useState<string | null>(null)
   const [editingLine, setEditingLine] = useState<Line | ''>('')
@@ -156,7 +156,8 @@ function AdminTab({ summoners, summonerScores, records }: { summoners: SummonerM
   const [error, setError] = useState('')
   const [inactiveStatusMap, setInactiveStatusMap] = useState<Map<string, boolean>>(new Map())
 
-  const allSummoners = Object.keys(summoners).sort()
+  // summoners는 계정ID+이름 이중 키라서, 실제 등록된 사람 목록은 이름 목록(nameByUserId의 값)에서 가져옴
+  const allSummoners = Array.from(new Set(Object.values(nameByUserId))).sort()
 
   // 14일 이상 미참여자 목록
   const inactiveList = useMemo(() => {
@@ -544,7 +545,8 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
     setSaving(false)
   }
 
-  const myLines: Partial<Record<Line, string>> = summonerName ? (summoners[summonerName] ?? {}) : {}
+  // 계정ID로 조회 (동명이인이어도 정확하게 본인 것만 나옴)
+  const myLines: Partial<Record<Line, string>> = myUserId ? (summoners[myUserId] ?? {}) : {}
   const registeredLines = (Object.keys(myLines) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b])
   const pendingLineNames = pendingLineRequests.map(r => r.line)
   const availableLines = LINES.filter(l => !registeredLines.includes(l) && !pendingLineNames.includes(l))
@@ -583,7 +585,7 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
   const [deletingLine, setDeletingLine] = useState<Line | null>(null)
 
   const deleteLine = async (line: Line) => {
-    if (!summonerName) return
+    if (!summonerName || !myUserId) return
     if (registeredLines.length <= 2) {
       setError('라인은 최소 2개는 유지해야 해요.')
       return
@@ -594,7 +596,7 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
     const { error: err } = await supabase
       .from('summoners')
       .delete()
-      .eq('name', summonerName)
+      .eq('user_id', myUserId)
       .eq('line', line)
     if (err) {
       setError('라인 삭제 실패: ' + err.message)
@@ -706,7 +708,7 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
                 <span className="badge b-line" style={{ width: 52, textAlign: 'center' }}>{l}</span>
                 <span className="badge b-tier" style={{ flex: 1 }}>{myLines[l] ?? '언랭'}</span>
                 <span style={{ fontSize: 11, color: 'var(--text3)' }}>
-                  {summonerScores[summonerName]?.[l] ?? getScoreByTier(myLines[l] ?? '언랭')}점
+                  {summonerScores[myUserId ?? '']?.[l] ?? getScoreByTier(myLines[l] ?? '언랭')}점
                 </span>
                 {registeredLines.length > 2 && (
                   <button
@@ -2791,6 +2793,7 @@ function RoomsTab({
   onRecord,
   dbIsAdmin,
   inactiveNames,
+  nameByUserId,
 }: {
   summoners: SummonerMap
   summonerScores: SummonerScoreMap
@@ -2800,6 +2803,7 @@ function RoomsTab({
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
   dbIsAdmin: boolean
   inactiveNames: Set<string>
+  nameByUserId: Record<string, string>
 }) {
   const [myName, setMyName] = useState<string | null>(null)
   const [myUserId, setMyUserId] = useState<string | null>(null)
@@ -3036,8 +3040,8 @@ function RoomsTab({
     })
 
     // 후보 풀: 아직 방에 없는 + 비활성화되지 않은 + 실제 로그인 계정이 연결된 등록 소환사만
-    // (summoners 테이블엔 있지만 member_accounts에 연결된 계정이 없는 "유령 데이터"는 제외)
-    let pool = Object.keys(summoners)
+    // (summoners 맵은 계정ID+이름 이중 키라서, 실제 사람 목록은 nameByUserId에서 가져옴)
+    let pool = Array.from(new Set(Object.values(nameByUserId)))
       .filter(n => !existingNames.has(n) && !inactiveNames.has(n) && idPrefixMap[n])
       .map(n => ({ name: n, lines: getSummonerLines(n) }))
       .filter(c => c.lines.length > 0)
@@ -4082,6 +4086,7 @@ function MainApp() {
   const [records, setRecords] = useState<GameRecord[]>([])
   const [summoners, setSummoners] = useState<SummonerMap>({})
   const [summonerScores, setSummonerScores] = useState<SummonerScoreMap>({})
+  const [nameByUserId, setNameByUserId] = useState<Record<string, string>>({})
 
   const [tierHistory, setTierHistory] = useState<{ record_id: number; name: string; line: string; tier_before: string; tier_after: string }[]>([])
   const [idPrefixMap, setIdPrefixMap] = useState<Record<string, string>>({})
@@ -4116,18 +4121,35 @@ function MainApp() {
       const map: SummonerMap = {}
       const scoreMap: SummonerScoreMap = {}
       const inactiveSet = new Set<string>()
-      sums.forEach((s: { name: string; tier: string; line: Line; score?: number; is_inactive?: boolean }) => {
-        if (!map[s.name]) map[s.name] = {} as Record<Line, string>
-        if (!scoreMap[s.name]) scoreMap[s.name] = {} as Record<Line, number>
-        if (s.is_inactive) inactiveSet.add(s.name)
-        // score 컬럼이 있으면 그걸로 티어명 재계산, 없으면(마이그레이션 전) 기존 tier 그대로 사용
-        const score = s.score ?? getScoreByTier(s.tier)
-        scoreMap[s.name][s.line] = score
-        map[s.name][s.line] = getTierByScore(score)
+      const nameMap: Record<string, string> = {}
+      sums.forEach((s: { name: string; tier: string; line: Line; score?: number; is_inactive?: boolean; user_id?: string }) => {
+        const uid = s.user_id
+        // 진짜 식별자(계정ID) 기준으로 데이터를 쌓음 — 동명이인이어도 서로 안 섞임
+        if (uid) {
+          if (!map[uid]) map[uid] = {} as Record<Line, string>
+          if (!scoreMap[uid]) scoreMap[uid] = {} as Record<Line, number>
+          if (s.is_inactive) inactiveSet.add(uid)
+          const score = s.score ?? getScoreByTier(s.tier)
+          scoreMap[uid][s.line] = score
+          map[uid][s.line] = getTierByScore(score)
+          nameMap[uid] = s.name
+        }
+      })
+      // 하위호환: 방/팀편성 등 아직 이름으로 조회하는 화면들이 계속 작동하도록,
+      // 계정ID로 쌓은 데이터를 이름으로도 조회 가능하게 별칭을 걸어둠.
+      // (동명이인이 있으면 이름으로는 마지막에 처리된 한 명의 데이터만 보임 — 다음 단계에서 방/팀편성도
+      //  계정ID 기준으로 전환하면 완전히 해결됨. 계정ID로 직접 조회하는 코드는 지금도 정확함.)
+      Object.keys(map).forEach(uid => {
+        const nm = nameMap[uid]
+        if (nm) {
+          map[nm] = map[uid]
+          scoreMap[nm] = scoreMap[uid]
+        }
       })
       setSummoners(map)
       setSummonerScores(scoreMap)
       setInactiveNames(inactiveSet)
+      setNameByUserId(nameMap)
     }
     setLoading(false)
   }, [])
@@ -4307,7 +4329,7 @@ function MainApp() {
             <div className="empty">불러오는 중...</div>
           ) : (
             <>
-              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} pendingLinesMap={pendingLinesMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} inactiveNames={inactiveNames} />}
+              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} pendingLinesMap={pendingLinesMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} inactiveNames={inactiveNames} nameByUserId={nameByUserId} />}
               {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
               {tab === 'ranking' && <RankingTab records={records} />}
               {tab === 'hall' && <HallOfFameTab records={records} />}
@@ -4319,7 +4341,7 @@ function MainApp() {
 
               {tab === 'admin' && dbIsAdmin && (
                 <div>
-                  <AdminTab summoners={summoners} summonerScores={summonerScores} records={records} />
+                  <AdminTab summoners={summoners} summonerScores={summonerScores} records={records} nameByUserId={nameByUserId} />
                 </div>
               )}
             </>
