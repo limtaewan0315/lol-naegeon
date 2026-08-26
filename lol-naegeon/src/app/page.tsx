@@ -4,14 +4,14 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import { TIERS, LINES, getScore, getTierByScore, getScoreByTier, shuffle } from '@/lib/data'
 import type { Line } from '@/lib/data'
-type TeamPlayer = { name: string; tier: string; line: Line; score: number }
+type TeamPlayer = { userId: string; name: string; tier: string; line: Line; score: number }
 interface BalanceResult { team1: TeamPlayer[]; team2: TeamPlayer[]; s1: number; s2: number }
-// blue/red는 이제 {name, line} 객체 배열로 저장
+// blue/red는 {userId, name, line} 객체 배열로 저장 (userId가 진짜 식별자, name은 그 시점 표시용 라벨)
 interface GameRecord {
   id: number
   winner: 'blue' | 'red'
-  blue: { name: string; line: Line }[]
-  red: { name: string; line: Line }[]
+  blue: { userId?: string; name: string; line: Line }[]
+  red: { userId?: string; name: string; line: Line }[]
   time: string
 }
 
@@ -34,6 +34,7 @@ type SummonerScoreMap = Record<string, Record<Line, number>>
 
 // 팀 뽑기용 플레이어 (모스트1/2 포함)
 interface PlayerEntry {
+  userId: string
   name: string
   most1: Line | 'any'
   most2: Line | 'any' | null
@@ -51,8 +52,9 @@ function checkPassword(): boolean {
 }
 
 // 동명이인 구분용: 이름 옆에 아이디 앞 4자리를 작은 회색 글씨로 붙여서 표시
-function NameWithIdBadge({ name, idPrefixMap }: { name: string; idPrefixMap: Record<string, string> }) {
-  const prefix = idPrefixMap[name]
+// userId가 있으면 계정ID로 정확히 조회(동명이인도 정확히 구분), 없으면 예전처럼 이름으로 조회(하위호환)
+function NameWithIdBadge({ name, idPrefixMap, userId }: { name: string; idPrefixMap: Record<string, string>; userId?: string }) {
+  const prefix = userId ? idPrefixMap[userId] : idPrefixMap[name]
   return (
     <>
       {name}
@@ -2637,6 +2639,7 @@ function ApprovalRequestsTab({ onRefresh }: { onRefresh: () => void }) {
 
 // ── 내전방 (로비: 방 생성/목록/입장/퇴장) — 1단계 ──────────────────────
 type RoomMember = {
+  user_id: string
   summoner_name: string
   most1: Line | 'any'
   most2: Line | 'any' | null
@@ -2662,7 +2665,7 @@ type Room = {
 
 // 팀편성 결과를 blue/red 구분 없이 비교 가능한 시그니처로 변환 (직전 조합과의 완전 동일 여부 판단용)
 function resultSignature(r: BalanceResult): string {
-  const teamSig = (team: TeamPlayer[]) => team.map(p => `${p.name}:${p.line}`).sort().join(',')
+  const teamSig = (team: TeamPlayer[]) => team.map(p => `${p.userId}:${p.line}`).sort().join(',')
   const sigs = [teamSig(r.team1), teamSig(r.team2)].sort()
   return sigs.join('|')
 }
@@ -2677,7 +2680,7 @@ type RoomMessage = {
   created_at: string
 }
 
-function RoomChat({ roomId, myName }: { roomId: number; myName: string }) {
+function RoomChat({ roomId, myName, myUserId }: { roomId: number; myName: string; myUserId: string }) {
   const [messages, setMessages] = useState<RoomMessage[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
@@ -2742,7 +2745,7 @@ function RoomChat({ roomId, myName }: { roomId: number; myName: string }) {
           <div className="empty">아직 채팅이 없어요</div>
         ) : (
           messages.map(m => {
-            const isMe = m.summoner_name === myName
+            const isMe = m.user_id === myUserId
             return (
               <div key={m.id} style={{ alignSelf: isMe ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
                 <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 2, textAlign: isMe ? 'right' : 'left' }}>
@@ -2871,8 +2874,8 @@ function RoomsTab({
     return () => { cancelled = true }
   }, [loadRooms])
 
-  const myRoom = rooms.find(r => r.members.some(m => m.summoner_name === myName)) ?? null
-  const isHost = !!myRoom && myRoom.host_summoner_name === myName
+  const myRoom = rooms.find(r => r.members.some(m => m.user_id === myUserId)) ?? null
+  const isHost = !!myRoom && myRoom.host_user_id === myUserId
 
   // 실시간 구독: 로비(방 목록)에 있을 땐 방 전체를 넓게 구독하고,
   // 내가 특정 방에 들어가 있을 땐 "그 방 하나"만 좁혀서 구독함.
@@ -2934,10 +2937,10 @@ function RoomsTab({
   }
 
   const joinRoom = async (room: Room) => {
-    if (!myName) return
+    if (!myName || !myUserId) return
     if (myRoom) { setError('이미 다른 방에 참가 중이에요. 먼저 나가주세요.'); return }
     if (room.members.length >= 10) { setError('방이 가득 찼어요.'); return }
-    if (room.members.some(m => m.summoner_name === myName)) return
+    if (room.members.some(m => m.user_id === myUserId)) return
     setError('')
 
     let pwd: string | null = null
@@ -2952,13 +2955,13 @@ function RoomsTab({
   }
 
   const leaveRoom = async () => {
-    if (!myRoom || !myName) return
+    if (!myRoom || !myUserId) return
     if (isHost) {
       // 방장이 나가면 방 자체가 삭제됨
       if (!confirm('방장이 나가면 방이 삭제돼요. 나갈까요?')) return
       await supabase.from('rooms').delete().eq('id', myRoom.id)
     } else {
-      const newMembers = myRoom.members.filter(m => m.summoner_name !== myName)
+      const newMembers = myRoom.members.filter(m => m.user_id !== myUserId)
       await supabase
         .from('rooms')
         .update({ members: newMembers, updated_at: new Date().toISOString() })
@@ -2968,11 +2971,11 @@ function RoomsTab({
   }
 
   const updateMyMost = async (field: 'most1' | 'most2', value: string) => {
-    if (!myRoom || !myName) return
-    const myEntry = myRoom.members.find(m => m.summoner_name === myName)
+    if (!myRoom || !myUserId) return
+    const myEntry = myRoom.members.find(m => m.user_id === myUserId)
     if (myEntry?.ready) return // 준비완료 상태에서는 라인 변경 불가 (UI에서도 비활성화되어 있지만 이중 확인)
     const newMembers = myRoom.members.map(m => {
-      if (m.summoner_name !== myName) return m
+      if (m.user_id !== myUserId) return m
       if (field === 'most1') {
         if (value === 'any') return { ...m, most1: 'any' as const, most2: null }
         // M1을 M2와 같은 라인으로 바꾸면, 겹치는 M2는 자동으로 비워줌 (안 그러면 데이터상 M1=M2로 중복 저장됨)
@@ -2988,18 +2991,18 @@ function RoomsTab({
   }
 
   const toggleReady = async () => {
-    if (!myRoom || !myName) return
-    const newMembers = myRoom.members.map(m => m.summoner_name === myName ? { ...m, ready: !m.ready } : m)
+    if (!myRoom || !myUserId) return
+    const newMembers = myRoom.members.map(m => m.user_id === myUserId ? { ...m, ready: !m.ready } : m)
     const roomId = myRoom.id
     setRooms(prev => prev.map(r => (r.id === roomId ? { ...r, members: newMembers } : r)))
     await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', roomId)
   }
 
-  // 방장이 다른 참가자를 강퇴 (본인 나가기와 동일하게 members 배열에서 제거)
-  const kickMember = async (name: string) => {
-    if (!myRoom || !isHost || name === myRoom.host_summoner_name) return
-    if (!confirm(`${name}님을 강퇴할까요?`)) return
-    const newMembers = myRoom.members.filter(m => m.summoner_name !== name)
+  // 방장이 다른 참가자를 강퇴 (본인 나가기와 동일하게 members 배열에서 제거) — 계정ID로 정확히 그 사람만 지목
+  const kickMember = async (targetUserId: string, targetName: string) => {
+    if (!myRoom || !isHost || targetUserId === myRoom.host_user_id) return
+    if (!confirm(`${targetName}님을 강퇴할까요?`)) return
+    const newMembers = myRoom.members.filter(m => m.user_id !== targetUserId)
     const roomId = myRoom.id
     setRooms(prev => prev.map(r => (r.id === roomId ? { ...r, members: newMembers } : r)))
     await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', roomId)
@@ -3028,7 +3031,7 @@ function RoomsTab({
   // "아직 2명이 안 채워진 라인"부터 우선적으로 채우는 방식으로 채움.
   const fillTestMembers = async () => {
     if (!myRoom || !isHost || !dbIsAdmin) return
-    const existingNames = new Set(myRoom.members.map(m => m.summoner_name))
+    const existingIds = new Set(myRoom.members.map(m => m.user_id))
     const need = 10 - myRoom.members.length
     if (need <= 0) return
 
@@ -3039,11 +3042,10 @@ function RoomsTab({
       if (m.most1 !== 'any') lineCount[m.most1 as Line] = (lineCount[m.most1 as Line] ?? 0) + 1
     })
 
-    // 후보 풀: 아직 방에 없는 + 비활성화되지 않은 + 실제 로그인 계정이 연결된 등록 소환사만
-    // (summoners 맵은 계정ID+이름 이중 키라서, 실제 사람 목록은 nameByUserId에서 가져옴)
-    let pool = Array.from(new Set(Object.values(nameByUserId)))
-      .filter(n => !existingNames.has(n) && !inactiveNames.has(n) && idPrefixMap[n])
-      .map(n => ({ name: n, lines: getSummonerLines(n) }))
+    // 후보 풀: 아직 방에 없는 + 비활성화되지 않은 실제 계정만 (계정ID 기준 — 동명이인도 각자 정확히 후보가 됨)
+    let pool = Object.entries(nameByUserId)
+      .filter(([uid, name]) => !existingIds.has(uid) && !inactiveNames.has(name))
+      .map(([uid, name]) => ({ userId: uid, name, lines: getSummonerLines(uid) }))
       .filter(c => c.lines.length > 0)
 
     const newFilled: RoomMember[] = []
@@ -3073,17 +3075,17 @@ function RoomsTab({
       const otherLines = chosen.lines.filter(l => l !== target)
       const most2 = otherLines.find(l => lineCount[l] < 2) ?? otherLines[0] ?? null
 
-      newFilled.push({ summoner_name: chosen.name, most1: target, most2, ready: true })
+      newFilled.push({ user_id: chosen.userId, summoner_name: chosen.name, most1: target, most2, ready: true })
       lineCount[target]++
-      pool = pool.filter(c => c.name !== chosen.name)
+      pool = pool.filter(c => c.userId !== chosen.userId)
     }
 
     // 그래도 인원이 부족하면(등록된 소환사 자체가 적은 경우) 라인 무관하게 남은 후보로 채움
     if (newFilled.length < need) {
-      const filledNames = new Set(newFilled.map(f => f.summoner_name))
-      const leftover = pool.filter(c => !filledNames.has(c.name)).slice(0, need - newFilled.length)
+      const filledIds = new Set(newFilled.map(f => f.user_id))
+      const leftover = pool.filter(c => !filledIds.has(c.userId)).slice(0, need - newFilled.length)
       leftover.forEach(c => {
-        newFilled.push({ summoner_name: c.name, most1: (c.lines[0] ?? '탑') as Line, most2: c.lines[1] ?? null, ready: true })
+        newFilled.push({ user_id: c.userId, summoner_name: c.name, most1: (c.lines[0] ?? '탑') as Line, most2: c.lines[1] ?? null, ready: true })
       })
     }
 
@@ -3103,14 +3105,14 @@ function RoomsTab({
   const runBalance = async () => {
     if (!myRoom) return
     setBalanceError('')
-    const players: PlayerEntry[] = myRoom.members.map(m => ({ name: m.summoner_name, most1: m.most1, most2: m.most2 }))
+    const players: PlayerEntry[] = myRoom.members.map(m => ({ userId: m.user_id, name: m.summoner_name, most1: m.most1, most2: m.most2 }))
     if (players.length !== 10) { setBalanceError(`정확히 10명이 필요해요. (현재 ${players.length}명)`); return }
     if (!myRoom.members.every(m => m.ready)) { setBalanceError('모든 참가자가 준비완료 상태여야 해요.'); return }
 
     setBalancing(true)
 
     const getOptions = (p: PlayerEntry): Line[] => {
-      const allLines = getSummonerLines(p.name)
+      const allLines = getSummonerLines(p.userId)
       const opts: Line[] = []
       if (p.most1 === 'any') opts.push(...allLines)
       else opts.push(p.most1 as Line)
@@ -3118,8 +3120,8 @@ function RoomsTab({
       return opts.length > 0 ? opts : allLines
     }
 
-    const getAdjustedScore = (name: string, line: Line, tier: string): number => {
-      return summonerScores[name]?.[line] ?? getScoreByTier(tier)
+    const getAdjustedScore = (userId: string, line: Line, tier: string): number => {
+      return summonerScores[userId]?.[line] ?? getScoreByTier(tier)
     }
 
     const LINE_PREFERENCE: Record<string, Line> = { '공민규': '정글' }
@@ -3139,11 +3141,11 @@ function RoomsTab({
     for (let i = 0; i < 3000; i++) {
       const assigned = players.map(p => {
         const preferredLine = LINE_PREFERENCE[p.name]
-        const allLines = getSummonerLines(p.name)
+        const allLines = getSummonerLines(p.userId)
         if (preferredLine && allLines.includes(preferredLine) && Math.random() < PREFERENCE_RATE) {
-          const tier = summoners[p.name]?.[preferredLine] ?? '골드2'
-          const score = getAdjustedScore(p.name, preferredLine, tier)
-          return { name: p.name, line: preferredLine, score }
+          const tier = summoners[p.userId]?.[preferredLine] ?? '골드2'
+          const score = getAdjustedScore(p.userId, preferredLine, tier)
+          return { userId: p.userId, name: p.name, line: preferredLine, score }
         }
         let line: Line
         let isM2 = false
@@ -3155,9 +3157,9 @@ function RoomsTab({
           isM2 = Math.random() >= 0.7
           line = isM2 ? p.most2 as Line : p.most1 as Line
         }
-        const tier = summoners[p.name]?.[line] ?? '골드2'
-        const score = getAdjustedScore(p.name, line, tier)
-        return { name: p.name, line, score }
+        const tier = summoners[p.userId]?.[line] ?? '골드2'
+        const score = getAdjustedScore(p.userId, line, tier)
+        return { userId: p.userId, name: p.name, line, score }
       })
 
       const lineCounts: Record<string, number> = {}
@@ -3202,8 +3204,8 @@ function RoomsTab({
       const botDiff = Math.abs(t1Bot - t2Bot)
 
       const candidateResult: BalanceResult = {
-        team1: t1.map(p => ({ name: p.name, tier: summoners[p.name]?.[p.line] ?? '골드2', line: p.line, score: p.score })),
-        team2: t2.map(p => ({ name: p.name, tier: summoners[p.name]?.[p.line] ?? '골드2', line: p.line, score: p.score })),
+        team1: t1.map(p => ({ userId: p.userId, name: p.name, tier: summoners[p.userId]?.[p.line] ?? '골드2', line: p.line, score: p.score })),
+        team2: t2.map(p => ({ userId: p.userId, name: p.name, tier: summoners[p.userId]?.[p.line] ?? '골드2', line: p.line, score: p.score })),
         s1, s2,
       }
 
@@ -3246,7 +3248,7 @@ function RoomsTab({
       const linePossible: Record<string, number> = {}
       LINES.forEach(l => { linePossible[l] = 0 })
       players.forEach(p => {
-        const allLines = getSummonerLines(p.name)
+        const allLines = getSummonerLines(p.userId)
         if (p.most1 === 'any') allLines.forEach(l => { linePossible[l] = (linePossible[l] ?? 0) + 1 })
         else linePossible[p.most1] = (linePossible[p.most1] ?? 0) + 1
         if (p.most2 === 'any') allLines.forEach(l => { linePossible[l] = (linePossible[l] ?? 0) + 1 })
@@ -3321,8 +3323,8 @@ function RoomsTab({
     const losers = winner === 'blue' ? result.team2 : result.team1
     const now = new Date()
     const time = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-    const blueData = result.team1.map(p => ({ name: p.name, line: p.line }))
-    const redData = result.team2.map(p => ({ name: p.name, line: p.line }))
+    const blueData = result.team1.map(p => ({ userId: p.userId, name: p.name, line: p.line }))
+    const redData = result.team2.map(p => ({ userId: p.userId, name: p.name, line: p.line }))
 
     const { data: newRecord } = await supabase.from('records').insert([{ winner, blue: blueData, red: redData, time }]).select()
     const recId = newRecord?.[0]?.id
@@ -3332,13 +3334,13 @@ function RoomsTab({
 
     if (recId) {
       for (const p of winners) {
-        if (!summoners[p.name]?.[p.line]) continue
-        const { error: rpcErr } = await supabase.rpc('apply_match_score_delta', { p_record_id: recId, p_name: p.name, p_line: p.line, p_delta: 1 })
+        if (!summoners[p.userId]?.[p.line]) continue
+        const { error: rpcErr } = await supabase.rpc('apply_match_score_delta', { p_record_id: recId, p_user_id: p.userId, p_name: p.name, p_line: p.line, p_delta: 1 })
         if (rpcErr) console.error('점수 반영 실패:', p.name, p.line, rpcErr.message)
       }
       for (const p of losers) {
-        if (!summoners[p.name]?.[p.line]) continue
-        const { error: rpcErr } = await supabase.rpc('apply_match_score_delta', { p_record_id: recId, p_name: p.name, p_line: p.line, p_delta: -1 })
+        if (!summoners[p.userId]?.[p.line]) continue
+        const { error: rpcErr } = await supabase.rpc('apply_match_score_delta', { p_record_id: recId, p_user_id: p.userId, p_name: p.name, p_line: p.line, p_delta: -1 })
         if (rpcErr) console.error('점수 반영 실패:', p.name, p.line, rpcErr.message)
       }
     }
@@ -3357,15 +3359,15 @@ function RoomsTab({
       const sortedWinners = [...winners].sort((a, b) => (LINE_ORDER[a.line] ?? 9) - (LINE_ORDER[b.line] ?? 9))
       const sortedLosers = [...losers].sort((a, b) => (LINE_ORDER[a.line] ?? 9) - (LINE_ORDER[b.line] ?? 9))
 
-      const getStreak = (name: string, line: Line, recs: GameRecord[]) => {
-        const lr = recs.filter(r => r.blue.some(p => p.name === name && p.line === line) || r.red.some(p => p.name === name && p.line === line))
+      const getStreak = (userId: string, line: Line, recs: GameRecord[]) => {
+        const lr = recs.filter(r => r.blue.some(p => p.userId === userId && p.line === line) || r.red.some(p => p.userId === userId && p.line === line))
         if (lr.length < 2) return 0
         const first = lr[0]
-        const isWin = (first.blue.some(p => p.name === name && p.line === line) && first.winner === 'blue') ||
-                      (first.red.some(p => p.name === name && p.line === line) && first.winner === 'red')
+        const isWin = (first.blue.some(p => p.userId === userId && p.line === line) && first.winner === 'blue') ||
+                      (first.red.some(p => p.userId === userId && p.line === line) && first.winner === 'red')
         let s = 0
         for (const r of lr) {
-          const inBlue = r.blue.some(p => p.name === name && p.line === line)
+          const inBlue = r.blue.some(p => p.userId === userId && p.line === line)
           const w = (inBlue && r.winner === 'blue') || (!inBlue && r.winner === 'red')
           if (w === isWin) s++; else break
         }
@@ -3373,15 +3375,15 @@ function RoomsTab({
       }
 
       const fmtPlayer = (p: TeamPlayer, isWinner: boolean) => {
-        const beforeTier = summoners[p.name]?.[p.line] ?? p.tier
-        const beforeScore = summonerScores[p.name]?.[p.line] ?? getScoreByTier(p.tier)
+        const beforeTier = summoners[p.userId]?.[p.line] ?? p.tier
+        const beforeScore = summonerScores[p.userId]?.[p.line] ?? getScoreByTier(p.tier)
         const afterScore = isWinner ? beforeScore + 1 : beforeScore - 1
         const afterTier = getTierByScore(afterScore)
         const tierChange = afterTier !== beforeTier
           ? `↳ ${beforeTier} → ${afterTier} ${isWinner ? '▲' : '▼'}`
           : `↳ ${afterTier} (변동없음)`
         const scoreChange = `↳ ${beforeScore}점 → ${afterScore}점 (${isWinner ? '+1' : '-1'})`
-        const streak = getStreak(p.name, p.line, updatedRecords)
+        const streak = getStreak(p.userId, p.line, updatedRecords)
         const abs = Math.abs(streak)
         const streakStr = abs >= 2 ? (streak > 0 ? ` 🔥${abs}연승` : ` 💧${abs}연패`) : ''
         const line1 = `\`${p.line}\` **${p.name}**${streakStr}`
@@ -3441,7 +3443,7 @@ function RoomsTab({
 
   // ── 방 안 화면 ──────────────────────────────────────────────
   if (myRoom) {
-    const myMember = myRoom.members.find(m => m.summoner_name === myName)
+    const myMember = myRoom.members.find(m => m.user_id === myUserId)
     const allReady = myRoom.members.length === 10 && myRoom.members.every(m => m.ready)
 
     return (
@@ -3458,13 +3460,13 @@ function RoomsTab({
             <>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
                 {myRoom.members.map(m => {
-                  const isMe = m.summoner_name === myName
-                  const lines = getSummonerLines(m.summoner_name)
-                  const pendingLines = pendingLinesMap[m.summoner_name] ?? []
+                  const isMe = m.user_id === myUserId
+                  const lines = getSummonerLines(m.user_id)
+                  const pendingLines = pendingLinesMap[m.user_id] ?? []
                   const selectableLines = [...lines, ...pendingLines.filter(l => !lines.includes(l))]
                   return (
                     <div
-                      key={m.summoner_name}
+                      key={m.user_id}
                       className="player-row"
                       style={{
                         padding: '8px 10px', flexWrap: 'wrap',
@@ -3474,9 +3476,9 @@ function RoomsTab({
                       }}
                     >
                       <span style={{ fontWeight: 600, fontSize: 13, minWidth: 80 }}>
-                        <NameWithIdBadge name={m.summoner_name} idPrefixMap={idPrefixMap} />
+                        <NameWithIdBadge name={m.summoner_name} idPrefixMap={idPrefixMap} userId={m.user_id} />
                         {isMe && <span style={{ fontSize: 10, color: 'var(--gold, #d4af37)', marginLeft: 4 }}>(나)</span>}
-                        {m.summoner_name === myRoom.host_summoner_name && <span style={{ fontSize: 10, color: 'var(--gold, #d4af37)', marginLeft: 4 }}>방장</span>}
+                        {m.user_id === myRoom.host_user_id && <span style={{ fontSize: 10, color: 'var(--gold, #d4af37)', marginLeft: 4 }}>방장</span>}
                       </span>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -3539,10 +3541,10 @@ function RoomsTab({
                         {m.ready ? '✓준비완료' : '대기중'}
                       </span>
 
-                      {isHost && m.summoner_name !== myRoom.host_summoner_name && (
+                      {isHost && m.user_id !== myRoom.host_user_id && (
                         <button
                           className="btn btn-danger btn-sm"
-                          onClick={() => kickMember(m.summoner_name)}
+                          onClick={() => kickMember(m.user_id, m.summoner_name)}
                           style={{ width: 'auto', flexShrink: 0, padding: '2px 8px', fontSize: 10, marginLeft: 4 }}
                         >
                           강퇴
@@ -3711,9 +3713,9 @@ function RoomsTab({
                       <span style={{ fontSize: 13, color: 'var(--text2)' }}>{team.score.toFixed(1)}점</span>
                     </div>
                     {team.players.map(p => (
-                      <div key={p.name} className="team-player">
+                      <div key={p.userId} className="team-player">
                         <span style={{ width: 36, fontSize: 11, fontWeight: 500, color: 'var(--text2)', flexShrink: 0 }}>{p.line}</span>
-                        <span style={{ flex: 1, fontWeight: 500 }}><NameWithIdBadge name={p.name} idPrefixMap={idPrefixMap} /></span>
+                        <span style={{ flex: 1, fontWeight: 500 }}><NameWithIdBadge name={p.name} idPrefixMap={idPrefixMap} userId={p.userId} /></span>
                         <span className="badge b-tier" style={{ fontSize: 10 }}>{p.tier}</span>
                         <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 4 }}>{p.score.toFixed(1)}</span>
                       </div>
@@ -3741,16 +3743,16 @@ function RoomsTab({
                   const rp = red1.find(p => p.line === line)
                   if (!bp || !rp) return null
                   const matchRecs = records.filter(r => {
-                    const bpInBlue = r.blue.some(p => p.name === bp.name && p.line === line)
-                    const bpInRed = r.red.some(p => p.name === bp.name && p.line === line)
-                    const rpInBlue = r.blue.some(p => p.name === rp.name && p.line === line)
-                    const rpInRed = r.red.some(p => p.name === rp.name && p.line === line)
+                    const bpInBlue = r.blue.some(p => p.userId === bp.userId && p.line === line)
+                    const bpInRed = r.red.some(p => p.userId === bp.userId && p.line === line)
+                    const rpInBlue = r.blue.some(p => p.userId === rp.userId && p.line === line)
+                    const rpInRed = r.red.some(p => p.userId === rp.userId && p.line === line)
                     return (bpInBlue && rpInRed) || (bpInRed && rpInBlue)
                   })
                   const total = matchRecs.length
                   if (total > 0) {
                     const bpWin = matchRecs.filter(r => {
-                      const bpInBlue = r.blue.some(p => p.name === bp.name && p.line === line)
+                      const bpInBlue = r.blue.some(p => p.userId === bp.userId && p.line === line)
                       return (bpInBlue && r.winner === 'blue') || (!bpInBlue && r.winner === 'red')
                     }).length
                     return { line, wr: bpWin / total, total, estimated: false }
@@ -3808,15 +3810,15 @@ function RoomsTab({
                     const rp = red1.find(p => p.line === line)
                     if (!bp || !rp) return null
                     const matchRecords = records.filter(r => {
-                      const bpInBlue = r.blue.some(p => p.name === bp.name && p.line === line)
-                      const bpInRed = r.red.some(p => p.name === bp.name && p.line === line)
-                      const rpInBlue = r.blue.some(p => p.name === rp.name && p.line === line)
-                      const rpInRed = r.red.some(p => p.name === rp.name && p.line === line)
+                      const bpInBlue = r.blue.some(p => p.userId === bp.userId && p.line === line)
+                      const bpInRed = r.red.some(p => p.userId === bp.userId && p.line === line)
+                      const rpInBlue = r.blue.some(p => p.userId === rp.userId && p.line === line)
+                      const rpInRed = r.red.some(p => p.userId === rp.userId && p.line === line)
                       return (bpInBlue && rpInRed) || (bpInRed && rpInBlue)
                     })
                     const total = matchRecords.length
                     const bpWin = matchRecords.filter(r => {
-                      const bpInBlue = r.blue.some(p => p.name === bp.name && p.line === line)
+                      const bpInBlue = r.blue.some(p => p.userId === bp.userId && p.line === line)
                       return (bpInBlue && r.winner === 'blue') || (!bpInBlue && r.winner === 'red')
                     }).length
                     return { line, bp, rp, total, bpWin, rpWin: total - bpWin }
@@ -3902,7 +3904,7 @@ function RoomsTab({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <RoomChat roomId={myRoom.id} myName={myName} />
+          <RoomChat roomId={myRoom.id} myName={myName} myUserId={myUserId ?? ''} />
 
           <div className="room-chat" style={{ height: 'auto', position: 'static' }}>
             <div className="room-chat-header">라인별 인원 (M1+M2 합산, 상관없음 포함)</div>
@@ -4106,14 +4108,14 @@ function MainApp() {
     if (hist) setTierHistory(hist)
     if (prefixes) {
       const pm: Record<string, string> = {}
-      prefixes.forEach((p: { summoner_name: string; id_prefix: string }) => { pm[p.summoner_name] = p.id_prefix })
+      prefixes.forEach((p: { user_id: string; summoner_name: string; id_prefix: string }) => { pm[p.user_id] = p.id_prefix })
       setIdPrefixMap(pm)
     }
     if (pendingLines) {
       const plm: Record<string, Line[]> = {}
-      pendingLines.forEach((p: { summoner_name: string; line: Line }) => {
-        if (!plm[p.summoner_name]) plm[p.summoner_name] = []
-        plm[p.summoner_name].push(p.line)
+      pendingLines.forEach((p: { user_id: string; summoner_name: string; line: Line }) => {
+        if (!plm[p.user_id]) plm[p.user_id] = []
+        plm[p.user_id].push(p.line)
       })
       setPendingLinesMap(plm)
     }
