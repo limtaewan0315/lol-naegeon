@@ -575,23 +575,42 @@ function MyInfoTab({ summoners, summonerScores, records, idPrefixMap, onRefresh 
       <div className="card">
         <div className="card-title">내 라인</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
-          {LINES.map(l => (
-            <div key={l} style={{
-              background: 'var(--bg3)', padding: '12px 6px 10px',
-              borderRadius: 'var(--radius-lg)', border: '0.5px solid var(--border)',
-              textAlign: 'center', transition: 'border-color 0.15s',
-            }}>
-              <div style={{
-                fontSize: 10, color: 'var(--text3)', marginBottom: 8,
-                fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-              }}>{l}</div>
-              {myLines[l] ? (
-                <span className="badge b-tier" style={{ fontSize: tierFontSize(myLines[l]!), padding: '2px 6px', whiteSpace: 'nowrap' }}>{myLines[l]}</span>
-              ) : (
-                <span style={{ fontSize: 11, color: 'var(--text3)' }}>없음</span>
-              )}
-            </div>
-          ))}
+          {LINES.map(l => {
+            const lineRecs = myUserId ? records.filter(r =>
+              r.blue.some(p => p.userId === myUserId && p.line === l) ||
+              r.red.some(p => p.userId === myUserId && p.line === l)
+            ) : []
+            const lineWin = lineRecs.filter(r => {
+              const inBlue = r.blue.some(p => p.userId === myUserId && p.line === l)
+              return (inBlue && r.winner === 'blue') || (!inBlue && r.winner === 'red')
+            }).length
+            const lineTotal = lineRecs.length
+            const lineLose = lineTotal - lineWin
+            const lineWr = lineTotal > 0 ? Math.round(lineWin / lineTotal * 100) : null
+
+            return (
+              <div key={l} style={{
+                background: 'var(--bg3)', padding: '10px 4px 8px',
+                borderRadius: 'var(--radius-lg)', border: '0.5px solid var(--border)',
+                textAlign: 'center', transition: 'border-color 0.15s',
+              }}>
+                <div style={{ fontSize: 13, color: 'var(--gold)', marginBottom: 3, fontWeight: 700 }}>{l}</div>
+                {myLines[l] ? (
+                  <span className="badge b-tier" style={{ fontSize: tierFontSize(myLines[l]!), padding: '2px 6px', whiteSpace: 'nowrap' }}>{myLines[l]}</span>
+                ) : (
+                  <span style={{ fontSize: 11, color: 'var(--text3)' }}>없음</span>
+                )}
+                <div style={{ marginTop: 6, fontSize: 9, color: 'var(--text2)', whiteSpace: 'nowrap' }}>
+                  {lineTotal > 0 ? `${lineWin}승 ${lineLose}패` : '전적없음'}
+                </div>
+                {lineWr !== null && (
+                  <div style={{ fontSize: 11, fontWeight: 700, color: lineWr >= 50 ? 'var(--green)' : 'var(--red)' }}>
+                    {lineWr}%
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
 
         {error && <div className="error" style={{ marginTop: 8 }}>{error}</div>}
