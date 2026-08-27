@@ -514,30 +514,6 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
     else await loadPendingLineRequests(summonerName)
   }
 
-  const [deletingLine, setDeletingLine] = useState<Line | null>(null)
-
-  const deleteLine = async (line: Line) => {
-    if (!summonerName || !myUserId) return
-    if (registeredLines.length <= 2) {
-      setError('라인은 최소 2개는 유지해야 해요.')
-      return
-    }
-    if (!confirm(`${line} 라인을 삭제할까요?`)) return
-    setDeletingLine(line)
-    setError('')
-    const { error: err } = await supabase
-      .from('summoners')
-      .delete()
-      .eq('user_id', myUserId)
-      .eq('line', line)
-    if (err) {
-      setError('라인 삭제 실패: ' + err.message)
-    } else {
-      onRefresh()
-    }
-    setDeletingLine(null)
-  }
-
   if (loading) {
     return <div className="card"><div className="empty">불러오는 중...</div></div>
   }
@@ -634,26 +610,18 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
         {registeredLines.length === 0 && pendingLineRequests.length === 0 ? (
           <div className="empty">등록된 라인이 없어요</div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: canAddMore ? 12 : 0 }}>
-            {registeredLines.map(l => (
-              <div key={l} className="player-row" style={{ padding: '6px 10px' }}>
-                <span className="badge b-line" style={{ width: 52, textAlign: 'center' }}>{l}</span>
-                <span className="badge b-tier" style={{ flex: 1 }}>{myLines[l] ?? '언랭'}</span>
-                <span style={{ fontSize: 11, color: 'var(--text3)' }}>
-                  {summonerScores[myUserId ?? '']?.[l] ?? getScoreByTier(myLines[l] ?? '언랭')}점
-                </span>
-                {registeredLines.length > 2 && (
-                  <button
-                    className="btn btn-danger btn-sm"
-                    onClick={() => deleteLine(l)}
-                    disabled={deletingLine === l}
-                    style={{ width: 'auto', flexShrink: 0, padding: '2px 8px', fontSize: 10, marginLeft: 6 }}
-                  >
-                    {deletingLine === l ? '삭제 중...' : '삭제'}
-                  </button>
-                )}
-              </div>
-            ))}
+          <div style={{ marginBottom: canAddMore ? 12 : 0 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4, marginBottom: pendingLineRequests.length > 0 ? 6 : 0 }}>
+              {LINES.map(l => (
+                <div key={l} style={{
+                  background: 'var(--bg3)', padding: '6px 4px', borderRadius: 'var(--radius)',
+                  textAlign: 'center', fontSize: 11,
+                }}>
+                  <div style={{ color: 'var(--text3)', marginBottom: 4, fontWeight: 600 }}>{l}</div>
+                  <div>{myLines[l] ?? '없음'}</div>
+                </div>
+              ))}
+            </div>
             {pendingLineRequests.map(r => (
               <div key={r.id} className="player-row" style={{ padding: '6px 10px', opacity: 0.7 }}>
                 <span className="badge b-line" style={{ width: 52, textAlign: 'center' }}>{r.line}</span>
@@ -2384,6 +2352,7 @@ type Room = {
   recent_team_history: { ids1: string[]; ids2: string[] }[]
   autofill_protected_ids: string[]
   guaranteed_m1_ids: string[]
+  pending_autofill_delta: { added: string[]; removedFromGuaranteed: string[] } | null
   balance_started_at: string | null
   created_at: string
   has_password: boolean
@@ -2954,6 +2923,8 @@ function RoomsTab({
         ...(myRoom.guaranteed_m1_ids ?? []).filter((id: string) => !fulfilledGuarantees.includes(id)),
         ...newlyAutofilled,
       ]))
+      // 이번 판에서 뭐가 바뀌었는지 기록해둠 — 이 판이 취소되면 이 델타로 되돌림
+      const delta = { added: newlyAutofilled, removedFromGuaranteed: fulfilledGuarantees }
 
       const startedAt = new Date().toISOString()
       await supabase.from('rooms').update({
@@ -2961,6 +2932,7 @@ function RoomsTab({
         balance_started_at: startedAt,
         autofill_protected_ids: newProtected,
         guaranteed_m1_ids: newGuaranteed,
+        pending_autofill_delta: delta,
       }).eq('id', myRoom.id)
 
       setBalancing(false)
@@ -3087,7 +3059,7 @@ function RoomsTab({
 
     if (best) {
       const startedAt = new Date().toISOString()
-      await supabase.from('rooms').update({ pending_result: best, balance_started_at: startedAt }).eq('id', myRoom.id)
+      await supabase.from('rooms').update({ pending_result: best, balance_started_at: startedAt, pending_autofill_delta: null }).eq('id', myRoom.id)
     } else if (fallback) {
       setBalanceError(`팀 편성에 필요한 라인 밸런스 조건을 만족하는 조합을 못 찾았어요. (가장 가까운 조합은 ${fallbackDiff.toFixed(1)}점 차이) 다시 시도해보세요.`)
     } else {
@@ -3205,7 +3177,8 @@ function RoomsTab({
       await supabase.from('rooms').delete().eq('id', myRoom.id)
     } else {
       const resetMembers = myRoom.members.map(m => ({ ...m, ready: false }))
-      await supabase.from('rooms').update({ members: resetMembers, last_result: result, recent_team_history: updatedHistory }).eq('id', myRoom.id)
+      // 경기가 실제로 기록됐으니 튕김 보호/보장은 이미 반영된 상태를 그대로 유지 (되돌릴 델타는 정리)
+      await supabase.from('rooms').update({ members: resetMembers, last_result: result, recent_team_history: updatedHistory, pending_autofill_delta: null }).eq('id', myRoom.id)
     }
 
     // 디스코드 전송
@@ -3541,7 +3514,24 @@ function RoomsTab({
                   <button className="btn btn-danger" onClick={async () => {
                     if (!confirm('팀편성을 취소하고 대기 화면으로 돌아갈까요?')) return
                     // 취소한 조합도 last_result로 남겨서, 다시 팀편성할 때 같은 조합이 반복되지 않게 함
-                    await supabase.from('rooms').update({ result: null, pending_result: null, balance_started_at: null, last_result: myRoom.result, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
+                    // 이번 판이 "라인 튕김" 규칙으로 만들어졌었다면, 그 튕김 보호/보장 변경도 원래대로 되돌림
+                    const delta = myRoom.pending_autofill_delta
+                    const revertedProtected = delta
+                      ? (myRoom.autofill_protected_ids ?? []).filter(id => !delta.added.includes(id))
+                      : myRoom.autofill_protected_ids
+                    const revertedGuaranteed = delta
+                      ? Array.from(new Set([
+                          ...(myRoom.guaranteed_m1_ids ?? []).filter(id => !delta.added.includes(id)),
+                          ...delta.removedFromGuaranteed,
+                        ]))
+                      : myRoom.guaranteed_m1_ids
+                    await supabase.from('rooms').update({
+                      result: null, pending_result: null, balance_started_at: null,
+                      last_result: myRoom.result, updated_at: new Date().toISOString(),
+                      autofill_protected_ids: revertedProtected,
+                      guaranteed_m1_ids: revertedGuaranteed,
+                      pending_autofill_delta: null,
+                    }).eq('id', myRoom.id)
                   }}>🚪 탈주하기</button>
                 )}
               </div>
