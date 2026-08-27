@@ -308,13 +308,9 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
   const [displayId, setDisplayId] = useState('')
   const [summonerName, setSummonerName] = useState<string | null>(null)
   const [myUserId, setMyUserId] = useState<string | null>(null)
-  const [selectedNewLine, setSelectedNewLine] = useState<Line | ''>('')
-  const [selectedNewTier, setSelectedNewTier] = useState('언랭')
-  const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
 
   const [riotId, setRiotId] = useState('')
-  const [pendingLineRequests, setPendingLineRequests] = useState<{ id: number; line: Line; requested_tier: string }[]>([])
 
   // 인라인 편집 상태: 지금 어떤 필드를 수정 중인지 (한 번에 하나만)
   const [editingField, setEditingField] = useState<'id' | 'password' | 'riot' | null>(null)
@@ -326,15 +322,6 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [newPassword2, setNewPassword2] = useState('')
-
-  const loadPendingLineRequests = async (name: string) => {
-    const { data } = await supabase
-      .from('line_change_requests')
-      .select('id, line, requested_tier')
-      .eq('summoner_name', name)
-      .eq('status', 'pending')
-    setPendingLineRequests((data ?? []) as { id: number; line: Line; requested_tier: string }[])
-  }
 
   useEffect(() => {
     let cancelled = false
@@ -358,7 +345,6 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
           setSummonerName(name)
           setRiotId(data?.riot_id ?? '')
         }
-        if (name && !cancelled) await loadPendingLineRequests(name)
       }
 
       // 로그인 아이디로 실제 사용하는 값만 표시 (내부 인증키는 노출하지 않음)
@@ -479,40 +465,6 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
 
   // 계정ID로 조회 (동명이인이어도 정확하게 본인 것만 나옴)
   const myLines: Partial<Record<Line, string>> = myUserId ? (summoners[myUserId] ?? {}) : {}
-  const registeredLines = (Object.keys(myLines) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b])
-  const pendingLineNames = pendingLineRequests.map(r => r.line)
-  const availableLines = LINES.filter(l => !registeredLines.includes(l) && !pendingLineNames.includes(l))
-  const canAddMore = registeredLines.length + pendingLineRequests.length < 5 && availableLines.length > 0
-
-  const addLine = async () => {
-    if (!summonerName || !selectedNewLine) return
-    if (registeredLines.length + pendingLineRequests.length >= 5) {
-      setError('라인은 최대 5개까지만 등록(신청 포함)할 수 있어요.')
-      return
-    }
-    setAdding(true)
-    setError('')
-    const { error: err } = await supabase.rpc('submit_line_change_request', {
-      p_line: selectedNewLine,
-      p_tier: selectedNewTier,
-    })
-    if (err) {
-      setError('신청 실패: ' + err.message)
-    } else {
-      setSelectedNewLine('')
-      setSelectedNewTier('언랭')
-      await loadPendingLineRequests(summonerName)
-    }
-    setAdding(false)
-  }
-
-  const cancelLineRequest = async (id: number) => {
-    if (!summonerName) return
-    if (!confirm('이 라인 신청을 취소할까요?')) return
-    const { error: err } = await supabase.from('line_change_requests').delete().eq('id', id)
-    if (err) setError('취소 실패: ' + err.message)
-    else await loadPendingLineRequests(summonerName)
-  }
 
   if (loading) {
     return <div className="card"><div className="empty">불러오는 중...</div></div>
@@ -606,59 +558,17 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
       </div>
 
       <div className="card">
-        <div className="card-title">내 라인 ({registeredLines.length}/5{pendingLineRequests.length > 0 ? ` · 신청중 ${pendingLineRequests.length}` : ''})</div>
-        {registeredLines.length === 0 && pendingLineRequests.length === 0 ? (
-          <div className="empty">등록된 라인이 없어요</div>
-        ) : (
-          <div style={{ marginBottom: canAddMore ? 12 : 0 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4, marginBottom: pendingLineRequests.length > 0 ? 6 : 0 }}>
-              {LINES.map(l => (
-                <div key={l} style={{
-                  background: 'var(--bg3)', padding: '6px 4px', borderRadius: 'var(--radius)',
-                  textAlign: 'center', fontSize: 11,
-                }}>
-                  <div style={{ color: 'var(--text3)', marginBottom: 4, fontWeight: 600 }}>{l}</div>
-                  <div>{myLines[l] ?? '없음'}</div>
-                </div>
-              ))}
+        <div className="card-title">내 라인</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4 }}>
+          {LINES.map(l => (
+            <div key={l} style={{
+              background: 'var(--bg3)', padding: '6px 4px', borderRadius: 'var(--radius)',
+              textAlign: 'center', fontSize: 11,
+            }}>
+              <div style={{ color: 'var(--text3)', marginBottom: 4, fontWeight: 600 }}>{l}</div>
+              <div>{myLines[l] ?? '없음'}</div>
             </div>
-            {pendingLineRequests.map(r => (
-              <div key={r.id} className="player-row" style={{ padding: '6px 10px', opacity: 0.7 }}>
-                <span className="badge b-line" style={{ width: 52, textAlign: 'center' }}>{r.line}</span>
-                <span style={{ flex: 1, fontSize: 12, color: 'var(--text3)' }}>
-                  신청한 티어: {r.requested_tier} · <span style={{ color: 'var(--gold, #d4af37)' }}>승인 대기중</span>
-                </span>
-                <button
-                  className="btn btn-sm"
-                  onClick={() => cancelLineRequest(r.id)}
-                  style={{ width: 'auto', flexShrink: 0, padding: '2px 8px', fontSize: 10, marginLeft: 6 }}
-                >
-                  신청 취소
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {canAddMore ? (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <select value={selectedNewLine} onChange={e => setSelectedNewLine(e.target.value as Line)} style={{ flex: 1 }}>
-              <option value="">추가할 라인 선택</option>
-              {availableLines.map(l => <option key={l} value={l}>{l}</option>)}
-            </select>
-            <select value={selectedNewTier} onChange={e => setSelectedNewTier(e.target.value)} style={{ flex: 1 }}>
-              {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-            <button className="btn btn-gold" onClick={addLine} disabled={!selectedNewLine || adding} style={{ width: 'auto', flexShrink: 0, whiteSpace: 'nowrap', padding: '0 16px' }}>
-              {adding ? '신청 중...' : '라인 신청'}
-            </button>
-          </div>
-        ) : registeredLines.length + pendingLineRequests.length >= 5 ? (
-          <div style={{ fontSize: 12, color: 'var(--text3)' }}>모든 라인을 이미 등록(신청 포함)했어요.</div>
-        ) : null}
-
-        <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 8 }}>
-          💡 새로 신청한 라인은 관리자 승인 후에 실제로 등록되고, 승인 전까지는 팀편성에서 선택할 수 없어요.
+          ))}
         </div>
 
         {error && <div className="error" style={{ marginTop: 8 }}>{error}</div>}
@@ -2160,173 +2070,9 @@ function SignupRequestsTab({ onRefresh }: { onRefresh: () => void }) {
   )
 }
 
-// ── 라인 변경 신청 탭 (관리자 전용) ────────────────────────────────
-type LineChangeRequest = {
-  id: number
-  summoner_name: string
-  line: string
-  requested_tier: string
-  status: 'pending' | 'approved' | 'rejected'
-  created_at: string
-}
-
-function LineChangeRequestsTab({ onRefresh }: { onRefresh: () => void }) {
-  const [requests, setRequests] = useState<LineChangeRequest[]>([])
-  const [loading, setLoading] = useState(true)
-  const [processingId, setProcessingId] = useState<number | null>(null)
-  const [error, setError] = useState('')
-  const [editedTiers, setEditedTiers] = useState<Record<number, string>>({})
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    const { data, error: err } = await supabase
-      .from('line_change_requests')
-      .select('*')
-      .order('created_at', { ascending: false })
-    if (err) {
-      setError(err.message)
-    } else {
-      setRequests(data ?? [])
-      setEditedTiers(prev => {
-        const next = { ...prev }
-        for (const r of data ?? []) {
-          if (!next[r.id]) next[r.id] = r.requested_tier
-        }
-        return next
-      })
-    }
-    setLoading(false)
-  }, [])
-
-  useEffect(() => { load() }, [load])
-
-  // 실시간 구독: 새 라인변경신청이 들어오면 관리자 화면에 자동으로 반영
-  useEffect(() => {
-    const channel = supabase
-      .channel('room-linechange-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'line_change_requests' }, () => { load() })
-      .subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [load])
-
-  const approve = async (id: number) => {
-    setProcessingId(id)
-    setError('')
-    const { error: err } = await supabase.rpc('approve_line_change_request', {
-      p_request_id: id,
-      p_tier: editedTiers[id] ?? null,
-    })
-    if (err) setError('승인 실패: ' + err.message)
-    else { await load(); onRefresh() }
-    setProcessingId(null)
-  }
-
-  const reject = async (id: number) => {
-    if (!confirm('이 라인 신청을 거절할까요?')) return
-    setProcessingId(id)
-    setError('')
-    const { error: err } = await supabase.rpc('reject_line_change_request', { p_request_id: id })
-    if (err) setError('거절 실패: ' + err.message)
-    else await load()
-    setProcessingId(null)
-  }
-
-  const pending = requests.filter(r => r.status === 'pending')
-  const reviewed = requests.filter(r => r.status !== 'pending')
-
-  return (
-    <div>
-      <div className="card">
-        <div className="card-title">대기 중인 라인변경신청 ({pending.length})</div>
-        {error && <div className="error">{error}</div>}
-        {loading ? (
-          <div className="empty">불러오는 중...</div>
-        ) : pending.length === 0 ? (
-          <div className="empty">대기 중인 라인변경신청이 없어요</div>
-        ) : (
-          pending.map(r => (
-            <div key={r.id} style={{
-              marginBottom: 10, padding: '10px 12px', background: 'var(--bg3)',
-              borderRadius: 'var(--radius)', border: '0.5px solid var(--border)'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <span style={{ fontWeight: 700 }}>{r.summoner_name}</span>
-                <span className="badge b-line" style={{ fontSize: 11 }}>{r.line}</span>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span style={{ fontSize: 12, color: 'var(--text3)' }}>신청 티어</span>
-                <select
-                  value={editedTiers[r.id] ?? r.requested_tier}
-                  onChange={e => setEditedTiers(prev => ({ ...prev, [r.id]: e.target.value }))}
-                  style={{ flex: 1, fontSize: 12 }}
-                >
-                  {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button className="btn btn-gold btn-sm" disabled={processingId === r.id} onClick={() => approve(r.id)}>
-                  {processingId === r.id ? '처리 중...' : '허용'}
-                </button>
-                <button className="btn btn-danger btn-sm" disabled={processingId === r.id} onClick={() => reject(r.id)}>
-                  거절
-                </button>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {reviewed.length > 0 && (
-        <div className="card">
-          <div className="card-title" style={{ fontSize: 12 }}>처리된 신청 ({reviewed.length})</div>
-          <div style={{ maxHeight: 300, overflowY: 'auto' }}>
-            {reviewed.map(r => (
-              <div key={r.id} style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '6px 4px', fontSize: 12, borderBottom: '0.5px solid var(--border2)'
-              }}>
-                <span>{r.summoner_name} ({r.line})</span>
-                <span style={{ color: r.status === 'approved' ? 'var(--gold, #d4af37)' : 'var(--red)' }}>
-                  {r.status === 'approved' ? '승인됨' : '거절됨'}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── 허가요청 탭 (관리자 전용) — 가입신청 / 라인변경신청 구분 ────────────
+// ── 허가요청 탭 (관리자 전용) — 가입신청 승인 ────────────────────────
 function ApprovalRequestsTab({ onRefresh }: { onRefresh: () => void }) {
-  const [subTab, setSubTab] = useState<'signup' | 'linechange'>('signup')
-
-  return (
-    <div>
-      <div className="card" style={{ marginBottom: 12 }}>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            className={`btn btn-sm${subTab === 'signup' ? ' btn-gold' : ''}`}
-            onClick={() => setSubTab('signup')}
-          >
-            가입신청
-          </button>
-          <button
-            className={`btn btn-sm${subTab === 'linechange' ? ' btn-gold' : ''}`}
-            onClick={() => setSubTab('linechange')}
-          >
-            라인변경신청
-          </button>
-        </div>
-      </div>
-
-      {subTab === 'signup' && <SignupRequestsTab onRefresh={onRefresh} />}
-      {subTab === 'linechange' && <LineChangeRequestsTab onRefresh={onRefresh} />}
-    </div>
-  )
+  return <SignupRequestsTab onRefresh={onRefresh} />
 }
 
 // ── 내전방 (로비: 방 생성/목록/입장/퇴장) — 1단계 ──────────────────────
@@ -2487,7 +2233,6 @@ function RoomsTab({
   summonerScores,
   records,
   idPrefixMap,
-  pendingLinesMap,
   onRecord,
   dbIsAdmin,
   inactiveNames,
@@ -2497,7 +2242,6 @@ function RoomsTab({
   summonerScores: SummonerScoreMap
   records: GameRecord[]
   idPrefixMap: Record<string, string>
-  pendingLinesMap: Record<string, Line[]>
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
   dbIsAdmin: boolean
   inactiveNames: Set<string>
@@ -3305,8 +3049,6 @@ function RoomsTab({
                 {myRoom.members.map(m => {
                   const isMe = m.user_id === myUserId
                   const lines = getSummonerLines(m.user_id)
-                  const pendingLines = pendingLinesMap[m.user_id] ?? []
-                  const selectableLines = [...lines, ...pendingLines.filter(l => !lines.includes(l))]
                   return (
                     <div
                       key={m.user_id}
@@ -3334,10 +3076,8 @@ function RoomsTab({
                             style={{ width: 95, padding: '4px 8px', fontSize: 12, opacity: m.ready ? 0.5 : 1, cursor: m.ready ? 'not-allowed' : 'pointer' }}
                           >
                             {lines.length >= 2 && <option value="any">상관없음</option>}
-                            {selectableLines.map(l => (
-                              <option key={l} value={l} disabled={pendingLines.includes(l)}>
-                                {l}{pendingLines.includes(l) ? ' (허가신청)' : ''}
-                              </option>
+                            {lines.map(l => (
+                              <option key={l} value={l}>{l}</option>
                             ))}
                           </select>
                         ) : (
@@ -3357,10 +3097,8 @@ function RoomsTab({
                             style={{ width: 95, padding: '4px 8px', fontSize: 12, opacity: (m.most1 === 'any' || m.ready) ? 0.4 : 1, cursor: m.ready ? 'not-allowed' : 'pointer' }}
                           >
                             <option value=''>없음</option>
-                            {selectableLines.filter(l => l !== m.most1 && m.most1 !== 'any').map(l => (
-                              <option key={l} value={l} disabled={pendingLines.includes(l)}>
-                                {l}{pendingLines.includes(l) ? ' (허가신청)' : ''}
-                              </option>
+                            {lines.filter(l => l !== m.most1 && m.most1 !== 'any').map(l => (
+                              <option key={l} value={l}>{l}</option>
                             ))}
                           </select>
                         ) : (
@@ -3926,17 +3664,15 @@ function MainApp() {
 
   const [tierHistory, setTierHistory] = useState<{ record_id: number; user_id?: string; name: string; line: string; tier_before: string; tier_after: string }[]>([])
   const [idPrefixMap, setIdPrefixMap] = useState<Record<string, string>>({})
-  const [pendingLinesMap, setPendingLinesMap] = useState<Record<string, Line[]>>({})
   const [inactiveNames, setInactiveNames] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
 
   const fetchAll = useCallback(async () => {
-    const [{ data: recs }, { data: sums }, { data: hist }, { data: prefixes }, { data: pendingLines }] = await Promise.all([
+    const [{ data: recs }, { data: sums }, { data: hist }, { data: prefixes }] = await Promise.all([
       supabase.from('records').select('*').order('created_at', { ascending: false }),
       supabase.from('summoners').select('*'),
       supabase.from('tier_history').select('*').order('id', { ascending: true }),
       supabase.rpc('summoner_id_prefixes'),
-      supabase.rpc('pending_line_requests'),
     ])
     if (recs) setRecords(recs)
     if (hist) setTierHistory(hist)
@@ -3944,14 +3680,6 @@ function MainApp() {
       const pm: Record<string, string> = {}
       prefixes.forEach((p: { user_id: string; summoner_name: string; id_prefix: string }) => { pm[p.user_id] = p.id_prefix })
       setIdPrefixMap(pm)
-    }
-    if (pendingLines) {
-      const plm: Record<string, Line[]> = {}
-      pendingLines.forEach((p: { user_id: string; summoner_name: string; line: Line }) => {
-        if (!plm[p.user_id]) plm[p.user_id] = []
-        plm[p.user_id].push(p.line)
-      })
-      setPendingLinesMap(plm)
     }
     if (sums) {
       const map: SummonerMap = {}
@@ -4165,7 +3893,7 @@ function MainApp() {
             <div className="empty">불러오는 중...</div>
           ) : (
             <>
-              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} pendingLinesMap={pendingLinesMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} inactiveNames={inactiveNames} nameByUserId={nameByUserId} />}
+              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} inactiveNames={inactiveNames} nameByUserId={nameByUserId} />}
               {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
               {tab === 'ranking' && <RankingTab records={records} idPrefixMap={idPrefixMap} />}
               {tab === 'hall' && <HallOfFameTab records={records} idPrefixMap={idPrefixMap} />}
