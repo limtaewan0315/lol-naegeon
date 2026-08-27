@@ -3359,15 +3359,38 @@ function RoomsTab({
                 </button>
               )}
 
-              {myMember && (
-                <button
-                  className={`btn ${myMember.ready ? '' : 'btn-gold'}`}
-                  onClick={toggleReady}
-                  style={{ width: '100%', marginBottom: 8 }}
-                >
-                  {myMember.ready ? '준비 취소' : '준비완료'}
-                </button>
-              )}
+              {myMember && (() => {
+                const hasRiotId = !!(myUserId && riotIdMap[myUserId])
+                if (myMember.ready || hasRiotId) {
+                  return (
+                    <button
+                      className={`btn ${myMember.ready ? '' : 'btn-gold'}`}
+                      onClick={toggleReady}
+                      style={{ width: '100%', marginBottom: 8 }}
+                    >
+                      {myMember.ready ? '준비 취소' : '준비완료'}
+                    </button>
+                  )
+                }
+                return (
+                  <div style={{ marginBottom: 8 }}>
+                    <div style={{
+                      fontSize: 11, color: 'var(--red)', marginBottom: 6,
+                      background: 'var(--red-bg)', border: '0.5px solid var(--red-border)',
+                      borderRadius: 'var(--radius)', padding: '6px 10px',
+                    }}>
+                      ⚠ 롤 계정이 등록되어 있지 않아요. "내 정보"에서 롤 계정을 입력한 뒤 이 탭으로 돌아와 새로고침하면 준비완료를 누를 수 있어요.
+                    </div>
+                    <button
+                      className="btn btn-danger"
+                      disabled
+                      style={{ width: '100%', opacity: 0.6, cursor: 'not-allowed', padding: '8px 16px', fontSize: 13, fontWeight: 500 }}
+                    >
+                      준비완료 (롤 계정 등록 필요)
+                    </button>
+                  </div>
+                )
+              })()}
 
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn btn-danger" onClick={leaveRoom} style={{ flex: 1 }}>
