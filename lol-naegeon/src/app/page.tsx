@@ -220,36 +220,43 @@ function AdminTab({ summoners, summonerScores, records, nameByUserId, idPrefixMa
                     <span><NameWithIdBadge name={name} idPrefixMap={idPrefixMap} userId={userId} /></span>
                     <button className="btn btn-danger btn-sm" onClick={() => deleteSummoner(userId, name)}>삭제</button>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {Object.entries(summoners[userId] ?? {}).map(([line, tier]) => (
-                      <div key={`${userId}-${line}`} style={{
-                        background: 'var(--bg3)', padding: '8px 10px', borderRadius: 'var(--radius)',
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12
-                      }}>
-                        {editingUserId === userId && editingLine === line ? (
-                          <>
-                            <span style={{ minWidth: 50 }}>{line}</span>
-                            <input
-                              type="text"
-                              value={editingTier}
-                              onChange={e => setEditingTier(e.target.value)}
-                              style={{ flex: 1, margin: '0 8px' }}
-                              placeholder="티어명"
-                            />
-                            <button className="btn btn-sm" style={{ marginRight: 4 }} onClick={saveEdit}>저장</button>
-                            <button className="btn btn-sm" onClick={cancelEdit}>취소</button>
-                          </>
-                        ) : (
-                          <>
-                            <span style={{ minWidth: 50 }}>{line}</span>
-                            <span style={{ color: 'var(--text2)' }}>
-                              {tier} (점수: {summonerScores[userId]?.[line as Line] ?? 0})
-                            </span>
-                            <button className="btn btn-sm" onClick={() => startEdit(userId, line as Line, tier)}>편집</button>
-                          </>
-                        )}
-                      </div>
-                    ))}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4 }}>
+                    {LINES.map(line => {
+                      const tier = summoners[userId]?.[line]
+                      const isEditing = editingUserId === userId && editingLine === line
+                      return (
+                        <div key={line} style={{
+                          background: 'var(--bg3)', padding: '6px 4px', borderRadius: 'var(--radius)',
+                          textAlign: 'center', fontSize: 11,
+                        }}>
+                          <div style={{ color: 'var(--text3)', marginBottom: 4, fontWeight: 600 }}>{line}</div>
+                          {isEditing ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                              <input
+                                type="text"
+                                value={editingTier}
+                                onChange={e => setEditingTier(e.target.value)}
+                                style={{ width: '100%', padding: '2px 4px', fontSize: 10 }}
+                                placeholder="티어명"
+                              />
+                              <div style={{ display: 'flex', gap: 2 }}>
+                                <button className="btn btn-sm" style={{ flex: 1, padding: '2px 0', fontSize: 10 }} onClick={saveEdit}>저장</button>
+                                <button className="btn btn-sm" style={{ flex: 1, padding: '2px 0', fontSize: 10 }} onClick={cancelEdit}>취소</button>
+                              </div>
+                            </div>
+                          ) : tier ? (
+                            <div
+                              onClick={() => startEdit(userId, line, tier)}
+                              style={{ cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 2 }}
+                            >
+                              {tier}
+                            </div>
+                          ) : (
+                            <div style={{ color: 'var(--text3)' }}>없음</div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               ))
