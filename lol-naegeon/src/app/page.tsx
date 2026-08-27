@@ -2378,10 +2378,10 @@ type Room = {
   members: RoomMember[]
   status: 'waiting' | 'playing'
   match_mode: 'line' | 'random'
-  max_score_diff: number
   result: BalanceResult | null
   pending_result: BalanceResult | null
   last_result: BalanceResult | null
+  recent_team_history: { ids1: string[]; ids2: string[] }[]
   balance_started_at: string | null
   created_at: string
   has_password: boolean
@@ -2740,15 +2740,6 @@ function RoomsTab({
     await supabase.from('rooms').update({ match_mode: mode, updated_at: new Date().toISOString() }).eq('id', roomId)
   }
 
-  // 팀 간 최대 점수차(0~10점)도 방장만 변경 가능
-  const updateMaxScoreDiff = async (value: number) => {
-    if (!myRoom || !isHost) return
-    const clamped = Math.min(10, Math.max(0, value))
-    const roomId = myRoom.id
-    setRooms(prev => prev.map(r => (r.id === roomId ? { ...r, max_score_diff: clamped } : r)))
-    await supabase.from('rooms').update({ max_score_diff: clamped, updated_at: new Date().toISOString() }).eq('id', roomId)
-  }
-
   // 관리자 전용 테스트 기능: 등록된 다른 소환사들로 방을 10명까지 자동으로 채우고
   // 전부 준비완료 상태로 만들어서, 혼자서도 매칭 테스트를 해볼 수 있게 함.
   // 무작위로 뽑으면 라인이 한쪽으로 쏠려서 밸런싱이 실패할 수 있으므로,
@@ -2948,26 +2939,29 @@ function RoomsTab({
       if (isBetter) { bestDiff = diff; bestLineDiff = lineDiff; best = candidateResult }
     }
 
-    // 방장이 설정한 "최대 점수차"(0~10점) 이내인 후보만 사용.
-    // (기존 버그: 이 범위 안에서 못 찾으면 범위 밖의 "그나마 나은 후보"로 조용히 대체하고 있었음 —
-    //  그래서 설정한 점수차보다 더 크게 매칭되는 문제가 있었음. 이제는 범위 밖 후보로 대체하지 않고
-    //  못 찾으면 그대로 실패 처리함.)
-    const maxDiff = myRoom.max_score_diff ?? 10
-    const goodCandidates = candidates.filter(c => c.diff <= maxDiff)
-    best = null
-    if (goodCandidates.length > 0) {
-      goodCandidates.sort((a, b) => b.total - a.total)
-      const top10 = goodCandidates.slice(0, 10)
-      const picked = top10[Math.floor(Math.random() * top10.length)]
-      best = picked.result
-      bestDiff = picked.diff
+    // 항상 "가장 작은 점수차"를 최우선으로 찾음 (더 이상 최대 점수차 제한을 안 둠)
+    candidates.sort((a, b) => a.diff - b.diff)
+
+    // 최근 4판 동안 같은 팀이었던 5명 중 2명 이상이 다시 같은 팀이 되는 조합은 피함
+    const historyTeams: string[][] = (myRoom.recent_team_history ?? []).flatMap(h => [h.ids1, h.ids2])
+    const violatesRepeat = (team: TeamPlayer[]): boolean => {
+      const ids = new Set(team.map(p => p.userId))
+      return historyTeams.some(histTeam => histTeam.filter(id => ids.has(id)).length >= 2)
     }
+    const isRepeatFree = (c: { result: BalanceResult }) => !violatesRepeat(c.result.team1) && !violatesRepeat(c.result.team2)
+
+    // 1순위: 점수차 0~5점 이내에서, 최근 4판 팀 반복 조건까지 만족하는 것 중 가장 작은 점수차
+    best = candidates.find(c => c.diff <= 5 && isRepeatFree(c))?.result ?? null
+    // 2순위: 5점을 넘더라도, 반복 조건을 만족하는 것 중 가장 작은 점수차
+    if (!best) best = candidates.find(c => isRepeatFree(c))?.result ?? null
+    // 3순위: 그래도 없으면 반복 조건은 포기하고 그냥 가장 작은 점수차 (방이 멈추지 않도록 하는 안전장치)
+    if (!best) best = candidates[0]?.result ?? null
 
     if (best) {
       const startedAt = new Date().toISOString()
       await supabase.from('rooms').update({ pending_result: best, balance_started_at: startedAt }).eq('id', myRoom.id)
     } else if (fallback) {
-      setBalanceError(`설정한 최대 점수차(${maxDiff}점) 이내의 조합을 찾지 못했어요. (가장 가까운 조합은 ${fallbackDiff.toFixed(1)}점 차이) 최대 점수차를 늘리거나, 같은 설정으로 다시 시도해보세요.`)
+      setBalanceError(`팀 편성에 필요한 라인 밸런스 조건을 만족하는 조합을 못 찾았어요. (가장 가까운 조합은 ${fallbackDiff.toFixed(1)}점 차이) 다시 시도해보세요.`)
     } else {
       const linePossible: Record<string, number> = {}
       LINES.forEach(l => { linePossible[l] = 0 })
@@ -3073,8 +3067,11 @@ function RoomsTab({
 
     // 방 초기화: 참가자는 유지하되 전부 준비 해제 (다음 판 위해 다시 준비해야 함)
     // 방금 진행한 팀편성은 last_result로 저장 — 다음 팀편성 때 완전히 같은 조합이 다시 나오지 않게 하기 위함
+    // recent_team_history에도 추가(최근 4판까지만 유지) — 5명 중 2명 이상 다시 같은 팀 되는 것 방지용
+    const newHistoryEntry = { ids1: result.team1.map(p => p.userId), ids2: result.team2.map(p => p.userId) }
+    const updatedHistory = [newHistoryEntry, ...(myRoom.recent_team_history ?? [])].slice(0, 4)
     const resetMembers = myRoom.members.map(m => ({ ...m, ready: false }))
-    await supabase.from('rooms').update({ members: resetMembers, last_result: result }).eq('id', myRoom.id)
+    await supabase.from('rooms').update({ members: resetMembers, last_result: result, recent_team_history: updatedHistory }).eq('id', myRoom.id)
 
     // 디스코드 전송
     try {
@@ -3277,32 +3274,6 @@ function RoomsTab({
                     </div>
                   )
                 })}
-              </div>
-
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8,
-                padding: '8px 10px', background: 'var(--bg3)', borderRadius: 'var(--radius)',
-                border: '0.5px solid var(--border)'
-              }}>
-                <span style={{ fontSize: 12, color: 'var(--text3)', whiteSpace: 'nowrap', flexShrink: 0 }}>팀 간 최대 점수차</span>
-                {isHost ? (
-                  <>
-                    <input
-                      type="range"
-                      min={0}
-                      max={10}
-                      step={1}
-                      value={myRoom.max_score_diff ?? 10}
-                      onChange={e => updateMaxScoreDiff(Number(e.target.value))}
-                      style={{ flex: 1, width: 'auto' }}
-                    />
-                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--gold)', minWidth: 32, textAlign: 'right', flexShrink: 0 }}>
-                      {myRoom.max_score_diff ?? 10}점
-                    </span>
-                  </>
-                ) : (
-                  <span style={{ fontSize: 12, fontWeight: 600, marginLeft: 'auto' }}>{myRoom.max_score_diff ?? 10}점</span>
-                )}
               </div>
 
               <div style={{
