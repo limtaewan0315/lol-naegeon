@@ -150,40 +150,42 @@ const TIER_SCORES: Record<string, number> = {
 
 // ── 관리자 탭 ──────────────────────────────────────────────
 // ── 관리자 탭 ──────────────────────────────────────────────
-function AdminTab({ summoners, summonerScores, records, nameByUserId }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; records: GameRecord[]; nameByUserId: Record<string, string> }) {
+function AdminTab({ summoners, summonerScores, records, nameByUserId, idPrefixMap }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; records: GameRecord[]; nameByUserId: Record<string, string>; idPrefixMap: Record<string, string> }) {
   const [subTab, setSubTab] = useState<'summoners' | 'inactive'>('summoners')
-  const [editingName, setEditingName] = useState<string | null>(null)
+  const [editingUserId, setEditingUserId] = useState<string | null>(null)
   const [editingLine, setEditingLine] = useState<Line | ''>('')
   const [editingTier, setEditingTier] = useState('')
   const [error, setError] = useState('')
   const [inactiveStatusMap, setInactiveStatusMap] = useState<Map<string, boolean>>(new Map())
 
-  // summoners는 계정ID+이름 이중 키라서, 실제 등록된 사람 목록은 이름 목록(nameByUserId의 값)에서 가져옴
-  const allSummoners = Array.from(new Set(Object.values(nameByUserId))).sort()
+  // 계정ID+이름 쌍 목록 (동명이인도 각자 별개의 항목으로 정확히 구분됨)
+  const allSummoners = Object.entries(nameByUserId)
+    .map(([userId, name]) => ({ userId, name }))
+    .sort((a, b) => a.name.localeCompare(b.name))
 
-  // 14일 이상 미참여자 목록
+  // 14일 이상 미참여자 목록 — 계정ID 기준으로 마지막 경기 조회
   const inactiveList = useMemo(() => {
     const now = Date.now()
-    const result: { name: string; days: number }[] = []
-    for (const name of allSummoners) {
-      const lastGame = records.find(r => r.blue.some(p => p.name === name) || r.red.some(p => p.name === name))
+    const result: { userId: string; name: string; days: number }[] = []
+    for (const { userId, name } of allSummoners) {
+      const lastGame = records.find(r => r.blue.some(p => p.userId === userId) || r.red.some(p => p.userId === userId))
       if (!lastGame) continue
       const lastDate = new Date((lastGame as any).created_at ?? '')
       if (isNaN(lastDate.getTime())) continue
       const days = Math.floor((now - lastDate.getTime()) / (1000 * 60 * 60 * 24))
-      if (days >= 14) result.push({ name, days })
+      if (days >= 14) result.push({ userId, name, days })
     }
     return result.sort((a, b) => b.days - a.days)
   }, [allSummoners, records])
 
-  // 페이지 로드 시 DB에서 기존 비활성화 상태 읽어오기
+  // 페이지 로드 시 DB에서 기존 비활성화 상태 읽어오기 (계정ID 기준)
   useEffect(() => {
     const loadInactiveStatus = async () => {
-      const { data } = await supabase.from('summoners').select('name, is_inactive').eq('is_inactive', true)
+      const { data } = await supabase.from('summoners').select('user_id, is_inactive').eq('is_inactive', true)
       if (data) {
         const statusMap = new Map<string, boolean>()
         for (const record of data) {
-          statusMap.set((record as any).name, true)
+          if ((record as any).user_id) statusMap.set((record as any).user_id, true)
         }
         setInactiveStatusMap(statusMap)
       }
@@ -191,75 +193,60 @@ function AdminTab({ summoners, summonerScores, records, nameByUserId }: { summon
     loadInactiveStatus()
   }, [])
 
-  const deleteSummoner = async (name: string) => {
+  const deleteSummoner = async (userId: string, name: string) => {
     if (!confirm(`${name}을(를) 완전히 삭제할까요?`)) return
     setError('')
-    
-    const lines = Object.keys(summoners[name] ?? {})
-    for (const line of lines) {
-      await supabase.from('summoners').delete().eq('name', name).eq('line', line)
-    }
+    await supabase.from('summoners').delete().eq('user_id', userId)
     window.location.reload()
   }
 
-  const toggleInactive = async (name: string, currentInactive: boolean) => {
+  const toggleInactive = async (userId: string, currentInactive: boolean) => {
     const newInactiveStatus = !currentInactive
     // 로컬 상태에 즉시 반영 (UI 업데이트)
-    setInactiveStatusMap(prev => new Map(prev).set(name, newInactiveStatus))
+    setInactiveStatusMap(prev => new Map(prev).set(userId, newInactiveStatus))
     // DB에 저장
     const { error: err } = await supabase
       .from('summoners')
       .update({ is_inactive: newInactiveStatus })
-      .eq('name', name)
+      .eq('user_id', userId)
     if (err) {
       setError('업데이트 실패: ' + err.message)
       // 실패 시 로컬 상태 되돌리기
-      setInactiveStatusMap(prev => new Map(prev).set(name, currentInactive))
+      setInactiveStatusMap(prev => new Map(prev).set(userId, currentInactive))
       return
     }
   }
 
-  const deleteInactivePlayer = async (name: string) => {
-    if (!confirm(`${name}을(를) 완전히 삭제할까요?`)) return
-    setError('')
-    
-    const lines = Object.keys(summoners[name] ?? {})
-    for (const line of lines) {
-      await supabase.from('summoners').delete().eq('name', name).eq('line', line)
-    }
-    window.location.reload()
-  }
-
-  const startEdit = (name: string, line: Line, tier: string) => {
-    setEditingName(name)
+  const startEdit = (userId: string, line: Line, tier: string) => {
+    setEditingUserId(userId)
     setEditingLine(line)
     setEditingTier(tier)
     setError('')
   }
 
   const saveEdit = async () => {
-    if (!editingName || editingLine === '') return
+    if (!editingUserId || editingLine === '') return
     setError('')
 
     const { error: err } = await supabase
       .from('summoners')
       .update({ tier: editingTier })
-      .eq('name', editingName)
+      .eq('user_id', editingUserId)
       .eq('line', editingLine)
-    
+
     if (err) {
       setError('업데이트 실패: ' + err.message)
       return
     }
 
-    setEditingName(null)
+    setEditingUserId(null)
     setEditingLine('')
     setEditingTier('')
     window.location.reload()
   }
 
   const cancelEdit = () => {
-    setEditingName(null)
+    setEditingUserId(null)
     setEditingLine('')
     setEditingTier('')
     setError('')
@@ -291,19 +278,19 @@ function AdminTab({ summoners, summonerScores, records, nameByUserId }: { summon
             {allSummoners.length === 0 ? (
               <div className="empty">등록된 소환사가 없어요</div>
             ) : (
-              allSummoners.map(name => (
-                <div key={name} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '0.5px solid var(--border2)' }}>
+              allSummoners.map(({ userId, name }) => (
+                <div key={userId} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '0.5px solid var(--border2)' }}>
                   <div style={{ fontWeight: 700, marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>{name}</span>
-                    <button className="btn btn-danger btn-sm" onClick={() => deleteSummoner(name)}>삭제</button>
+                    <span><NameWithIdBadge name={name} idPrefixMap={idPrefixMap} userId={userId} /></span>
+                    <button className="btn btn-danger btn-sm" onClick={() => deleteSummoner(userId, name)}>삭제</button>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {Object.entries(summoners[name] ?? {}).map(([line, tier]) => (
-                      <div key={`${name}-${line}`} style={{
+                    {Object.entries(summoners[userId] ?? {}).map(([line, tier]) => (
+                      <div key={`${userId}-${line}`} style={{
                         background: 'var(--bg3)', padding: '8px 10px', borderRadius: 'var(--radius)',
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12
                       }}>
-                        {editingName === name && editingLine === line ? (
+                        {editingUserId === userId && editingLine === line ? (
                           <>
                             <span style={{ minWidth: 50 }}>{line}</span>
                             <input
@@ -320,9 +307,9 @@ function AdminTab({ summoners, summonerScores, records, nameByUserId }: { summon
                           <>
                             <span style={{ minWidth: 50 }}>{line}</span>
                             <span style={{ color: 'var(--text2)' }}>
-                              {tier} (점수: {summonerScores[name]?.[line as Line] ?? 0})
+                              {tier} (점수: {summonerScores[userId]?.[line as Line] ?? 0})
                             </span>
-                            <button className="btn btn-sm" onClick={() => startEdit(name, line as Line, tier)}>편집</button>
+                            <button className="btn btn-sm" onClick={() => startEdit(userId, line as Line, tier)}>편집</button>
                           </>
                         )}
                       </div>
@@ -340,26 +327,26 @@ function AdminTab({ summoners, summonerScores, records, nameByUserId }: { summon
             {inactiveList.length === 0 ? (
               <div className="empty">장기 미접속자가 없어요</div>
             ) : (
-              inactiveList.map(({ name, days }: { name: string; days: number }) => {
-                const isInactive = inactiveStatusMap.get(name) ?? false
+              inactiveList.map(({ userId, name, days }) => {
+                const isInactive = inactiveStatusMap.get(userId) ?? false
                 return (
-                  <div key={name} style={{
+                  <div key={userId} style={{
                     marginBottom: 10, padding: '10px 12px', background: 'var(--bg3)',
                     borderRadius: 'var(--radius)', display: 'flex', justifyContent: 'space-between',
                     alignItems: 'center'
                   }}>
                     <div>
-                      <span style={{ fontWeight: 700 }}>{name}</span>
+                      <span style={{ fontWeight: 700 }}><NameWithIdBadge name={name} idPrefixMap={idPrefixMap} userId={userId} /></span>
                       <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 8 }}>
                         {days}일 미참여
                         {isInactive && <span style={{ marginLeft: 8, color: 'var(--red)', fontWeight: 700 }}>비활성화</span>}
                       </span>
                     </div>
                     <div style={{ display: 'flex', gap: 6 }}>
-                      <button className="btn btn-sm" onClick={() => toggleInactive(name, isInactive)}>
+                      <button className="btn btn-sm" onClick={() => toggleInactive(userId, isInactive)}>
                         {isInactive ? '활성화' : '비활성화'}
                       </button>
-                      <button className="btn btn-danger btn-sm" onClick={() => deleteInactivePlayer(name)}>삭제</button>
+                      <button className="btn btn-danger btn-sm" onClick={() => deleteSummoner(userId, name)}>삭제</button>
                     </div>
                   </div>
                 )
@@ -1542,176 +1529,29 @@ function StatsTab({ records, summoners, summonerScores, tierHistory, idPrefixMap
 }
 
 
-// ── 상대 전적 검색 탭 ──────────────────────────────────────────────
-function MatchupTab({ records }: { records: GameRecord[] }) {
-  const [nameA, setNameA] = useState('')
-  const [nameB, setNameB] = useState('')
-  const [sugA, setSugA] = useState<string[]>([])
-  const [sugB, setSugB] = useState<string[]>([])
-
-  const allNames = Array.from(new Set(records.flatMap(r => [...r.blue, ...r.red].map(p => p.name)))).sort()
-
-  const handleA = (val: string) => { setNameA(val); setSugA(val ? allNames.filter(n => n.includes(val) && n !== nameB).slice(0, 5) : []) }
-  const handleB = (val: string) => { setNameB(val); setSugB(val ? allNames.filter(n => n.includes(val) && n !== nameA).slice(0, 5) : []) }
-
-  // 두 소환사가 같은 게임에 있었던 전적 계산
-  const getMatchup = () => {
-    if (!nameA || !nameB) return null
-    const matched = records.filter(r => {
-      const allP = [...r.blue, ...r.red].map(p => p.name)
-      return allP.includes(nameA) && allP.includes(nameB)
-    })
-    if (matched.length === 0) return { total: 0, aWin: 0, bWin: 0, sameTeam: 0, oppose: 0, sameWin: 0 }
-
-    let aWin = 0, bWin = 0, sameTeam = 0, oppose = 0, sameWin = 0
-    matched.forEach(r => {
-      const aInBlue = r.blue.some(p => p.name === nameA)
-      const bInBlue = r.blue.some(p => p.name === nameB)
-      const aWins = (aInBlue && r.winner === 'blue') || (!aInBlue && r.winner === 'red')
-
-      if (aInBlue === bInBlue) {
-        sameTeam++
-        if (aWins) sameWin++
-      } else {
-        oppose++
-        if (aWins) aWin++; else bWin++
-      }
-    })
-    return { total: matched.length, aWin, bWin, sameTeam, oppose, sameWin }
-  }
-
-  const result = nameA && nameB && nameA !== nameB ? getMatchup() : null
-
-  return (
-    <div>
-      <div className="card">
-        <div className="card-title">상대 전적 검색</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-          {/* 소환사 A */}
-          <div style={{ position: 'relative' }}>
-            <input value={nameA} onChange={e => handleA(e.target.value)} placeholder="소환사 A" autoComplete="off" />
-            {sugA.length > 0 && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--bg3)', border: '0.5px solid var(--border2)', borderRadius: 'var(--radius)', marginTop: 2, overflow: 'hidden' }}>
-                {sugA.map(s => (
-                  <div key={s} onClick={() => { setNameA(s); setSugA([]) }} style={{ padding: '7px 12px', cursor: 'pointer', fontSize: 13 }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg2)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{s}</div>
-                ))}
-              </div>
-            )}
-          </div>
-          <span style={{ fontSize: 13, color: 'var(--gold)', textAlign: 'center', letterSpacing: 2 }}>VS</span>
-          {/* 소환사 B */}
-          <div style={{ position: 'relative' }}>
-            <input value={nameB} onChange={e => handleB(e.target.value)} placeholder="소환사 B" autoComplete="off" />
-            {sugB.length > 0 && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--bg3)', border: '0.5px solid var(--border2)', borderRadius: 'var(--radius)', marginTop: 2, overflow: 'hidden' }}>
-                {sugB.map(s => (
-                  <div key={s} onClick={() => { setNameB(s); setSugB([]) }} style={{ padding: '7px 12px', cursor: 'pointer', fontSize: 13 }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg2)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>{s}</div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {!nameA || !nameB || nameA === nameB
-          ? <div className="empty">두 소환사를 검색해서 전적을 확인하세요</div>
-          : result === null ? null
-          : result.total === 0
-          ? <div className="empty">두 소환사가 함께한 게임이 없어요.</div>
-          : (
-            <div>
-              {/* 상대팀 전적 */}
-              {result.oppose > 0 && (
-                <div style={{ marginBottom: 12 }}>
-                  <div style={{ fontSize: 11, color: 'var(--text3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>맞대결 전적</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
-                    {/* A */}
-                    <div style={{ flex: 1, textAlign: 'right' }}>
-                      <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--blue)' }}>{nameA}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>{result.aWin}승</div>
-                    </div>
-                    {/* 가운데 바 */}
-                    <div style={{ textAlign: 'center', minWidth: 120 }}>
-                      <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>
-                        <span style={{ color: 'var(--blue)', fontWeight: 600 }}>{result.aWin}</span>
-                        <span style={{ margin: '0 6px', color: 'var(--text3)' }}>-</span>
-                        <span style={{ color: 'var(--red)', fontWeight: 600 }}>{result.bWin}</span>
-                        <span style={{ color: 'var(--text3)', marginLeft: 6, fontSize: 11 }}>({result.oppose}판)</span>
-                      </div>
-                      <div style={{ height: 5, background: 'var(--bg)', borderRadius: 2, overflow: 'hidden', display: 'flex' }}>
-                        <div style={{ height: '100%', width: `${Math.round(result.aWin / result.oppose * 100)}%`, background: 'var(--blue)' }} />
-                        <div style={{ height: '100%', flex: 1, background: 'var(--red)' }} />
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 3 }}>
-                        <span style={{ color: 'var(--blue)', fontWeight: 600 }}>{Math.round(result.aWin / result.oppose * 100)}%</span>
-                        <span style={{ color: 'var(--red)', fontWeight: 600 }}>{Math.round(result.bWin / result.oppose * 100)}%</span>
-                      </div>
-                    </div>
-                    {/* B */}
-                    <div style={{ flex: 1, textAlign: 'left' }}>
-                      <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--red)' }}>{nameB}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>{result.bWin}승</div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* 같은팀 전적 */}
-              {result.sameTeam > 0 && (
-                <div>
-                  <div style={{ fontSize: 11, color: 'var(--text3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>같은 팀 전적</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)', marginBottom: 4 }}>
-                        <span style={{ color: 'var(--blue)', fontWeight: 600 }}>{nameA}</span>
-                        <span style={{ margin: '0 6px', color: 'var(--text3)' }}>+</span>
-                        <span style={{ color: 'var(--red)', fontWeight: 600 }}>{nameB}</span>
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--text2)' }}>
-                        <span style={{ color: 'var(--green)', fontWeight: 600 }}>{result.sameWin}승</span>
-                        <span style={{ margin: '0 4px', color: 'var(--text3)' }}>/</span>
-                        <span style={{ color: 'var(--red)' }}>{result.sameTeam - result.sameWin}패</span>
-                        <span style={{ color: 'var(--text3)', marginLeft: 6 }}>({result.sameTeam}판)</span>
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: Math.round(result.sameWin / result.sameTeam * 100) >= 50 ? 'var(--green)' : 'var(--red)' }}>
-                      {Math.round(result.sameWin / result.sameTeam * 100)}%
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )
-        }
-      </div>
-    </div>
-  )
-}
-
 
 // ── 명예의 전당 탭 ──────────────────────────────────────────────
-function HallOfFameTab({ records }: { records: GameRecord[] }) {
+function HallOfFameTab({ records, idPrefixMap }: { records: GameRecord[]; idPrefixMap: Record<string, string> }) {
   const totalGames = records.length
   const minGames = 70 // 전체 70판 이상
   const minLineGames = 30 // 라인별 30판 이상
 
-  // 라인별 승률 집계
-  const lineMap: Record<string, Record<string, { win: number; lose: number }>> = {}
+  // 라인별 승률 집계 — 계정ID 기준 (동명이인이 안 섞임). 예전 기록에 계정ID가 없으면 이름으로 대체.
+  const lineMap: Record<string, Record<string, { name: string; userId?: string; win: number; lose: number }>> = {}
   LINES.forEach(l => { lineMap[l] = {} })
 
   records.forEach(r => {
     const winners = r.winner === 'blue' ? r.blue : r.red
     const losers = r.winner === 'blue' ? r.red : r.blue
     winners.forEach(p => {
-      if (!lineMap[p.line][p.name]) lineMap[p.line][p.name] = { win: 0, lose: 0 }
-      lineMap[p.line][p.name].win++
+      const key = p.userId ?? p.name
+      if (!lineMap[p.line][key]) lineMap[p.line][key] = { name: p.name, userId: p.userId, win: 0, lose: 0 }
+      lineMap[p.line][key].win++
     })
     losers.forEach(p => {
-      if (!lineMap[p.line][p.name]) lineMap[p.line][p.name] = { win: 0, lose: 0 }
-      lineMap[p.line][p.name].lose++
+      const key = p.userId ?? p.name
+      if (!lineMap[p.line][key]) lineMap[p.line][key] = { name: p.name, userId: p.userId, win: 0, lose: 0 }
+      lineMap[p.line][key].lose++
     })
   })
 
@@ -1747,12 +1587,11 @@ function HallOfFameTab({ records }: { records: GameRecord[] }) {
             </div>
             {top3.length === 0
               ? <div style={{ fontSize: 12, color: 'var(--text3)', padding: '6px 10px' }}>집계 인원 부족</div>
-              : top3.map(([name, s], i) => {
+              : top3.map(([key, s], i) => {
                 const total = s.win + s.lose
                 const wr = Math.round(s.win / total * 100)
-                const loseRate = Math.round(s.lose / total * 100)
                 return (
-                  <div key={name} style={{
+                  <div key={key} style={{
                     display: 'flex', alignItems: 'center', gap: 8,
                     padding: '6px 10px', borderRadius: 'var(--radius)',
                     marginBottom: 4,
@@ -1760,7 +1599,9 @@ function HallOfFameTab({ records }: { records: GameRecord[] }) {
                     border: `1px solid ${medalBorder[i]}`,
                   }}>
                     <span style={{ fontSize: 16, width: 22, flexShrink: 0 }}>{medals[i]}</span>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: '#c8d8e8', flex: 1 }}>{name}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#c8d8e8', flex: 1 }}>
+                      <NameWithIdBadge name={s.name} idPrefixMap={idPrefixMap} userId={s.userId} />
+                    </span>
                     <span style={{ fontSize: 13, fontWeight: 700, color: medalColors[i] }}>{wr}%</span>
                     <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 4 }}>{s.win}승 {s.lose}패</span>
                   </div>
@@ -1775,17 +1616,21 @@ function HallOfFameTab({ records }: { records: GameRecord[] }) {
 }
 
 // ── 전체 랭킹 탭 ──────────────────────────────────────────────
-function RankingTab({ records }: { records: GameRecord[] }) {
+function RankingTab({ records, idPrefixMap }: { records: GameRecord[]; idPrefixMap: Record<string, string> }) {
   const [page, setPage] = useState(1)
   const PAGE_SIZE = 10
 
-  const playerMap: Record<string, { win: number; lose: number }> = {}
+  // 계정ID 기준으로 집계 (동명이인이 안 섞임). 예전 기록에 계정ID가 없으면 이름으로 대체.
+  const playerMap: Record<string, { name: string; userId?: string; win: number; lose: number }> = {}
   records.forEach(r => {
     const winners = r.winner === 'blue' ? r.blue : r.red
     const losers = r.winner === 'blue' ? r.red : r.blue
-    ;[...winners, ...losers].forEach(p => { if (!playerMap[p.name]) playerMap[p.name] = { win: 0, lose: 0 } })
-    winners.forEach(p => playerMap[p.name].win++)
-    losers.forEach(p => playerMap[p.name].lose++)
+    ;[...winners, ...losers].forEach(p => {
+      const key = p.userId ?? p.name
+      if (!playerMap[key]) playerMap[key] = { name: p.name, userId: p.userId, win: 0, lose: 0 }
+    })
+    winners.forEach(p => { playerMap[p.userId ?? p.name].win++ })
+    losers.forEach(p => { playerMap[p.userId ?? p.name].lose++ })
   })
 
   const entries = Object.entries(playerMap)
@@ -1808,7 +1653,7 @@ function RankingTab({ records }: { records: GameRecord[] }) {
       </div>
       {entries.length === 0
         ? <div className="empty">70판 이상 참가한 소환사가 없어요. 경기를 더 쌓아보세요!</div>
-        : pagedEntries.map(([name, s], i) => {
+        : pagedEntries.map(([key, s], i) => {
           const globalIdx = (page - 1) * PAGE_SIZE + i
           const total = s.win + s.lose
           const wr = Math.round(s.win / total * 100)
@@ -1816,7 +1661,7 @@ function RankingTab({ records }: { records: GameRecord[] }) {
           const isTop3 = globalIdx < 3
 
           return (
-            <div key={name} style={{
+            <div key={key} style={{
               display: 'flex', alignItems: 'center', gap: 10,
               padding: '12px 14px', marginBottom: 8,
               background: isTop3 ? (
@@ -1837,7 +1682,9 @@ function RankingTab({ records }: { records: GameRecord[] }) {
                   : <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text3)' }}>{globalIdx + 1}</span>
                 }
               </div>
-              <span style={{ fontWeight: 700, fontSize: 14, flex: '0 0 90px' }}>{name}</span>
+              <span style={{ fontWeight: 700, fontSize: 14, flex: '0 0 90px' }}>
+                <NameWithIdBadge name={s.name} idPrefixMap={idPrefixMap} userId={s.userId} />
+              </span>
               <span className="badge b-win">{s.win}승</span>
               <span className="badge b-lose">{s.lose}패</span>
               <span style={{ fontSize: 12, color: 'var(--text2)' }}>{s.win}승 {s.lose}패</span>
@@ -3044,7 +2891,7 @@ function RoomsTab({
 
     // 후보 풀: 아직 방에 없는 + 비활성화되지 않은 실제 계정만 (계정ID 기준 — 동명이인도 각자 정확히 후보가 됨)
     let pool = Object.entries(nameByUserId)
-      .filter(([uid, name]) => !existingIds.has(uid) && !inactiveNames.has(name))
+      .filter(([uid, name]) => !existingIds.has(uid) && !inactiveNames.has(uid))
       .map(([uid, name]) => ({ userId: uid, name, lines: getSummonerLines(uid) }))
       .filter(c => c.lines.length > 0)
 
@@ -4333,8 +4180,8 @@ function MainApp() {
             <>
               {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} pendingLinesMap={pendingLinesMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} inactiveNames={inactiveNames} nameByUserId={nameByUserId} />}
               {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
-              {tab === 'ranking' && <RankingTab records={records} />}
-              {tab === 'hall' && <HallOfFameTab records={records} />}
+              {tab === 'ranking' && <RankingTab records={records} idPrefixMap={idPrefixMap} />}
+              {tab === 'hall' && <HallOfFameTab records={records} idPrefixMap={idPrefixMap} />}
               {tab === 'stats' && <StatsTab records={records} summoners={summoners} summonerScores={summonerScores} tierHistory={tierHistory} idPrefixMap={idPrefixMap} />}
 
               {tab === 'summoners' && <MyInfoTab summoners={summoners} summonerScores={summonerScores} onRefresh={fetchAll} />}
@@ -4343,7 +4190,7 @@ function MainApp() {
 
               {tab === 'admin' && dbIsAdmin && (
                 <div>
-                  <AdminTab summoners={summoners} summonerScores={summonerScores} records={records} nameByUserId={nameByUserId} />
+                  <AdminTab summoners={summoners} summonerScores={summonerScores} records={records} nameByUserId={nameByUserId} idPrefixMap={idPrefixMap} />
                 </div>
               )}
             </>
