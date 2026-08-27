@@ -2255,7 +2255,7 @@ function riotIdToLolPsUrl(riotId: string): string | null {
   if (parts.length !== 2) return null
   const [gameName, tag] = parts
   if (!gameName.trim() || !tag.trim()) return null
-  return `https://lol.ps/summoner/${encodeURIComponent(`${gameName.trim()}_${tag.trim()}`)}?pid=null`
+  return `https://lol.ps/summoner/${encodeURIComponent(`${gameName.trim()}_${tag.trim()}`)}?region=kr`
 }
 
 // ── 내전방 채팅 (방 단위, 방이 사라지면 같이 사라짐) ────────────────────
