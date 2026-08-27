@@ -3070,8 +3070,15 @@ function RoomsTab({
     // recent_team_history에도 추가(최근 4판까지만 유지) — 5명 중 2명 이상 다시 같은 팀 되는 것 방지용
     const newHistoryEntry = { ids1: result.team1.map(p => p.userId), ids2: result.team2.map(p => p.userId) }
     const updatedHistory = [newHistoryEntry, ...(myRoom.recent_team_history ?? [])].slice(0, 4)
-    const resetMembers = myRoom.members.map(m => ({ ...m, ready: false }))
-    await supabase.from('rooms').update({ members: resetMembers, last_result: result, recent_team_history: updatedHistory }).eq('id', myRoom.id)
+    const roomShouldClose = updatedHistory.length >= 4
+
+    if (roomShouldClose) {
+      // 탈주하기(취소) 제외, 실제로 플레이된 경기가 4판이 되면 방을 자동으로 삭제 (채팅도 같이 삭제됨)
+      await supabase.from('rooms').delete().eq('id', myRoom.id)
+    } else {
+      const resetMembers = myRoom.members.map(m => ({ ...m, ready: false }))
+      await supabase.from('rooms').update({ members: resetMembers, last_result: result, recent_team_history: updatedHistory }).eq('id', myRoom.id)
+    }
 
     // 디스코드 전송
     try {
@@ -3175,7 +3182,21 @@ function RoomsTab({
             {myRoom.name}
             {isHost && <span style={{ fontSize: 11, color: 'var(--gold, #d4af37)' }}>👑 방장</span>}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 10 }}>참가자 {myRoom.members.length}/10</div>
+          <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>참가자 {myRoom.members.length}/10</span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }} title={`이번 방에서 ${myRoom.recent_team_history?.length ?? 0}/4판 진행됨 (4판을 채우면 방이 자동으로 사라져요)`}>
+              {[0, 1, 2, 3].map(i => (
+                <span
+                  key={i}
+                  style={{
+                    width: 7, height: 7, borderRadius: '50%',
+                    background: i < (myRoom.recent_team_history?.length ?? 0) ? 'var(--gold, #d4af37)' : 'transparent',
+                    border: `1px solid ${i < (myRoom.recent_team_history?.length ?? 0) ? 'var(--gold, #d4af37)' : 'var(--border2)'}`,
+                  }}
+                />
+              ))}
+            </span>
+          </div>
 
           {!myRoom.result && countdown === null && (
             <>
