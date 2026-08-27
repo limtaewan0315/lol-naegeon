@@ -166,7 +166,7 @@ function AdminTab({ summoners, summonerScores, records, nameByUserId, idPrefixMa
 
     const { error: err } = await supabase
       .from('summoners')
-      .update({ tier: editingTier })
+      .update({ tier: editingTier, score: getScoreByTier(editingTier) })
       .eq('user_id', editingUserId)
       .eq('line', editingLine)
 
@@ -232,13 +232,13 @@ function AdminTab({ summoners, summonerScores, records, nameByUserId, idPrefixMa
                           <div style={{ color: 'var(--text3)', marginBottom: 4, fontWeight: 600 }}>{line}</div>
                           {isEditing ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                              <input
-                                type="text"
+                              <select
                                 value={editingTier}
                                 onChange={e => setEditingTier(e.target.value)}
                                 style={{ width: '100%', padding: '2px 4px', fontSize: 10 }}
-                                placeholder="티어명"
-                              />
+                              >
+                                {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
+                              </select>
                               <div style={{ display: 'flex', gap: 2 }}>
                                 <button className="btn btn-sm" style={{ flex: 1, padding: '2px 0', fontSize: 10 }} onClick={saveEdit}>저장</button>
                                 <button className="btn btn-sm" style={{ flex: 1, padding: '2px 0', fontSize: 10 }} onClick={cancelEdit}>취소</button>
