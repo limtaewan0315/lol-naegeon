@@ -63,6 +63,15 @@ function NameWithIdBadge({ name, idPrefixMap, userId }: { name: string; idPrefix
   )
 }
 
+// 티어 이름 길이에 맞춰 글자 크기를 줄여서, 좁은 칸 안에서도 한 줄로 안 잘리게 함
+function tierFontSize(tier: string): number {
+  const len = tier.length
+  if (len <= 3) return 11
+  if (len <= 5) return 10
+  if (len <= 7) return 9
+  return 8
+}
+
 // 점수 기반 티어 시스템 헬퍼
 function tierUp(tier: string): string {
   // 호환용: 기존 코드에서 호출하는 곳이 있다면 다음 티어명 반환 (점수 무관)
@@ -220,16 +229,20 @@ function AdminTab({ summoners, summonerScores, records, nameByUserId, idPrefixMa
                     <span><NameWithIdBadge name={name} idPrefixMap={idPrefixMap} userId={userId} /></span>
                     <button className="btn btn-danger btn-sm" onClick={() => deleteSummoner(userId, name)}>삭제</button>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
                     {LINES.map(line => {
                       const tier = summoners[userId]?.[line]
                       const isEditing = editingUserId === userId && editingLine === line
                       return (
                         <div key={line} style={{
-                          background: 'var(--bg3)', padding: '6px 4px', borderRadius: 'var(--radius)',
-                          textAlign: 'center', fontSize: 11,
+                          background: 'var(--bg3)', padding: '12px 6px 10px',
+                          borderRadius: 'var(--radius-lg)', border: '0.5px solid var(--border)',
+                          textAlign: 'center', transition: 'border-color 0.15s',
                         }}>
-                          <div style={{ color: 'var(--text3)', marginBottom: 4, fontWeight: 600 }}>{line}</div>
+                          <div style={{
+                            fontSize: 10, color: 'var(--text3)', marginBottom: 8,
+                            fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+                          }}>{line}</div>
                           {isEditing ? (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                               <select
@@ -245,14 +258,15 @@ function AdminTab({ summoners, summonerScores, records, nameByUserId, idPrefixMa
                               </div>
                             </div>
                           ) : tier ? (
-                            <div
+                            <span
+                              className="badge b-tier"
                               onClick={() => startEdit(userId, line, tier)}
-                              style={{ cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 2 }}
+                              style={{ fontSize: tierFontSize(tier), padding: '2px 6px', whiteSpace: 'nowrap', cursor: 'pointer' }}
                             >
                               {tier}
-                            </div>
+                            </span>
                           ) : (
-                            <div style={{ color: 'var(--text3)' }}>없음</div>
+                            <span style={{ fontSize: 11, color: 'var(--text3)' }}>없음</span>
                           )}
                         </div>
                       )
@@ -559,14 +573,22 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
 
       <div className="card">
         <div className="card-title">내 라인</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
           {LINES.map(l => (
             <div key={l} style={{
-              background: 'var(--bg3)', padding: '6px 4px', borderRadius: 'var(--radius)',
-              textAlign: 'center', fontSize: 11,
+              background: 'var(--bg3)', padding: '12px 6px 10px',
+              borderRadius: 'var(--radius-lg)', border: '0.5px solid var(--border)',
+              textAlign: 'center', transition: 'border-color 0.15s',
             }}>
-              <div style={{ color: 'var(--text3)', marginBottom: 4, fontWeight: 600 }}>{l}</div>
-              <div>{myLines[l] ?? '없음'}</div>
+              <div style={{
+                fontSize: 10, color: 'var(--text3)', marginBottom: 8,
+                fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+              }}>{l}</div>
+              {myLines[l] ? (
+                <span className="badge b-tier" style={{ fontSize: tierFontSize(myLines[l]!), padding: '2px 6px', whiteSpace: 'nowrap' }}>{myLines[l]}</span>
+              ) : (
+                <span style={{ fontSize: 11, color: 'var(--text3)' }}>없음</span>
+              )}
             </div>
           ))}
         </div>
