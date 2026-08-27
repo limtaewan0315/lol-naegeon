@@ -317,7 +317,7 @@ function AdminTab({ summoners, summonerScores, records, nameByUserId, idPrefixMa
 }
 
 // ── 소환사 관리 탭 ──────────────────────────────────────────────
-function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; onRefresh: () => void }) {
+function MyInfoTab({ summoners, summonerScores, records, idPrefixMap, onRefresh }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; records: GameRecord[]; idPrefixMap: Record<string, string>; onRefresh: () => void }) {
   const [loading, setLoading] = useState(true)
   const [displayId, setDisplayId] = useState('')
   const [summonerName, setSummonerName] = useState<string | null>(null)
@@ -336,6 +336,7 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [newPassword2, setNewPassword2] = useState('')
+  const [myRecordsPage, setMyRecordsPage] = useState(1)
 
   useEffect(() => {
     let cancelled = false
@@ -595,6 +596,102 @@ function MyInfoTab({ summoners, summonerScores, onRefresh }: { summoners: Summon
 
         {error && <div className="error" style={{ marginTop: 8 }}>{error}</div>}
       </div>
+
+      {myUserId && (() => {
+        const myRecords = records.filter(r => r.blue.some(p => p.userId === myUserId) || r.red.some(p => p.userId === myUserId))
+        const win = myRecords.filter(r => {
+          const inBlue = r.blue.some(p => p.userId === myUserId)
+          return (inBlue && r.winner === 'blue') || (!inBlue && r.winner === 'red')
+        }).length
+        const lose = myRecords.length - win
+        const PAGE_SIZE = 10
+        const totalPages = Math.ceil(myRecords.length / PAGE_SIZE)
+        const paged = myRecords.slice((myRecordsPage - 1) * PAGE_SIZE, myRecordsPage * PAGE_SIZE)
+
+        const sortTeam = (team: GameRecord['blue']) => [...team].sort((a, b) => (LINE_ORDER[a.line] ?? 9) - (LINE_ORDER[b.line] ?? 9))
+        const renderPlayer = (p: GameRecord['blue'][number], bg: string, border: string) => {
+          const isMe = p.userId === myUserId
+          return (
+            <div key={p.userId ?? p.name} style={{
+              display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px',
+              background: bg, borderRadius: 999, fontSize: 11,
+              border: isMe ? '1px solid var(--gold, #d4af37)' : `0.5px solid ${border}`,
+              boxShadow: isMe ? '0 0 0 1px rgba(200,170,110,0.4)' : undefined,
+            }}>
+              <span style={{ color: 'var(--text2)', fontSize: 10 }}>{p.line}</span>
+              <span style={{ color: isMe ? 'var(--gold, #d4af37)' : 'var(--text)', fontWeight: isMe ? 700 : 500 }}>
+                {p.name}{isMe ? ' (나)' : ''}
+              </span>
+            </div>
+          )
+        }
+
+        return (
+          <div className="card">
+            <div className="card-title">
+              내 경기 기록 {myRecords.length > 0 ? `(${myRecords.length}전 ${win}승 ${lose}패)` : ''}
+            </div>
+            {myRecords.length === 0 ? (
+              <div className="empty">아직 참여한 경기가 없어요.</div>
+            ) : (
+              paged.map((r, i) => {
+                const inBlue = r.blue.some(p => p.userId === myUserId)
+                const isWin = (inBlue && r.winner === 'blue') || (!inBlue && r.winner === 'red')
+                return (
+                  <div key={r.id} style={{ background: 'var(--bg3)', borderRadius: 'var(--radius)', marginBottom: 8, border: '0.5px solid var(--border)', overflow: 'hidden' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderBottom: '0.5px solid var(--border)' }}>
+                      <span style={{ fontSize: 12, color: 'var(--text3)', width: 20, flexShrink: 0 }}>
+                        {myRecords.length - ((myRecordsPage - 1) * PAGE_SIZE + i)}
+                      </span>
+                      <span className={`badge ${r.winner === 'blue' ? 'b-win' : 'b-lose'}`} style={{ fontSize: 11 }}>
+                        {r.winner === 'blue' ? '🔵 블루승' : '🔴 레드승'} ({isWin ? '승리' : '패배'})
+                      </span>
+                      <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text3)' }}>{r.time}</span>
+                    </div>
+                    <div style={{ padding: '6px 12px', borderBottom: '0.5px solid var(--border)' }}>
+                      <div style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 600, marginBottom: 4 }}>🔵 블루팀</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {sortTeam(r.blue).map(p => renderPlayer(p, 'var(--blue-bg)', 'var(--blue-border)'))}
+                      </div>
+                    </div>
+                    <div style={{ padding: '6px 12px' }}>
+                      <div style={{ fontSize: 10, color: 'var(--red)', fontWeight: 600, marginBottom: 4 }}>🔴 레드팀</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {sortTeam(r.red).map(p => renderPlayer(p, 'var(--red-bg)', 'var(--red-border)'))}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 }}>
+                <button className="btn btn-sm" onClick={() => setMyRecordsPage(1)} disabled={myRecordsPage === 1}>{'<<'}</button>
+                <button className="btn btn-sm" onClick={() => setMyRecordsPage(p => Math.max(1, p - 1))} disabled={myRecordsPage === 1}>{'<'}</button>
+                {Array.from({ length: totalPages }, (_, idx) => idx + 1)
+                  .filter(p => p === 1 || p === totalPages || Math.abs(p - myRecordsPage) <= 1)
+                  .reduce((acc: (number | string)[], p, idx, arr) => {
+                    if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push('...')
+                    acc.push(p)
+                    return acc
+                  }, [])
+                  .map((p, idx) => typeof p === 'string'
+                    ? <span key={idx} style={{ fontSize: 12, color: 'var(--text3)' }}>...</span>
+                    : <button key={idx} className="btn btn-sm" onClick={() => setMyRecordsPage(p as number)}
+                        style={{ background: myRecordsPage === p ? 'var(--blue2)' : undefined, color: myRecordsPage === p ? '#fff' : undefined }}>
+                        {p}
+                      </button>
+                  )
+                }
+                <button className="btn btn-sm" onClick={() => setMyRecordsPage(p => Math.min(totalPages, p + 1))} disabled={myRecordsPage === totalPages}>{'>'}</button>
+                <button className="btn btn-sm" onClick={() => setMyRecordsPage(totalPages)} disabled={myRecordsPage === totalPages}>{'>>'}</button>
+                <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 4 }}>{myRecordsPage}/{totalPages}페이지</span>
+              </div>
+            )}
+          </div>
+        )
+      })()}
     </div>
   )
 }
@@ -3894,11 +3991,16 @@ function MainApp() {
       ) : (
         <>
           <div className="tabs" style={{ background: 'rgba(6,17,31,0.75)' }}>
-            {(['team', 'record', 'ranking', 'hall', 'stats', 'summoners'] as const).map((t, i) => (
+            {(['team', 'ranking', 'hall', 'stats', 'summoners'] as const).map((t, i) => (
               <button key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
-                {['내전방', '전적 기록', '전체 랭킹', '명예의 전당', '개인 통계', '내 정보'][i]}
+                {['내전방', '전체 랭킹', '명예의 전당', '개인 통계', '내 정보'][i]}
               </button>
             ))}
+            {dbIsAdmin && (
+              <button className={`tab${tab === 'record' ? ' active' : ''}`} onClick={() => setTab('record')}>
+                전적 기록
+              </button>
+            )}
             {dbIsAdmin && (
               <button className={`tab${tab === 'requests' ? ' active' : ''}`} onClick={() => setTab('requests')}>
                 허가요청
@@ -3916,12 +4018,12 @@ function MainApp() {
           ) : (
             <>
               {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} inactiveNames={inactiveNames} nameByUserId={nameByUserId} />}
-              {tab === 'record' && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
+              {tab === 'record' && dbIsAdmin && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
               {tab === 'ranking' && <RankingTab records={records} idPrefixMap={idPrefixMap} />}
               {tab === 'hall' && <HallOfFameTab records={records} idPrefixMap={idPrefixMap} />}
               {tab === 'stats' && <StatsTab records={records} summoners={summoners} summonerScores={summonerScores} tierHistory={tierHistory} idPrefixMap={idPrefixMap} nameByUserId={nameByUserId} />}
 
-              {tab === 'summoners' && <MyInfoTab summoners={summoners} summonerScores={summonerScores} onRefresh={fetchAll} />}
+              {tab === 'summoners' && <MyInfoTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} onRefresh={fetchAll} />}
 
               {tab === 'requests' && dbIsAdmin && <ApprovalRequestsTab onRefresh={fetchAll} />}
 
