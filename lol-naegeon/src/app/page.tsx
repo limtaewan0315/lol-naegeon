@@ -2249,6 +2249,15 @@ function resultSignature(r: BalanceResult): string {
   return sigs.join('|')
 }
 
+// 롤 계정("닉네임#태그")을 lol.ps 소환사 검색 URL로 변환 (태그는 #가 아니라 _로 연결하는 형식)
+function riotIdToLolPsUrl(riotId: string): string | null {
+  const parts = riotId.split('#')
+  if (parts.length !== 2) return null
+  const [gameName, tag] = parts
+  if (!gameName.trim() || !tag.trim()) return null
+  return `https://lol.ps/summoner/${encodeURIComponent(`${gameName.trim()}_${tag.trim()}`)}?pid=null`
+}
+
 // ── 내전방 채팅 (방 단위, 방이 사라지면 같이 사라짐) ────────────────────
 type RoomMessage = {
   id: number
@@ -2371,6 +2380,7 @@ function RoomsTab({
   summonerScores,
   records,
   idPrefixMap,
+  riotIdMap,
   onRecord,
   dbIsAdmin,
   inactiveNames,
@@ -2380,6 +2390,7 @@ function RoomsTab({
   summonerScores: SummonerScoreMap
   records: GameRecord[]
   idPrefixMap: Record<string, string>
+  riotIdMap: Record<string, string>
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
   dbIsAdmin: boolean
   inactiveNames: Set<string>
@@ -3452,14 +3463,32 @@ function RoomsTab({
                       <span style={{ fontWeight: 700 }}>{team.label}</span>
                       <span style={{ fontSize: 13, color: 'var(--text2)' }}>{team.score.toFixed(1)}점</span>
                     </div>
-                    {team.players.map(p => (
-                      <div key={p.userId} className="team-player">
-                        <span style={{ width: 36, fontSize: 11, fontWeight: 500, color: 'var(--text2)', flexShrink: 0 }}>{p.line}</span>
-                        <span style={{ flex: 1, fontWeight: 500 }}><NameWithIdBadge name={p.name} idPrefixMap={idPrefixMap} userId={p.userId} /></span>
-                        <span className="badge b-tier" style={{ fontSize: 10 }}>{p.tier}</span>
-                        <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 4 }}>{p.score.toFixed(1)}</span>
-                      </div>
-                    ))}
+                    {team.players.map(p => {
+                      const riotId = riotIdMap[p.userId]
+                      const lolPsUrl = riotId ? riotIdToLolPsUrl(riotId) : null
+                      return (
+                        <div key={p.userId} className="team-player">
+                          <span style={{ width: 36, fontSize: 11, fontWeight: 500, color: 'var(--text2)', flexShrink: 0 }}>{p.line}</span>
+                          <span style={{ flex: 1, fontWeight: 500 }}>
+                            {lolPsUrl ? (
+                              <a
+                                href={lolPsUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ color: 'inherit', textDecoration: 'underline dotted', textUnderlineOffset: 2, cursor: 'pointer' }}
+                                title="lol.ps에서 전적 보기"
+                              >
+                                <NameWithIdBadge name={p.name} idPrefixMap={idPrefixMap} userId={p.userId} />
+                              </a>
+                            ) : (
+                              <NameWithIdBadge name={p.name} idPrefixMap={idPrefixMap} userId={p.userId} />
+                            )}
+                          </span>
+                          <span className="badge b-tier" style={{ fontSize: 10 }}>{p.tier}</span>
+                          <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 4 }}>{p.score.toFixed(1)}</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 ))}
               </div>
@@ -3832,15 +3861,17 @@ function MainApp() {
 
   const [tierHistory, setTierHistory] = useState<{ record_id: number; user_id?: string; name: string; line: string; tier_before: string; tier_after: string }[]>([])
   const [idPrefixMap, setIdPrefixMap] = useState<Record<string, string>>({})
+  const [riotIdMap, setRiotIdMap] = useState<Record<string, string>>({})
   const [inactiveNames, setInactiveNames] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
 
   const fetchAll = useCallback(async () => {
-    const [{ data: recs }, { data: sums }, { data: hist }, { data: prefixes }] = await Promise.all([
+    const [{ data: recs }, { data: sums }, { data: hist }, { data: prefixes }, { data: riotIds }] = await Promise.all([
       supabase.from('records').select('*').order('created_at', { ascending: false }),
       supabase.from('summoners').select('*'),
       supabase.from('tier_history').select('*').order('id', { ascending: true }),
       supabase.rpc('summoner_id_prefixes'),
+      supabase.rpc('member_riot_ids'),
     ])
     if (recs) setRecords(recs)
     if (hist) setTierHistory(hist)
@@ -3848,6 +3879,11 @@ function MainApp() {
       const pm: Record<string, string> = {}
       prefixes.forEach((p: { user_id: string; summoner_name: string; id_prefix: string }) => { pm[p.user_id] = p.id_prefix })
       setIdPrefixMap(pm)
+    }
+    if (riotIds) {
+      const rm: Record<string, string> = {}
+      riotIds.forEach((r: { user_id: string; riot_id: string }) => { rm[r.user_id] = r.riot_id })
+      setRiotIdMap(rm)
     }
     if (sums) {
       const map: SummonerMap = {}
@@ -4066,7 +4102,7 @@ function MainApp() {
             <div className="empty">불러오는 중...</div>
           ) : (
             <>
-              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} inactiveNames={inactiveNames} nameByUserId={nameByUserId} />}
+              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} riotIdMap={riotIdMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} inactiveNames={inactiveNames} nameByUserId={nameByUserId} />}
               {tab === 'record' && dbIsAdmin && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
               {tab === 'ranking' && <RankingTab records={records} idPrefixMap={idPrefixMap} />}
               {tab === 'hall' && <HallOfFameTab records={records} idPrefixMap={idPrefixMap} />}
