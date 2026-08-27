@@ -2473,10 +2473,13 @@ function RoomsTab({
 
   // 경기 기록 시점에 방의 나머지 참가자 전원에게 "새로고침해" 신호를 즉시 쏴주는 채널.
   const reloadChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const [roomClosedNotice, setRoomClosedNotice] = useState(false)
   useEffect(() => {
     if (!myRoom?.id) { reloadChannelRef.current = null; return }
     const channel = supabase.channel(`room-events-${myRoom.id}`)
     channel.on('broadcast', { event: 'reload' }, () => { window.location.reload() })
+    // 4판을 채워서 방이 자동으로 닫힐 때는 곧바로 새로고침하지 않고, 이유를 먼저 안내함
+    channel.on('broadcast', { event: 'room_closed_4games' }, () => { setRoomClosedNotice(true) })
     channel.subscribe()
     reloadChannelRef.current = channel
     return () => { supabase.removeChannel(channel); reloadChannelRef.current = null }
@@ -3121,16 +3124,26 @@ function RoomsTab({
       if (!discordRes.ok) console.error('Discord webhook failed:', discordRes.status, await discordRes.text())
     } catch (e) { console.error('Discord webhook error:', e) }
 
-    // 나머지 참가자들에게 "지금 새로고침해" 신호를 즉시 전송 (폴링 없이 그 순간 바로 반영됨)
+    // 나머지 참가자들에게 신호 전송: 방이 4판을 채워서 닫혔으면 이유 안내, 아니면 그냥 새로고침
     if (reloadChannelRef.current) {
       try {
-        await reloadChannelRef.current.send({ type: 'broadcast', event: 'reload', payload: {} })
-      } catch (e) { console.error('reload broadcast 실패:', e) }
+        await reloadChannelRef.current.send({
+          type: 'broadcast',
+          event: roomShouldClose ? 'room_closed_4games' : 'reload',
+          payload: {},
+        })
+      } catch (e) { console.error('알림 전송 실패:', e) }
     }
 
     setIsRecording(false)
     recordingRef.current = false
-    window.location.reload()
+
+    if (roomShouldClose) {
+      // 방장 본인 화면에도 동일하게 안내 (본인이 보낸 브로드캐스트는 본인한테 안 돌아오므로 직접 처리)
+      setRoomClosedNotice(true)
+    } else {
+      window.location.reload()
+    }
   }
 
   const sortByLine = (arr: TeamPlayer[]) => [...arr].sort((a, b) => (LINE_ORDER[a.line] ?? 9) - (LINE_ORDER[b.line] ?? 9))
@@ -3150,6 +3163,23 @@ function RoomsTab({
 
   if (!myName) {
     return <div className="card"><div className="empty">계정에 연결된 소환사 정보가 없어요. 관리자에게 문의해주세요.</div></div>
+  }
+
+  // ── 방 4판 만료 안내 (다른 화면보다 우선 표시) ──────────────────────
+  if (roomClosedNotice) {
+    return (
+      <div className="card" style={{ maxWidth: 420, margin: '40px auto', textAlign: 'center' }}>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>🏁</div>
+        <div className="card-title" style={{ textAlign: 'center', fontSize: 16, marginBottom: 10 }}>4판 만료</div>
+        <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.6, marginBottom: 20 }}>
+          이 방은 4판을 모두 진행해서 자동으로 종료됐어요.<br />
+          <span style={{ color: 'var(--gold, #d4af37)' }}>피어리스 초기화</span> — 새로운 방부터는 팀 반복 방지 기록도 새로 시작돼요.
+        </div>
+        <button className="btn btn-gold" style={{ width: '100%' }} onClick={() => window.location.reload()}>
+          확인
+        </button>
+      </div>
+    )
   }
 
   // ── 방 안 화면 ──────────────────────────────────────────────
