@@ -2271,7 +2271,7 @@ function RoomChat({ roomId, myName, myUserId }: { roomId: number; myName: string
           rows={2}
           style={{ resize: 'none', overflowY: 'auto', maxHeight: 72, fontFamily: 'inherit', lineHeight: 1.4 }}
         />
-        <button className="btn btn-gold btn-sm" onClick={send} disabled={sending || !input.trim()} style={{ alignSelf: 'flex-end' }}>전송</button>
+        <button className="btn btn-gold btn-sm" onClick={send} disabled={sending || !input.trim()} style={{ alignSelf: 'center' }}>전송</button>
       </div>
     </div>
   )
