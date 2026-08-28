@@ -3102,14 +3102,16 @@ function RoomsTab({
       const fmtPlayer = (p: TeamPlayer, isWinner: boolean) => {
         const beforeTier = summoners[p.userId]?.[p.line] ?? p.tier
         const beforeScore = summonerScores[p.userId]?.[p.line] ?? getScoreByTier(p.tier)
-        const afterScore = isWinner ? beforeScore + 1 : beforeScore - 1
+        const streak = getStreak(p.userId, p.line, updatedRecords)
+        const abs = Math.abs(streak)
+        // 연승/연패 배점: 1~2연속=1점, 3~4연속=2점, 5연속 이상=3점 (서버의 apply_match_score_delta와 동일한 규칙)
+        const actualDelta = abs >= 5 ? 3 : abs >= 3 ? 2 : 1
+        const afterScore = isWinner ? beforeScore + actualDelta : beforeScore - actualDelta
         const afterTier = getTierByScore(afterScore)
         const tierChange = afterTier !== beforeTier
           ? `↳ ${beforeTier} → ${afterTier} ${isWinner ? '▲' : '▼'}`
           : `↳ ${afterTier} (변동없음)`
-        const scoreChange = `↳ ${beforeScore}점 → ${afterScore}점 (${isWinner ? '+1' : '-1'})`
-        const streak = getStreak(p.userId, p.line, updatedRecords)
-        const abs = Math.abs(streak)
+        const scoreChange = `↳ ${beforeScore}점 → ${afterScore}점 (${isWinner ? '+' : '-'}${actualDelta})`
         const streakStr = abs >= 2 ? (streak > 0 ? ` 🔥${abs}연승` : ` 💧${abs}연패`) : ''
         const line1 = `\`${p.line}\` **${p.name}**${streakStr}`
         return [line1, tierChange, scoreChange].join('\n')
