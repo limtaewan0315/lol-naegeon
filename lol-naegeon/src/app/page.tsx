@@ -2454,11 +2454,8 @@ function RoomsTab({
       if (!confirm('방장이 나가면 방이 삭제돼요. 나갈까요?')) return
       await supabase.from('rooms').delete().eq('id', myRoom.id)
     } else {
-      const newMembers = myRoom.members.filter(m => m.user_id !== myUserId)
-      await supabase
-        .from('rooms')
-        .update({ members: newMembers, updated_at: new Date().toISOString() })
-        .eq('id', myRoom.id)
+      const { error: err } = await supabase.rpc('leave_room_member', { p_room_id: myRoom.id })
+      if (err) console.error('방 나가기 실패:', err.message)
     }
     await loadRooms()
   }
@@ -2467,38 +2464,46 @@ function RoomsTab({
     if (!myRoom || !myUserId) return
     const myEntry = myRoom.members.find(m => m.user_id === myUserId)
     if (myEntry?.ready) return // 준비완료 상태에서는 라인 변경 불가 (UI에서도 비활성화되어 있지만 이중 확인)
-    const newMembers = myRoom.members.map(m => {
-      if (m.user_id !== myUserId) return m
-      if (field === 'most1') {
-        if (value === 'any') return { ...m, most1: 'any' as const, most2: null }
-        // M1을 M2와 같은 라인으로 바꾸면, 겹치는 M2는 자동으로 비워줌 (안 그러면 데이터상 M1=M2로 중복 저장됨)
-        const clearedMost2 = m.most2 === value ? null : m.most2
-        return { ...m, most1: value as Line, most2: clearedMost2 }
-      }
-      return { ...m, most2: (value || null) as Line | 'any' | null }
-    })
     const roomId = myRoom.id
-    // 낙관적 업데이트: 서버 응답(왕복)을 기다리지 않고 화면을 즉시 반영해서 클릭 반응성을 높임
-    setRooms(prev => prev.map(r => (r.id === roomId ? { ...r, members: newMembers } : r)))
-    await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', roomId)
+    // 낙관적 업데이트: 내 화면은 즉시 반영 (실제 저장은 서버에서 원자적으로 처리되어 다른 사람 변경과 안 부딪힘)
+    setRooms(prev => prev.map(r => {
+      if (r.id !== roomId) return r
+      const newMembers = r.members.map(m => {
+        if (m.user_id !== myUserId) return m
+        if (field === 'most1') {
+          if (value === 'any') return { ...m, most1: 'any' as const, most2: null }
+          const clearedMost2 = m.most2 === value ? null : m.most2
+          return { ...m, most1: value as Line, most2: clearedMost2 }
+        }
+        return { ...m, most2: (value || null) as Line | 'any' | null }
+      })
+      return { ...r, members: newMembers }
+    }))
+    const { error: err } = await supabase.rpc('set_my_most', { p_room_id: roomId, p_field: field, p_value: value })
+    if (err) { console.error('라인 변경 실패:', err.message); await loadRooms() }
   }
 
   const toggleReady = async () => {
     if (!myRoom || !myUserId) return
-    const newMembers = myRoom.members.map(m => m.user_id === myUserId ? { ...m, ready: !m.ready } : m)
     const roomId = myRoom.id
-    setRooms(prev => prev.map(r => (r.id === roomId ? { ...r, members: newMembers } : r)))
-    await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', roomId)
+    const newReady = !myRoom.members.find(m => m.user_id === myUserId)?.ready
+    setRooms(prev => prev.map(r => r.id === roomId
+      ? { ...r, members: r.members.map(m => m.user_id === myUserId ? { ...m, ready: newReady } : m) }
+      : r))
+    const { error: err } = await supabase.rpc('set_ready', { p_room_id: roomId, p_ready: newReady })
+    if (err) { console.error('준비 상태 변경 실패:', err.message); await loadRooms() }
   }
 
-  // 방장이 다른 참가자를 강퇴 (본인 나가기와 동일하게 members 배열에서 제거) — 계정ID로 정확히 그 사람만 지목
+  // 방장이 다른 참가자를 강퇴 — 계정ID로 정확히 그 사람만 지목, 서버에서 원자적으로 처리
   const kickMember = async (targetUserId: string, targetName: string) => {
     if (!myRoom || !isHost || targetUserId === myRoom.host_user_id) return
     if (!confirm(`${targetName}님을 강퇴할까요?`)) return
-    const newMembers = myRoom.members.filter(m => m.user_id !== targetUserId)
     const roomId = myRoom.id
-    setRooms(prev => prev.map(r => (r.id === roomId ? { ...r, members: newMembers } : r)))
-    await supabase.from('rooms').update({ members: newMembers, updated_at: new Date().toISOString() }).eq('id', roomId)
+    setRooms(prev => prev.map(r => r.id === roomId
+      ? { ...r, members: r.members.filter(m => m.user_id !== targetUserId) }
+      : r))
+    const { error: err } = await supabase.rpc('kick_member', { p_room_id: roomId, p_target_user_id: targetUserId })
+    if (err) { console.error('강퇴 실패:', err.message); await loadRooms() }
   }
 
   // 매칭 방식(라인밸런싱/올랜덤)은 방장만 변경 가능
