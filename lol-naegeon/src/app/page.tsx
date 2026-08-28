@@ -1857,7 +1857,10 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
         padding: 30, width: 340, boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
       }}>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 6 }}>⚔ 내전 매니저</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, fontFamily: "'Rajdhani', sans-serif", fontSize: 30, fontWeight: 700, color: 'var(--gold)', letterSpacing: '0.03em', marginBottom: 8 }}>
+            <span className="hex-mark" style={{ width: 14, height: 14 }} />
+            내전 매니저
+          </div>
           <div style={{ fontSize: 12, color: 'var(--text3)' }}>로그인 / 가입 신청</div>
         </div>
 
@@ -4081,7 +4084,7 @@ function MainApp() {
 
       <div className="header" style={{ background: 'transparent', backdropFilter: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <div className="header-title">⚔ 내전 매니저</div>
+          <div className="header-title"><span className="hex-mark" /> 내전 매니저</div>
           <div className="header-sub">티어·라인 기반 팀 균형 매칭 + 전적 기록</div>
         </div>
         <button
