@@ -1,29 +1,32 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Rajdhani:wght@500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap');
 
 :root {
   --bg: #0a0e17;
-  --bg2: #111827;
-  --bg3: #1a2235;
-  --border: rgba(200,170,110,0.15);
-  --border2: rgba(200,170,110,0.3);
+  --bg2: #10151f;
+  --bg3: #171e2c;
+  --border: rgba(255,255,255,0.05);
+  --border2: rgba(255,255,255,0.09);
   --gold: #c8aa6e;
-  --gold2: #f0e6c8;
+  --gold2: #e0c68f;
   --gold3: #a68a52;
   --gold-deep: #8a6d2f;
-  --blue: #1e90ff;
-  --blue2: #2f6fd6;
-  --blue-bg: rgba(30,144,255,0.1);
-  --blue-border: rgba(30,144,255,0.3);
-  --red: #e84057;
-  --red-bg: rgba(232,64,87,0.1);
-  --red-border: rgba(232,64,87,0.3);
+  --blue: #4f8ef7;
+  --blue2: #3f74d6;
+  --blue-bg: rgba(79,142,247,0.1);
+  --blue-border: rgba(79,142,247,0.22);
+  --red: #ef5468;
+  --red-bg: rgba(239,84,104,0.1);
+  --red-border: rgba(239,84,104,0.2);
   --green: #3ecf8e;
   --green-bg: rgba(62,207,142,0.1);
-  --text: #e8e0d0;
-  --text2: #9a8f7e;
-  --text3: #5a5348;
-  --radius: 8px;
-  --radius-lg: 14px;
+  --text: #eae3d6;
+  --text2: #99917f;
+  --text3: #5f5847;
+  --radius: 10px;
+  --radius-lg: 18px;
+  --shadow-card: 0 1px 2px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.035);
+  --shadow-inset: inset 0 0 0 1px rgba(255,255,255,0.03);
+  --shadow-pop: 0 10px 30px rgba(0,0,0,0.35);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -33,16 +36,17 @@ body {
   color: var(--text);
   font-family: 'Noto Sans KR', sans-serif;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* 배경 패턴 */
+/* 배경 패턴: 부드러운 이중 광원 느낌 */
 body::before {
   content: '';
   position: fixed;
   inset: 0;
   background-image:
-    radial-gradient(ellipse at 20% 20%, rgba(200,170,110,0.05) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 80%, rgba(30,144,255,0.04) 0%, transparent 50%);
+    radial-gradient(ellipse at 15% 10%, rgba(200,170,110,0.05) 0%, transparent 45%),
+    radial-gradient(ellipse at 85% 90%, rgba(79,142,247,0.045) 0%, transparent 45%);
   pointer-events: none;
   z-index: 0;
 }
@@ -55,49 +59,32 @@ body::before {
   padding: 2rem 1rem;
 }
 
-/* 헥스텍 포인트: 육각형 시그니처 마커 (헤더, 카드 타이틀 등에서 재사용) */
-.hex-mark {
-  display: inline-block;
-  width: 9px;
-  height: 9px;
-  flex-shrink: 0;
-  background: linear-gradient(135deg, var(--gold2), var(--gold), var(--gold-deep));
-  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
-}
-
 /* 헤더 */
 .header {
   text-align: center;
   margin-bottom: 2rem;
 }
 .header-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-family: 'Rajdhani', sans-serif;
-  font-size: 2.2rem;
-  font-weight: 700;
-  color: var(--gold);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-size: 1.9rem;
+  font-weight: 800;
+  color: var(--gold2);
+  letter-spacing: -0.01em;
 }
-.header-title .hex-mark { width: 16px; height: 16px; }
 .header-sub {
   font-size: 13px;
   color: var(--text2);
   margin-top: 6px;
-  letter-spacing: 0.02em;
 }
 
 /* 탭 */
 .tabs {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   background: var(--bg2);
-  border: 0.5px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 4px;
   margin-bottom: 1.5rem;
+  box-shadow: var(--shadow-card);
 }
 .tab {
   flex: 1;
@@ -106,55 +93,32 @@ body::before {
   font-weight: 500;
   font-family: 'Noto Sans KR', sans-serif;
   border: none;
-  border-radius: var(--radius);
+  border-radius: calc(var(--radius-lg) - 4px);
   background: transparent;
   color: var(--text2);
   cursor: pointer;
   transition: all 0.15s;
-  position: relative;
 }
 .tab:hover { color: var(--text); }
 .tab.active {
   background: var(--bg3);
   color: var(--gold2);
-}
-.tab.active::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  bottom: -1px;
-  transform: translateX(-50%);
-  width: 20px;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  box-shadow: var(--shadow-inset);
 }
 
 /* 카드 */
 .card {
   background: var(--bg2);
-  border: 0.5px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 1.25rem;
+  padding: 1.4rem;
   margin-bottom: 1rem;
+  box-shadow: var(--shadow-card);
 }
 .card-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--gold);
-  margin-bottom: 1rem;
-  letter-spacing: 0.03em;
-}
-.card-title::before {
-  content: '';
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  flex-shrink: 0;
-  background: linear-gradient(135deg, var(--gold2), var(--gold), var(--gold-deep));
-  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--gold2);
+  margin-bottom: 1.1rem;
 }
 
 /* 폼 */
@@ -166,100 +130,94 @@ body::before {
   margin-bottom: 10px;
 }
 input, select {
-  padding: 8px 12px;
+  padding: 9px 13px;
   font-size: 13px;
   font-family: 'Noto Sans KR', sans-serif;
-  border: 0.5px solid var(--border2);
+  border: none;
   border-radius: var(--radius);
   background: var(--bg3);
   color: var(--text);
   width: 100%;
   outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  box-shadow: var(--shadow-inset);
+  transition: box-shadow 0.15s;
 }
-input:focus, select:focus { border-color: var(--gold); box-shadow: 0 0 0 2px rgba(200,170,110,0.12); }
+input:focus, select:focus { box-shadow: 0 0 0 2px rgba(200,170,110,0.35); }
+input::placeholder { color: var(--text3); }
 select option { background: var(--bg3); }
 
-/* 라디오/체크박스는 위 input 공통 스타일(배경/패딩/테두리)이 적용되면
-   네이티브 체크 표시가 안 보이게 되므로 별도로 초기화함 */
-input[type="radio"], input[type="checkbox"] {
+/* 라디오/체크박스/슬라이더는 위 input 공통 스타일(배경/패딩)이 적용되면
+   네이티브 표시가 안 보이게 되므로 별도로 초기화함 */
+input[type="radio"], input[type="checkbox"], input[type="range"] {
   width: auto;
   padding: 0;
   border: none;
   background: none;
-  accent-color: var(--gold);
-  cursor: pointer;
-}
-
-/* range 슬라이더도 같은 이유로 배경/패딩 초기화 */
-input[type="range"] {
-  padding: 0;
-  border: none;
-  background: none;
+  box-shadow: none;
   accent-color: var(--gold);
   cursor: pointer;
 }
 
 /* 버튼 */
 .btn {
-  padding: 8px 16px;
+  padding: 9px 18px;
   font-size: 13px;
   font-family: 'Noto Sans KR', sans-serif;
   font-weight: 500;
-  border: 0.5px solid var(--border2);
+  border: none;
   border-radius: var(--radius);
-  background: transparent;
+  background: var(--bg3);
   color: var(--text);
   cursor: pointer;
   white-space: nowrap;
+  box-shadow: var(--shadow-inset);
   transition: all 0.15s;
 }
-.btn:hover { background: var(--bg3); border-color: var(--gold); color: var(--gold); }
+.btn:hover { background: #1c2436; color: var(--gold2); }
 .btn:active { transform: scale(0.98); }
 .btn-gold {
-  background: linear-gradient(135deg, var(--gold2), var(--gold) 55%, var(--gold-deep));
-  color: #1a1206;
-  border-color: var(--gold);
+  background: linear-gradient(135deg, var(--gold2), var(--gold));
+  color: #201705;
   font-weight: 700;
+  box-shadow: 0 4px 14px rgba(200,170,110,0.22);
 }
-.btn-gold:hover { filter: brightness(1.08); box-shadow: 0 0 0 3px rgba(200,170,110,0.15); }
-.btn-blue { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); }
-.btn-blue:hover { background: rgba(30,144,255,0.2); color: var(--blue); }
-.btn-red { background: var(--red-bg); color: var(--red); border-color: var(--red-border); }
-.btn-red:hover { background: rgba(232,64,87,0.2); color: var(--red); }
-.btn-danger { color: var(--red); border-color: var(--red-border); font-size: 12px; padding: 3px 10px; }
-.btn-danger:hover { background: var(--red-bg); }
-.btn-sm { font-size: 12px; padding: 4px 10px; }
+.btn-gold:hover { filter: brightness(1.06); box-shadow: 0 4px 18px rgba(200,170,110,0.32); }
+.btn-blue { background: var(--blue-bg); color: var(--blue); }
+.btn-blue:hover { background: rgba(79,142,247,0.18); color: var(--blue); }
+.btn-red { background: var(--red-bg); color: var(--red); }
+.btn-red:hover { background: rgba(239,84,104,0.18); color: var(--red); }
+.btn-danger { color: var(--red); background: var(--red-bg); font-size: 12px; padding: 4px 11px; }
+.btn-danger:hover { background: rgba(239,84,104,0.18); }
+.btn-sm { font-size: 12px; padding: 5px 12px; }
 
 /* 참가자 목록 */
 .player-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 12px;
+  padding: 10px 13px;
   background: var(--bg3);
   border-radius: var(--radius);
   font-size: 13px;
   margin-bottom: 6px;
-  border: 0.5px solid transparent;
-  transition: border-color 0.15s;
+  box-shadow: var(--shadow-inset);
+  transition: box-shadow 0.15s;
 }
-.player-row:hover { border-color: var(--border); }
+.player-row:hover { box-shadow: inset 0 0 0 1px rgba(200,170,110,0.2); }
 
 /* 배지 */
 .badge {
-  padding: 2px 9px;
-  border-radius: 999px;
+  padding: 3px 10px;
+  border-radius: 7px;
   font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
+  font-weight: 600;
   white-space: nowrap;
 }
-.b-tier { background: rgba(200,170,110,0.1); color: var(--gold); border: 0.5px solid rgba(200,170,110,0.25); }
-.b-line { background: rgba(62,207,142,0.08); color: var(--green); border: 0.5px solid rgba(62,207,142,0.22); }
-.b-score { background: rgba(30,144,255,0.08); color: var(--blue); border: 0.5px solid rgba(30,144,255,0.22); }
-.b-win { background: rgba(62,207,142,0.08); color: var(--green); border: 0.5px solid rgba(62,207,142,0.22); }
-.b-lose { background: var(--red-bg); color: var(--red); border: 0.5px solid var(--red-border); }
+.b-tier { background: rgba(200,170,110,0.14); color: var(--gold2); }
+.b-line { background: rgba(62,207,142,0.12); color: var(--green); }
+.b-score { background: rgba(79,142,247,0.12); color: var(--blue); }
+.b-win { background: rgba(62,207,142,0.12); color: var(--green); }
+.b-lose { background: var(--red-bg); color: var(--red); }
 
 /* 팀 그리드 */
 .teams-grid {
@@ -271,35 +229,25 @@ input[type="range"] {
 .team-card {
   background: var(--bg2);
   border-radius: var(--radius-lg);
-  padding: 1rem;
-  border: 0.5px solid var(--border);
-  position: relative;
-  overflow: hidden;
+  padding: 1.1rem;
+  box-shadow: var(--shadow-card);
 }
-.team-card::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 2px;
-}
-.team-card.blue { border-color: var(--blue-border); }
-.team-card.blue::before { background: linear-gradient(90deg, transparent, var(--blue), transparent); }
-.team-card.red { border-color: var(--red-border); }
-.team-card.red::before { background: linear-gradient(90deg, transparent, var(--red), transparent); }
+.team-card.blue { box-shadow: var(--shadow-card), inset 3px 0 0 var(--blue); }
+.team-card.red { box-shadow: var(--shadow-card), inset 3px 0 0 var(--red); }
 .team-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 0.75rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 0.5px solid var(--border);
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
 }
 .team-player {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 0;
-  border-bottom: 0.5px solid var(--border);
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
   font-size: 13px;
 }
 .team-player:last-child { border-bottom: none; }
@@ -314,12 +262,12 @@ input[type="range"] {
 .stat-box {
   background: var(--bg3);
   border-radius: var(--radius);
-  padding: 0.75rem 1rem;
+  padding: 0.85rem 1rem;
   text-align: center;
-  border: 0.5px solid var(--border);
+  box-shadow: var(--shadow-inset);
 }
-.stat-label { font-size: 11px; color: var(--text2); margin-bottom: 4px; letter-spacing: 0.02em; }
-.stat-value { font-size: 22px; font-weight: 700; font-family: 'Rajdhani', sans-serif; color: var(--gold); }
+.stat-label { font-size: 11px; color: var(--text2); margin-bottom: 4px; }
+.stat-value { font-size: 22px; font-weight: 700; color: var(--gold2); }
 .stat-value.blue-v { color: var(--blue); }
 .stat-value.red-v { color: var(--red); }
 
@@ -328,38 +276,36 @@ input[type="range"] {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 11px 13px;
   background: var(--bg3);
   border-radius: var(--radius);
   font-size: 12px;
   margin-bottom: 6px;
-  border: 0.5px solid transparent;
-  transition: border-color 0.15s;
+  box-shadow: var(--shadow-inset);
 }
-.record-row:hover { border-color: var(--border); }
 
 /* 승률 바 */
 .wr-bar-bg {
   flex: 1;
-  height: 4px;
-  background: var(--bg3);
-  border-radius: 2px;
+  height: 5px;
+  background: var(--bg);
+  border-radius: 3px;
   overflow: hidden;
 }
-.wr-bar { height: 100%; background: var(--blue); border-radius: 2px; transition: width 0.4s ease; }
+.wr-bar { height: 100%; background: var(--blue); border-radius: 3px; transition: width 0.4s ease; }
 
 /* 에러 */
 .error { color: var(--red); font-size: 13px; padding: 4px 0; }
 
 /* count bar */
 .count-bar { font-size: 13px; color: var(--text2); margin-bottom: 0.75rem; }
-.count-bar span { color: var(--gold); font-weight: 500; }
+.count-bar span { color: var(--gold2); font-weight: 600; }
 
 /* 빈 상태 */
 .empty { font-size: 13px; color: var(--text3); padding: 4px 0; }
 
 /* 분리선 */
-.divider { border: none; border-top: 0.5px solid var(--border); margin: 1rem 0; }
+.divider { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
 
 /* 내전방 레이아웃: 본문 + 오른쪽 채팅 사이드바 */
 .room-layout {
@@ -370,21 +316,21 @@ input[type="range"] {
 }
 .room-chat {
   background: var(--bg2);
-  border: 0.5px solid var(--border);
   border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   height: 520px;
   position: sticky;
   top: 12px;
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
 }
 .room-chat-header {
-  padding: 10px 12px;
-  border-bottom: 0.5px solid var(--border);
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
   font-size: 12px;
   color: var(--text3);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-weight: 600;
 }
 .room-chat-messages {
   flex: 1;
@@ -397,8 +343,8 @@ input[type="range"] {
 .room-chat-input {
   display: flex;
   gap: 6px;
-  padding: 8px;
-  border-top: 0.5px solid var(--border);
+  padding: 10px;
+  border-top: 1px solid var(--border);
 }
 .room-chat-input input, .room-chat-input textarea { flex: 1; }
 
