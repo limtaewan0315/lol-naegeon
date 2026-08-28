@@ -843,18 +843,16 @@ function RecordTab({ records, onDelete, onClear, isAdmin }: {
 }
 
 // ── 개인 통계 탭 ──────────────────────────────────────────────
-function StatsTab({ records, summoners, summonerScores, tierHistory, idPrefixMap, nameByUserId }: {
+function StatsTab({ records, summoners, summonerScores, idPrefixMap, nameByUserId }: {
   records: GameRecord[]
   summoners: SummonerMap
   summonerScores: SummonerScoreMap
-  tierHistory: { record_id: number; user_id?: string; name: string; line: string; tier_before: string; tier_after: string }[]
   idPrefixMap: Record<string, string>
   nameByUserId: Record<string, string>
 }) {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<{ key: string; name: string } | null>(null)
   const [suggestions, setSuggestions] = useState<{ key: string; name: string }[]>([])
-  const [openGraphLine, setOpenGraphLine] = useState<string | null>(null)
   const [oppSearch, setOppSearch] = useState('')
   const [oppSelected, setOppSelected] = useState<{ key: string; name: string } | null>(null)
   const [oppSuggestions, setOppSuggestions] = useState<{ key: string; name: string }[]>([])
@@ -1018,43 +1016,6 @@ function StatsTab({ records, summoners, summonerScores, tierHistory, idPrefixMap
   }
 
   // 티어 히스토리 그래프 (해당 소환사 + 라인별) — 계정ID 기준, 없으면 이름으로 대체(옛날 기록 호환)
-  const getTierGraph = (key: string) => {
-    const twoWeeksAgo = new Date()
-    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14)
-    const history = tierHistory
-      .filter(h => {
-        const hKey = h.user_id ?? h.name
-        if (hKey !== key) return false
-        const createdAt = (h as any).created_at
-        if (!createdAt) return true // created_at 없으면 포함
-        return new Date(createdAt) >= twoWeeksAgo
-      })
-      .slice()
-      .reverse()
-    return history
-  }
-
-  const fmtDate = (dateStr: string) => {
-    if (!dateStr) return ''
-    const d = new Date(dateStr)
-    if (isNaN(d.getTime())) return ''
-    return `${d.getMonth() + 1}/${d.getDate()}`
-  }
-
-  // 티어 점수 (그래프용 간단 수치)
-  const TIER_SCORE: Record<string, number> = {
-    '언랭': 1, '실버2': 2, '실버1': 3, '골드4': 4, '골드3': 5, '골드2': 6, '골드1': 7,
-    '플래티넘4': 8, '플래티넘3': 9, '플래티넘2': 10, '플래티넘1': 11,
-    '에메랄드4': 12, '에메랄드3': 13, '에메랄드2': 14, '에메랄드1': 15,
-    '다이아4': 16, '다이아3': 17, '다이아2': 18, '다이아1': 19,
-    '마스터 0층': 20, '마스터 1층': 21, '마스터 2층': 22, '마스터 3층': 23,
-    '마스터 4층': 24, '마스터 5층': 25, '마스터 6층': 26, '마스터 7층': 27,
-    '그랜드마스터 8층': 28, '그랜드마스터 9층': 29, '그랜드마스터 10층': 30,
-    '그랜드마스터 11층': 31, '그랜드마스터 12층': 32, '그랜드마스터 13층': 33,
-    '그랜드마스터 14층': 34, '챌린저 15층': 35, '챌린저 16층': 36,
-    '챌린저 17층': 37, '리그오브레전드': 38,
-  }
-
   const OX = ({ results }: { results: boolean[] }) => (
     <div style={{ display: 'flex', gap: 3 }}>
       {results.slice(0, 5).map((isWin, idx) => (
@@ -1099,7 +1060,6 @@ function StatsTab({ records, summoners, summonerScores, tierHistory, idPrefixMap
           if (total === 0) return <div className="empty">전적이 없어요.</div>
           const wr = Math.round(win / total * 100)
           const sortedLines = (Object.keys(lines) as Line[]).sort((a, b) => LINE_ORDER[a] - LINE_ORDER[b])
-          const tierGraph = getTierGraph(selKey)
 
           // 마지막 게임 날짜 계산 (records는 최신순 정렬되어 있음)
           const lastGame = records.find(r => r.blue.some(p => keyOf(p) === selKey) || r.red.some(p => keyOf(p) === selKey))
@@ -1143,91 +1103,30 @@ function StatsTab({ records, summoners, summonerScores, tierHistory, idPrefixMap
                 const ls = lines[l]
                 const lTotal = ls.win + ls.lose
                 const lWr = Math.round(ls.win / lTotal * 100)
-
                 const lineStreak = getLineStreak(selKey, l)
-                const lineHistory = tierGraph.filter(h => h.line === l)
-                const isGraphOpen = openGraphLine === l
-                const hasGraph = lineHistory.length > 0
-
-                // 날짜별 1포인트 그래프 데이터
-                const graphPts: { score: number; tier: string; date: string; up: boolean | null }[] = []
-                if (lineHistory.length > 0) {
-                  graphPts.push({ score: TIER_SCORE[lineHistory[0].tier_before] ?? 5, tier: lineHistory[0].tier_before, date: fmtDate((lineHistory[0] as any).created_at ?? ''), up: null })
-                  lineHistory.forEach(h => {
-                    graphPts.push({ score: TIER_SCORE[h.tier_after] ?? 5, tier: h.tier_after, date: fmtDate((h as any).created_at ?? ''), up: (TIER_SCORE[h.tier_after] ?? 5) > (TIER_SCORE[h.tier_before] ?? 5) })
-                  })
-                }
-                const minS = graphPts.length > 0 ? Math.min(...graphPts.map(p => p.score)) - 1 : 0
-                const maxS = graphPts.length > 0 ? Math.max(...graphPts.map(p => p.score)) + 1 : 10
-                const rng = maxS - minS || 1
-                const GW = Math.max(260, graphPts.length * 40), GH = 65
-                const svgPts = graphPts.map((p, i) => ({
-                  x: graphPts.length === 1 ? GW/2 : (i / (graphPts.length - 1)) * GW,
-                  y: GH - ((p.score - minS) / rng) * GH,
-                  p
-                }))
-                const pathD = svgPts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
 
                 return (
-                  <div key={l} style={{ background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)', marginBottom: 6, overflow: 'hidden' }}>
-                    <div style={{ padding: '10px 12px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                        <span className="badge b-line">{l}</span>
-                        {summoners[selKey]?.[l] && (
-                          <>
-                            <span className="badge b-tier">{summoners[selKey][l]}</span>
-                            <span style={{ fontSize: 11, color: 'var(--text3)' }}>{summonerScores[selKey]?.[l] ?? '-'}점</span>
-                          </>
-                        )}
-                        <span className="badge b-win" style={{ fontSize: 10 }}>{ls.win}승</span>
-                        <span className="badge b-lose" style={{ fontSize: 10 }}>{ls.lose}패</span>
-                        <span style={{ fontSize: 11, color: 'var(--text2)' }}>{lTotal}판</span>
+                  <div key={l} style={{ background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)', marginBottom: 6, padding: '10px 12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <span className="badge b-line">{l}</span>
+                      {summoners[selKey]?.[l] && (
+                        <>
+                          <span className="badge b-tier">{summoners[selKey][l]}</span>
+                          <span style={{ fontSize: 11, color: 'var(--text3)' }}>{summonerScores[selKey]?.[l] ?? '-'}점</span>
+                        </>
+                      )}
+                      <span className="badge b-win" style={{ fontSize: 10 }}>{ls.win}승</span>
+                      <span className="badge b-lose" style={{ fontSize: 10 }}>{ls.lose}패</span>
+                      <span style={{ fontSize: 11, color: 'var(--text2)' }}>{lTotal}판</span>
 
-                        <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 600, color: lWr >= 50 ? 'var(--green)' : 'var(--red)' }}>{lWr}%</span>
-                        {hasGraph && (
-                          <button onClick={() => setOpenGraphLine(isGraphOpen ? null : l)} style={{
-                            padding: '3px 8px', fontSize: 10, border: `1px solid ${isGraphOpen ? 'var(--gold)' : 'rgba(200,155,60,0.35)'}`,
-                            borderRadius: 3, background: isGraphOpen ? 'rgba(200,155,60,0.12)' : 'rgba(200,155,60,0.04)',
-                            color: 'var(--gold)', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0
-                          }}>
-                            📈 티어그래프 {isGraphOpen ? '▲' : '▼'}
-                          </button>
-                        )}
-                      </div>
-                      {/* 최근 5판 + 라인 연승/연패 */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontSize: 10, color: 'var(--text3)' }}>최근</span>
-                        <OX results={ls.recent} />
-                        {getStreakDisplay(lineStreak)}
-                      </div>
+                      <span style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 600, color: lWr >= 50 ? 'var(--green)' : 'var(--red)' }}>{lWr}%</span>
                     </div>
-                    {/* 티어 그래프 */}
-                    {isGraphOpen && hasGraph && (
-                      <div style={{ padding: '0 12px 12px', borderTop: '0.5px solid var(--border)' }}>
-                        <div style={{ fontSize: 10, color: 'var(--text3)', margin: '8px 0 6px', letterSpacing: '0.05em' }}>게임 참여일 기준 · 최근 2주</div>
-                        <div style={{ overflowX: 'auto' }}>
-                          <svg width={GW} height={GH + 32} style={{ overflow: 'visible', display: 'block' }}>
-                            {[0, 0.5, 1].map((t, i) => (
-                              <line key={i} x1={0} y1={GH * t} x2={GW} y2={GH * t} stroke="rgba(80,130,190,0.08)" strokeWidth={1} />
-                            ))}
-                            <path d={pathD} fill="none" stroke="rgba(11,196,227,0.5)" strokeWidth={2} />
-                            {svgPts.map((sp, i) => {
-                              const isStart = sp.p.up === null
-                              const col = isStart ? '#3a5a78' : sp.p.up ? 'var(--green)' : 'var(--red)'
-                              return (
-                                <g key={i}>
-                                  <circle cx={sp.x} cy={sp.y} r={isStart ? 3 : 5} fill={col} stroke="var(--bg)" strokeWidth={1.5} />
-                                  <text x={sp.x} y={sp.y - 8} textAnchor="middle" fontSize={7} fill={col}>
-                                    {sp.p.tier.replace('플래티넘','플').replace('에메랄드','에').replace('실버','실').replace('골드','골').replace(' 이하','↓')}
-                                  </text>
-                                  <text x={sp.x} y={GH + 20} textAnchor="middle" fontSize={7} fill="#3a5a78">{sp.p.date}</text>
-                                </g>
-                              )
-                            })}
-                          </svg>
-                        </div>
-                      </div>
-                    )}
+                    {/* 최근 5판 + 라인 연승/연패 */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 10, color: 'var(--text3)' }}>최근</span>
+                      <OX results={ls.recent} />
+                      {getStreakDisplay(lineStreak)}
+                    </div>
                   </div>
                 )
               })}
@@ -3887,22 +3786,19 @@ function MainApp() {
   const [summonerScores, setSummonerScores] = useState<SummonerScoreMap>({})
   const [nameByUserId, setNameByUserId] = useState<Record<string, string>>({})
 
-  const [tierHistory, setTierHistory] = useState<{ record_id: number; user_id?: string; name: string; line: string; tier_before: string; tier_after: string }[]>([])
   const [idPrefixMap, setIdPrefixMap] = useState<Record<string, string>>({})
   const [riotIdMap, setRiotIdMap] = useState<Record<string, string>>({})
   const [inactiveNames, setInactiveNames] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
 
   const fetchAll = useCallback(async () => {
-    const [{ data: recs }, { data: sums }, { data: hist }, { data: prefixes }, { data: riotIds }] = await Promise.all([
+    const [{ data: recs }, { data: sums }, { data: prefixes }, { data: riotIds }] = await Promise.all([
       supabase.from('records').select('*').order('created_at', { ascending: false }),
       supabase.from('summoners').select('*'),
-      supabase.from('tier_history').select('*').order('id', { ascending: true }),
       supabase.rpc('summoner_id_prefixes'),
       supabase.rpc('member_riot_ids'),
     ])
     if (recs) setRecords(recs)
-    if (hist) setTierHistory(hist)
     if (prefixes) {
       const pm: Record<string, string> = {}
       prefixes.forEach((p: { user_id: string; summoner_name: string; id_prefix: string }) => { pm[p.user_id] = p.id_prefix })
@@ -4134,7 +4030,7 @@ function MainApp() {
               {tab === 'record' && dbIsAdmin && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
               {tab === 'ranking' && <RankingTab records={records} idPrefixMap={idPrefixMap} />}
               {tab === 'hall' && <HallOfFameTab records={records} idPrefixMap={idPrefixMap} />}
-              {tab === 'stats' && <StatsTab records={records} summoners={summoners} summonerScores={summonerScores} tierHistory={tierHistory} idPrefixMap={idPrefixMap} nameByUserId={nameByUserId} />}
+              {tab === 'stats' && <StatsTab records={records} summoners={summoners} summonerScores={summonerScores} idPrefixMap={idPrefixMap} nameByUserId={nameByUserId} />}
 
               {tab === 'summoners' && <MyInfoTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} onRefresh={fetchAll} />}
 
