@@ -236,8 +236,8 @@ function AdminTab({ summoners, summonerScores, records, nameByUserId, idPrefixMa
                       return (
                         <div key={line} style={{
                           background: 'var(--bg3)', padding: '12px 6px 10px',
-                          borderRadius: 'var(--radius-lg)', border: '0.5px solid var(--border)',
-                          textAlign: 'center', transition: 'border-color 0.15s',
+                          borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-inset)',
+                          textAlign: 'center', transition: 'box-shadow 0.15s',
                         }}>
                           <div style={{
                             fontSize: 10, color: 'var(--text3)', marginBottom: 8,
@@ -591,8 +591,8 @@ function MyInfoTab({ summoners, summonerScores, records, idPrefixMap, onRefresh 
             return (
               <div key={l} style={{
                 background: 'var(--bg3)', padding: '10px 4px 8px',
-                borderRadius: 'var(--radius-lg)', border: '0.5px solid var(--border)',
-                textAlign: 'center', transition: 'border-color 0.15s',
+                borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-inset)',
+                textAlign: 'center', transition: 'box-shadow 0.15s',
               }}>
                 <div style={{ fontSize: 13, color: 'var(--gold)', marginBottom: 3, fontWeight: 700 }}>{l}</div>
                 {myLines[l] ? (
@@ -1752,12 +1752,11 @@ function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void }) {
       background: 'linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%)', padding: 20
     }}>
       <div style={{
-        background: 'var(--bg2)', border: '0.5px solid var(--border2)', borderRadius: 'var(--radius)',
-        padding: 30, width: 340, boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
+        background: 'var(--bg2)', borderRadius: 'var(--radius-lg)',
+        padding: 30, width: 340, boxShadow: 'var(--shadow-pop)'
       }}>
         <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, fontFamily: "'Rajdhani', sans-serif", fontSize: 30, fontWeight: 700, color: 'var(--gold)', letterSpacing: '0.03em', marginBottom: 8 }}>
-            <span className="hex-mark" style={{ width: 14, height: 14 }} />
+          <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--gold2)', marginBottom: 8 }}>
             내전 매니저
           </div>
           <div style={{ fontSize: 12, color: 'var(--text3)' }}>로그인 / 가입 신청</div>
@@ -3985,7 +3984,7 @@ function MainApp() {
 
       <div className="header" style={{ background: 'transparent', backdropFilter: 'none', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <div className="header-title"><span className="hex-mark" /> 내전 매니저</div>
+          <div className="header-title">내전 매니저</div>
           <div className="header-sub">티어·라인 기반 팀 균형 매칭 + 전적 기록</div>
         </div>
         <button
