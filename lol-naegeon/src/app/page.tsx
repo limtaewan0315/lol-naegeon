@@ -3896,23 +3896,18 @@ function MainApp() {
     // 삭제할 전적 정보 조회 (승/패 참가자)
     const target = records.find(r => r.id === id)
     if (target) {
-      const winners = target.winner === 'blue' ? target.blue : target.red
-      const losers = target.winner === 'blue' ? target.red : target.blue
-      // 승리자는 +1점 받았으니 -1점으로 되돌리고, 패배자는 -1점 받았으니 +1점으로 되돌림
-      for (const p of winners) {
-        const { data: row } = await supabase.from('summoners').select('score, tier').eq('name', p.name).eq('line', p.line).single()
+      // 실제로 그 경기에서 각 사람에게 적용됐던 정확한 값(score_events)을 그대로 반대로 되돌림
+      // (연승/연패로 ±2, ±3이 적용됐을 수 있으므로 무조건 ±1이 아니라 실제 적용값 기준으로 되돌려야 함)
+      const { data: events } = await supabase.from('score_events').select('user_id, line, delta').eq('record_id', id)
+      for (const ev of events ?? []) {
+        if (!ev.user_id) continue
+        const { data: row } = await supabase.from('summoners').select('score, tier').eq('user_id', ev.user_id).eq('line', ev.line).single()
         if (row) {
-          const newScore = (row.score ?? getScoreByTier(row.tier)) - 1
-          await supabase.from('summoners').update({ score: newScore, tier: getTierByScore(newScore) }).eq('name', p.name).eq('line', p.line)
+          const newScore = (row.score ?? getScoreByTier(row.tier)) - ev.delta
+          await supabase.from('summoners').update({ score: newScore, tier: getTierByScore(newScore) }).eq('user_id', ev.user_id).eq('line', ev.line)
         }
       }
-      for (const p of losers) {
-        const { data: row } = await supabase.from('summoners').select('score, tier').eq('name', p.name).eq('line', p.line).single()
-        if (row) {
-          const newScore = (row.score ?? getScoreByTier(row.tier)) + 1
-          await supabase.from('summoners').update({ score: newScore, tier: getTierByScore(newScore) }).eq('name', p.name).eq('line', p.line)
-        }
-      }
+      await supabase.from('score_events').delete().eq('record_id', id)
     }
     await supabase.from('tier_history').delete().eq('record_id', id)
     await supabase.from('records').delete().eq('id', id)
@@ -3923,25 +3918,19 @@ function MainApp() {
   const clearRecords = async () => {
     if (!confirm('전체 기록을 삭제할까요? 티어(점수)도 전부 0판 상태로 롤백돼요!')) return
     if (!checkPassword()) return
-    // 모든 전적을 역순으로 롤백
+    // 모든 전적을 역순으로 롤백 — 각 경기에 실제 적용됐던 값(score_events)을 정확히 되돌림
     for (const r of records) {
-      const winners = r.winner === 'blue' ? r.blue : r.red
-      const losers = r.winner === 'blue' ? r.red : r.blue
-      for (const p of winners) {
-        const { data: row } = await supabase.from('summoners').select('score, tier').eq('name', p.name).eq('line', p.line).single()
+      const { data: events } = await supabase.from('score_events').select('user_id, line, delta').eq('record_id', r.id)
+      for (const ev of events ?? []) {
+        if (!ev.user_id) continue
+        const { data: row } = await supabase.from('summoners').select('score, tier').eq('user_id', ev.user_id).eq('line', ev.line).single()
         if (row) {
-          const newScore = (row.score ?? getScoreByTier(row.tier)) - 1
-          await supabase.from('summoners').update({ score: newScore, tier: getTierByScore(newScore) }).eq('name', p.name).eq('line', p.line)
-        }
-      }
-      for (const p of losers) {
-        const { data: row } = await supabase.from('summoners').select('score, tier').eq('name', p.name).eq('line', p.line).single()
-        if (row) {
-          const newScore = (row.score ?? getScoreByTier(row.tier)) + 1
-          await supabase.from('summoners').update({ score: newScore, tier: getTierByScore(newScore) }).eq('name', p.name).eq('line', p.line)
+          const newScore = (row.score ?? getScoreByTier(row.tier)) - ev.delta
+          await supabase.from('summoners').update({ score: newScore, tier: getTierByScore(newScore) }).eq('user_id', ev.user_id).eq('line', ev.line)
         }
       }
     }
+    await supabase.from('score_events').delete().neq('id', 0)
     await supabase.from('tier_history').delete().neq('id', 0)
     await supabase.from('records').delete().neq('id', 0)
     setRecords([])
