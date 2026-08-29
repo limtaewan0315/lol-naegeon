@@ -2945,6 +2945,10 @@ function RoomsTab({
     const time = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
     const blueData = result.team1.map(p => ({ userId: p.userId, name: p.name, line: p.line }))
     const redData = result.team2.map(p => ({ userId: p.userId, name: p.name, line: p.line }))
+    // 서버(apply_match_score_delta)가 실제로 적용한 정확한 적용전/후 값을 여기 담아둠 —
+    // 디스코드 메시지가 이 값을 그대로 써서, 화면(브라우저)이 새로고침 안 됐어도 항상 정확하게 표시됨
+    const scoreResults: Record<string, { old_score: number; old_tier: string; new_score: number; new_tier: string; delta_applied: number }> = {}
+    const scoreFailures: string[] = []
 
     const { data: newRecord } = await supabase.from('records').insert([{ winner, blue: blueData, red: redData, time }]).select()
     const recId = newRecord?.[0]?.id
@@ -2954,14 +2958,14 @@ function RoomsTab({
 
     if (recId) {
       for (const p of winners) {
-        if (!summoners[p.userId]?.[p.line]) continue
-        const { error: rpcErr } = await supabase.rpc('apply_match_score_delta', { p_record_id: recId, p_user_id: p.userId, p_name: p.name, p_line: p.line, p_delta: 1 })
-        if (rpcErr) console.error('점수 반영 실패:', p.name, p.line, rpcErr.message)
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('apply_match_score_delta', { p_record_id: recId, p_user_id: p.userId, p_name: p.name, p_line: p.line, p_delta: 1 })
+        if (rpcErr) { console.error('점수 반영 실패:', p.name, p.line, rpcErr.message); scoreFailures.push(`${p.name}(${p.line})`) }
+        else if (rpcData?.[0]) scoreResults[p.userId] = rpcData[0]
       }
       for (const p of losers) {
-        if (!summoners[p.userId]?.[p.line]) continue
-        const { error: rpcErr } = await supabase.rpc('apply_match_score_delta', { p_record_id: recId, p_user_id: p.userId, p_name: p.name, p_line: p.line, p_delta: -1 })
-        if (rpcErr) console.error('점수 반영 실패:', p.name, p.line, rpcErr.message)
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('apply_match_score_delta', { p_record_id: recId, p_user_id: p.userId, p_name: p.name, p_line: p.line, p_delta: -1 })
+        if (rpcErr) { console.error('점수 반영 실패:', p.name, p.line, rpcErr.message); scoreFailures.push(`${p.name}(${p.line})`) }
+        else if (rpcData?.[0]) scoreResults[p.userId] = rpcData[0]
       }
     }
 
@@ -3006,14 +3010,15 @@ function RoomsTab({
       }
 
       const fmtPlayer = (p: TeamPlayer, isWinner: boolean) => {
-        const beforeTier = summoners[p.userId]?.[p.line] ?? p.tier
-        const beforeScore = summonerScores[p.userId]?.[p.line] ?? getScoreByTier(p.tier)
+        const sr = scoreResults[p.userId]
+        // 서버가 실제로 적용한 값이 있으면 그걸 그대로 씀 (항상 정확함). 없으면(드문 예외 상황) 기존 방식으로 대략 계산
+        const beforeTier = sr?.old_tier ?? (summoners[p.userId]?.[p.line] ?? p.tier)
+        const beforeScore = sr?.old_score ?? (summonerScores[p.userId]?.[p.line] ?? getScoreByTier(p.tier))
+        const afterTier = sr?.new_tier ?? beforeTier
+        const afterScore = sr?.new_score ?? beforeScore
+        const actualDelta = sr ? Math.abs(sr.delta_applied) : 1
         const streak = getStreak(p.userId, p.line, updatedRecords)
         const abs = Math.abs(streak)
-        // 연승/연패 배점: 1~2연속=1점, 3~4연속=2점, 5연속 이상=3점 (서버의 apply_match_score_delta와 동일한 규칙)
-        const actualDelta = abs >= 5 ? 3 : abs >= 3 ? 2 : 1
-        const afterScore = isWinner ? beforeScore + actualDelta : beforeScore - actualDelta
-        const afterTier = getTierByScore(afterScore)
         const tierChange = afterTier !== beforeTier
           ? `↳ ${beforeTier} → ${afterTier} ${isWinner ? '▲' : '▼'}`
           : `↳ ${afterTier} (변동없음)`
@@ -3056,6 +3061,10 @@ function RoomsTab({
 
     setIsRecording(false)
     recordingRef.current = false
+
+    if (scoreFailures.length > 0) {
+      alert(`⚠ 다음 플레이어의 점수 반영이 실패했어요: ${scoreFailures.join(', ')}\n관리자에게 알려서 수동으로 확인해달라고 해주세요.`)
+    }
 
     if (roomShouldClose) {
       // 방장 본인 화면에도 동일하게 안내 (본인이 보낸 브로드캐스트는 본인한테 안 돌아오므로 직접 처리)
