@@ -926,77 +926,62 @@ export default function RoomsTab({
                       key={m.user_id}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 10, padding: '10px 13px',
-                        borderRadius: 12, flexWrap: 'wrap',
+                        borderRadius: 12,
                         background: isHostRow
                           ? 'linear-gradient(135deg, rgba(224,198,143,0.14), rgba(224,198,143,0.05))'
                           : 'var(--bg3)',
                         border: isHostRow ? '1px solid rgba(224,198,143,0.4)' : undefined,
                       }}
                     >
-                      <div style={{
-                        width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 11, fontWeight: 700,
-                        background: isHostRow ? 'linear-gradient(135deg, var(--gold2), var(--gold-deep))' : 'var(--bg)',
-                        color: isHostRow ? '#1a1206' : 'var(--text2)',
-                      }}>
-                        {m.summoner_name.slice(0, 1)}
-                      </div>
-
-                      <span style={{ fontWeight: isHostRow ? 700 : 600, fontSize: 13, minWidth: 70 }}>
-                        <NameWithIdBadge name={m.summoner_name} idPrefixMap={idPrefixMap} userId={m.user_id} />
-                        {isMe && <span style={{ fontSize: 10, color: 'var(--gold2)', marginLeft: 4 }}>(나)</span>}
-                        {isHostRow && <span style={{ fontSize: 10, color: 'var(--gold2)', marginLeft: 4 }}>👑</span>}
-                      </span>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span style={{ fontSize: 10, color: m.most1 === 'any' ? 'var(--text2)' : 'var(--gold2)', fontWeight: 600 }}>M1</span>
-                        {isMe ? (
-                          <select
-                            value={m.most1}
-                            onChange={e => updateMyMost('most1', e.target.value)}
-                            disabled={m.ready}
-                            style={{ width: 95, padding: '4px 8px', fontSize: 12, opacity: m.ready ? 0.5 : 1, cursor: m.ready ? 'not-allowed' : 'pointer' }}
-                          >
-                            {lines.length >= 2 && <option value="any">상관없음</option>}
-                            {lines.map(l => (
-                              <option key={l} value={l}>{l}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span className="badge" style={{ minWidth: 56, textAlign: 'center', ...(m.most1 === 'any' ? { background: 'var(--bg)', color: 'var(--text2)' } : lineBadgeStyle(m.most1)) }}>
-                            {m.most1 === 'any' ? '상관없음' : m.most1}
-                          </span>
-                        )}
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 600 }}>M2</span>
-                        {isMe ? (
-                          <select
-                            value={m.most2 ?? ''}
-                            onChange={e => updateMyMost('most2', e.target.value)}
-                            disabled={m.most1 === 'any' || m.ready}
-                            style={{ width: 95, padding: '4px 8px', fontSize: 12, opacity: (m.most1 === 'any' || m.ready) ? 0.4 : 1, cursor: m.ready ? 'not-allowed' : 'pointer' }}
-                          >
-                            <option value=''>없음</option>
-                            {lines.filter(l => l !== m.most1 && m.most1 !== 'any').map(l => (
-                              <option key={l} value={l}>{l}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <span className="badge" style={{
-                            minWidth: 56, textAlign: 'center',
-                            opacity: m.most1 === 'any' || !m.most2 ? 0.4 : 1,
-                            ...(m.most1 === 'any' || !m.most2 ? { background: 'var(--bg)', color: 'var(--text2)' } : lineBadgeStyle(m.most2)),
-                          }}>
-                            {m.most1 === 'any' ? '-' : (m.most2 ?? '없음')}
-                          </span>
-                        )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: isHostRow ? 700 : 600, fontSize: 12.5 }}>
+                          <NameWithIdBadge name={m.summoner_name} idPrefixMap={idPrefixMap} userId={m.user_id} />
+                          {isMe && <span style={{ fontSize: 10, color: 'var(--gold2)', marginLeft: 4 }}>(나)</span>}
+                          {isHostRow && <span style={{ fontSize: 10, color: 'var(--gold2)', marginLeft: 4 }}>👑</span>}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 3, flexWrap: 'wrap' }}>
+                          {isMe ? (
+                            <>
+                              <select
+                                value={m.most1}
+                                onChange={e => updateMyMost('most1', e.target.value)}
+                                disabled={m.ready}
+                                style={{ width: 78, padding: '2px 4px', fontSize: 10, opacity: m.ready ? 0.5 : 1, cursor: m.ready ? 'not-allowed' : 'pointer' }}
+                              >
+                                {lines.length >= 2 && <option value="any">상관없음</option>}
+                                {lines.map(l => (
+                                  <option key={l} value={l}>{l}</option>
+                                ))}
+                              </select>
+                              <select
+                                value={m.most2 ?? ''}
+                                onChange={e => updateMyMost('most2', e.target.value)}
+                                disabled={m.most1 === 'any' || m.ready}
+                                style={{ width: 78, padding: '2px 4px', fontSize: 10, opacity: (m.most1 === 'any' || m.ready) ? 0.4 : 1, cursor: m.ready ? 'not-allowed' : 'pointer' }}
+                              >
+                                <option value=''>없음</option>
+                                {lines.filter(l => l !== m.most1 && m.most1 !== 'any').map(l => (
+                                  <option key={l} value={l}>{l}</option>
+                                ))}
+                              </select>
+                            </>
+                          ) : (
+                            <>
+                              <span className="badge" style={{ fontSize: 9, padding: '1px 7px', ...(m.most1 === 'any' ? { background: 'var(--bg)', color: 'var(--text2)' } : lineBadgeStyle(m.most1)) }}>
+                                {m.most1 === 'any' ? '상관없음' : m.most1}
+                              </span>
+                              {m.most1 !== 'any' && m.most2 && (
+                                <span className="badge" style={{ fontSize: 9, padding: '1px 7px', ...lineBadgeStyle(m.most2) }}>
+                                  {m.most2}
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </div>
                       </div>
 
                       <span style={{
-                        marginLeft: 'auto', fontSize: 10, padding: '3px 9px', borderRadius: 20,
+                        fontSize: 10, padding: '3px 9px', borderRadius: 20, flexShrink: 0,
                         background: m.ready ? 'rgba(62,207,142,0.15)' : 'var(--bg)',
                         color: m.ready ? 'var(--green)' : 'var(--text3)',
                         fontWeight: 600, whiteSpace: 'nowrap',
@@ -1116,7 +1101,7 @@ export default function RoomsTab({
                     onClick={runBalance}
                     disabled={!allReady || balancing}
                     style={{
-                      flex: 1,
+                      flex: 2,
                       ...(allReady ? { boxShadow: '0 0 20px rgba(224,198,143,0.5), 0 4px 14px rgba(200,170,110,0.35)', fontWeight: 800 } : {}),
                     }}
                   >
