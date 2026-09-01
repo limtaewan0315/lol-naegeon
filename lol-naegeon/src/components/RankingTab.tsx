@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { GameRecord, NameWithIdBadge } from '@/lib/shared'
 
-export default function RankingTab({ records, idPrefixMap }: { records: GameRecord[]; idPrefixMap: Record<string, string> }) {
+export default function RankingTab({ records, idPrefixMap, inactiveNames }: { records: GameRecord[]; idPrefixMap: Record<string, string>; inactiveNames: Set<string> }) {
   const [page, setPage] = useState(1)
   const PAGE_SIZE = 10
 
@@ -21,7 +21,7 @@ export default function RankingTab({ records, idPrefixMap }: { records: GameReco
   })
 
   const entries = Object.entries(playerMap)
-    .filter(([, s]) => s.win + s.lose >= 70)
+    .filter(([key, s]) => s.win + s.lose >= 70 && !(s.userId && inactiveNames.has(s.userId)))
     .sort((a, b) => {
       const wA = a[1].win / (a[1].win + a[1].lose)
       const wB = b[1].win / (b[1].win + b[1].lose)

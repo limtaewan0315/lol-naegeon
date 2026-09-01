@@ -263,9 +263,9 @@ export default function MainApp() {
             <>
               {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} riotIdMap={riotIdMap} correctionMap={correctionMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} inactiveNames={inactiveNames} nameByUserId={nameByUserId} />}
               {tab === 'record' && dbIsAdmin && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
-              {tab === 'ranking' && <RankingTab records={records} idPrefixMap={idPrefixMap} />}
-              {tab === 'hall' && <HallOfFameTab records={records} idPrefixMap={idPrefixMap} />}
-              {tab === 'stats' && <StatsTab records={records} summoners={summoners} summonerScores={summonerScores} idPrefixMap={idPrefixMap} nameByUserId={nameByUserId} />}
+              {tab === 'ranking' && <RankingTab records={records} idPrefixMap={idPrefixMap} inactiveNames={inactiveNames} />}
+              {tab === 'hall' && <HallOfFameTab records={records} idPrefixMap={idPrefixMap} inactiveNames={inactiveNames} />}
+              {tab === 'stats' && <StatsTab records={records} summoners={summoners} summonerScores={summonerScores} idPrefixMap={idPrefixMap} nameByUserId={nameByUserId} inactiveNames={inactiveNames} />}
 
               {tab === 'summoners' && <MyInfoTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} onRefresh={fetchAll} />}
 

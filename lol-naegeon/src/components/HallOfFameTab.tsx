@@ -4,7 +4,7 @@ import type { Line } from '@/lib/data'
 import { LINES } from '@/lib/data'
 import { GameRecord, NameWithIdBadge } from '@/lib/shared'
 
-export default function HallOfFameTab({ records, idPrefixMap }: { records: GameRecord[]; idPrefixMap: Record<string, string> }) {
+export default function HallOfFameTab({ records, idPrefixMap, inactiveNames }: { records: GameRecord[]; idPrefixMap: Record<string, string>; inactiveNames: Set<string> }) {
   const totalGames = records.length
   const minGames = 70 // 전체 70판 이상
   const minLineGames = 30 // 라인별 30판 이상
@@ -35,7 +35,7 @@ export default function HallOfFameTab({ records, idPrefixMap }: { records: GameR
 
   const getLineTop3 = (line: Line) => {
     return Object.entries(lineMap[line])
-      .filter(([, s]) => s.win + s.lose >= minLineGames)
+      .filter(([, s]) => s.win + s.lose >= minLineGames && !(s.userId && inactiveNames.has(s.userId)))
       .sort((a, b) => {
         const wA = a[1].win / (a[1].win + a[1].lose)
         const wB = b[1].win / (b[1].win + b[1].lose)

@@ -5,12 +5,13 @@ import type { Line } from '@/lib/data'
 import { LINES, getScoreByTier } from '@/lib/data'
 import { SummonerMap, SummonerScoreMap, GameRecord, LINE_ORDER, NameWithIdBadge } from '@/lib/shared'
 
-export default function StatsTab({ records, summoners, summonerScores, idPrefixMap, nameByUserId }: {
+export default function StatsTab({ records, summoners, summonerScores, idPrefixMap, nameByUserId, inactiveNames }: {
   records: GameRecord[]
   summoners: SummonerMap
   summonerScores: SummonerScoreMap
   idPrefixMap: Record<string, string>
   nameByUserId: Record<string, string>
+  inactiveNames: Set<string>
 }) {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<{ key: string; name: string } | null>(null)
@@ -26,17 +27,17 @@ export default function StatsTab({ records, summoners, summonerScores, idPrefixM
   // 한 사람을 가리키는 키: 계정ID가 있으면 계정ID(정확), 없으면(탈퇴 계정 등 옛날 기록) 이름으로 대체
   const keyOf = (p: { userId?: string; name: string }) => p.userId ?? p.name
 
-  // 전체 플레이어 목록 (records 기반, 계정ID로 동명이인 구분)
+  // 전체 플레이어 목록 (records 기반, 계정ID로 동명이인 구분) — 비활성화된 사람은 검색/조회에서 제외
   const allPeople = useMemo(() => {
     const map = new Map<string, string>()
     records.forEach(r => {
       ;[...r.blue, ...r.red].forEach(p => {
         const key = keyOf(p)
-        if (!map.has(key)) map.set(key, p.name)
+        if (!map.has(key) && !inactiveNames.has(key)) map.set(key, p.name)
       })
     })
     return Array.from(map.entries()).map(([key, name]) => ({ key, name })).sort((a, b) => a.name.localeCompare(b.name))
-  }, [records])
+  }, [records, inactiveNames])
 
   const handleSearch = (val: string) => {
     setSearch(val)
