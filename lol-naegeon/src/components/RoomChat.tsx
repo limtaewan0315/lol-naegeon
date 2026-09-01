@@ -84,9 +84,11 @@ export default function RoomChat({ roomId, myName, myUserId }: { roomId: number;
                   {isMe ? '나' : m.summoner_name} · {fmtTime(m.created_at)}
                 </div>
                 <div style={{
-                  fontSize: 12, padding: '6px 10px', borderRadius: 'var(--radius)',
-                  background: isMe ? 'rgba(212,175,55,0.15)' : 'var(--bg3)',
-                  border: `0.5px solid ${isMe ? 'var(--gold, #d4af37)' : 'var(--border2)'}`,
+                  fontSize: 12, padding: '6px 10px',
+                  borderRadius: isMe ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
+                  background: isMe ? '#2f6fd6' : 'var(--bg3)',
+                  color: isMe ? '#fff' : 'var(--text)',
+                  fontWeight: isMe ? 500 : 400,
                   wordBreak: 'break-word',
                   whiteSpace: 'pre-wrap',
                 }}>
@@ -111,9 +113,22 @@ export default function RoomChat({ roomId, myName, myUserId }: { roomId: number;
           disabled={sending}
           maxLength={300}
           rows={2}
-          style={{ resize: 'none', overflowY: 'auto', maxHeight: 72, fontFamily: 'inherit', lineHeight: 1.4 }}
+          style={{ resize: 'none', overflowY: 'auto', maxHeight: 72, fontFamily: 'inherit', lineHeight: 1.4, borderRadius: 20 }}
         />
-        <button className="btn btn-gold btn-sm" onClick={send} disabled={sending || !input.trim()} style={{ alignSelf: 'center' }}>전송</button>
+        <button
+          onClick={send}
+          disabled={sending || !input.trim()}
+          style={{
+            alignSelf: 'center', padding: '0 16px', height: 32, borderRadius: 16,
+            background: 'linear-gradient(135deg, var(--gold2), var(--gold))',
+            border: 'none', color: '#1a1206', fontSize: 11, fontWeight: 700,
+            cursor: sending || !input.trim() ? 'not-allowed' : 'pointer',
+            opacity: sending || !input.trim() ? 0.6 : 1,
+            whiteSpace: 'nowrap', flexShrink: 0,
+          }}
+        >
+          전송
+        </button>
       </div>
     </div>
   )

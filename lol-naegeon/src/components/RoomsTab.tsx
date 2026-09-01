@@ -5,7 +5,7 @@ import type { Line } from '@/lib/data'
 import { LINES, TIERS, getScore, getTierByScore, getScoreByTier, shuffle } from '@/lib/data'
 import {
   supabase, SummonerMap, SummonerScoreMap, GameRecord, TeamPlayer, BalanceResult,
-  PlayerEntry, NameWithIdBadge, LINE_ORDER, DISCORD_WEBHOOK_URL, tierBadgeStyle
+  PlayerEntry, NameWithIdBadge, LINE_ORDER, DISCORD_WEBHOOK_URL, tierBadgeStyle, lineBadgeStyle
 } from '@/lib/shared'
 import RoomChat from './RoomChat'
 
@@ -919,26 +919,38 @@ export default function RoomsTab({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
                 {myRoom.members.map(m => {
                   const isMe = m.user_id === myUserId
+                  const isHostRow = m.user_id === myRoom.host_user_id
                   const lines = getSummonerLines(m.user_id)
                   return (
                     <div
                       key={m.user_id}
-                      className="player-row"
                       style={{
-                        padding: '8px 10px', flexWrap: 'wrap',
-                        background: isMe ? (m.ready ? 'rgba(212,175,55,0.28)' : 'rgba(212,175,55,0.12)') : undefined,
-                        border: isMe ? `${m.ready ? 1 : 0.5}px solid var(--gold, #d4af37)` : undefined,
-                        borderRadius: isMe ? 'var(--radius)' : undefined,
+                        display: 'flex', alignItems: 'center', gap: 10, padding: '10px 13px',
+                        borderRadius: 12, flexWrap: 'wrap',
+                        background: isHostRow
+                          ? 'linear-gradient(135deg, rgba(224,198,143,0.14), rgba(224,198,143,0.05))'
+                          : 'var(--bg3)',
+                        border: isHostRow ? '1px solid rgba(224,198,143,0.4)' : undefined,
                       }}
                     >
-                      <span style={{ fontWeight: 600, fontSize: 13, minWidth: 80 }}>
+                      <div style={{
+                        width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 11, fontWeight: 700,
+                        background: isHostRow ? 'linear-gradient(135deg, var(--gold2), var(--gold-deep))' : 'var(--bg)',
+                        color: isHostRow ? '#1a1206' : 'var(--text2)',
+                      }}>
+                        {m.summoner_name.slice(0, 1)}
+                      </div>
+
+                      <span style={{ fontWeight: isHostRow ? 700 : 600, fontSize: 13, minWidth: 70 }}>
                         <NameWithIdBadge name={m.summoner_name} idPrefixMap={idPrefixMap} userId={m.user_id} />
-                        {isMe && <span style={{ fontSize: 10, color: 'var(--gold, #d4af37)', marginLeft: 4 }}>(나)</span>}
-                        {m.user_id === myRoom.host_user_id && <span style={{ fontSize: 10, color: 'var(--gold, #d4af37)', marginLeft: 4 }}>방장</span>}
+                        {isMe && <span style={{ fontSize: 10, color: 'var(--gold2)', marginLeft: 4 }}>(나)</span>}
+                        {isHostRow && <span style={{ fontSize: 10, color: 'var(--gold2)', marginLeft: 4 }}>👑</span>}
                       </span>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span style={{ fontSize: 11, color: m.most1 === 'any' ? 'var(--text2)' : 'var(--gold)', fontWeight: 600 }}>M1</span>
+                        <span style={{ fontSize: 10, color: m.most1 === 'any' ? 'var(--text2)' : 'var(--gold2)', fontWeight: 600 }}>M1</span>
                         {isMe ? (
                           <select
                             value={m.most1}
@@ -952,14 +964,14 @@ export default function RoomsTab({
                             ))}
                           </select>
                         ) : (
-                          <span className="badge b-line" style={{ minWidth: 60, textAlign: 'center' }}>
+                          <span className="badge" style={{ minWidth: 56, textAlign: 'center', ...(m.most1 === 'any' ? { background: 'var(--bg)', color: 'var(--text2)' } : lineBadgeStyle(m.most1)) }}>
                             {m.most1 === 'any' ? '상관없음' : m.most1}
                           </span>
                         )}
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span style={{ fontSize: 11, color: 'var(--text2)', fontWeight: 600 }}>M2</span>
+                        <span style={{ fontSize: 10, color: 'var(--text2)', fontWeight: 600 }}>M2</span>
                         {isMe ? (
                           <select
                             value={m.most2 ?? ''}
@@ -973,31 +985,33 @@ export default function RoomsTab({
                             ))}
                           </select>
                         ) : (
-                          <span className="badge b-line" style={{ minWidth: 60, textAlign: 'center', opacity: m.most1 === 'any' || !m.most2 ? 0.4 : 1 }}>
+                          <span className="badge" style={{
+                            minWidth: 56, textAlign: 'center',
+                            opacity: m.most1 === 'any' || !m.most2 ? 0.4 : 1,
+                            ...(m.most1 === 'any' || !m.most2 ? { background: 'var(--bg)', color: 'var(--text2)' } : lineBadgeStyle(m.most2)),
+                          }}>
                             {m.most1 === 'any' ? '-' : (m.most2 ?? '없음')}
                           </span>
                         )}
                       </div>
 
-                      <span
-                        className="badge"
-                        style={{
-                          marginLeft: 'auto', fontSize: m.ready ? 9 : 11, padding: '3px 8px', borderRadius: 999,
-                          background: m.ready ? 'rgba(212,175,55,0.2)' : 'var(--bg3)',
-                          color: m.ready ? 'var(--gold, #d4af37)' : 'var(--text3)',
-                          border: `0.5px solid ${m.ready ? 'var(--gold, #d4af37)' : 'var(--border2)'}`,
-                          fontWeight: m.ready ? 600 : 400,
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {m.ready ? '✓준비완료' : '대기중'}
+                      <span style={{
+                        marginLeft: 'auto', fontSize: 10, padding: '3px 9px', borderRadius: 20,
+                        background: m.ready ? 'rgba(62,207,142,0.15)' : 'var(--bg)',
+                        color: m.ready ? 'var(--green)' : 'var(--text3)',
+                        fontWeight: 600, whiteSpace: 'nowrap',
+                      }}>
+                        ● {m.ready ? '준비완료' : '대기중'}
                       </span>
 
-                      {isHost && m.user_id !== myRoom.host_user_id && (
+                      {isHost && !isHostRow && (
                         <button
-                          className="btn btn-danger btn-sm"
                           onClick={() => kickMember(m.user_id, m.summoner_name)}
-                          style={{ width: 'auto', flexShrink: 0, padding: '2px 8px', fontSize: 10, marginLeft: 4 }}
+                          style={{
+                            fontSize: 9, padding: '3px 8px', borderRadius: 7, flexShrink: 0,
+                            background: 'rgba(239,84,104,0.12)', color: 'var(--red)',
+                            border: 'none', fontWeight: 600, cursor: 'pointer',
+                          }}
                         >
                           강퇴
                         </button>
@@ -1101,9 +1115,12 @@ export default function RoomsTab({
                     className="btn btn-gold"
                     onClick={runBalance}
                     disabled={!allReady || balancing}
-                    style={{ flex: 1 }}
+                    style={{
+                      flex: 1,
+                      ...(allReady ? { boxShadow: '0 0 20px rgba(224,198,143,0.5), 0 4px 14px rgba(200,170,110,0.35)', fontWeight: 800 } : {}),
+                    }}
                   >
-                    {balancing ? '편성 중...' : `팀편성 (${myRoom.members.filter(m => m.ready).length}/${myRoom.members.length})`}
+                    {balancing ? '편성 중...' : allReady ? `✓ 전원 준비완료 — 팀편성 시작` : `팀편성 (${myRoom.members.filter(m => m.ready).length}/${myRoom.members.length})`}
                   </button>
                 )}
               </div>
@@ -1410,13 +1427,14 @@ export default function RoomsTab({
                   return c
                 }, 0)
                 const pct = myRoom.members.length > 0 ? Math.min(100, (count / myRoom.members.length) * 100) : 0
+                const lc = lineBadgeStyle(l)
                 return (
                   <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span className="badge b-line" style={{ width: 44, textAlign: 'center', flexShrink: 0 }}>{l}</span>
+                    <span style={{ width: 40, textAlign: 'left', flexShrink: 0, fontSize: 11, fontWeight: 600, color: lc.color as string }}>{l}</span>
                     <div style={{ flex: 1, height: 6, background: 'var(--bg)', borderRadius: 3, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${pct}%`, background: 'var(--gold)', borderRadius: 3 }} />
+                      <div style={{ height: '100%', width: `${pct}%`, background: lc.color as string, borderRadius: 3 }} />
                     </div>
-                    <span style={{ fontSize: 12, color: 'var(--text2)', minWidth: 28, textAlign: 'right', flexShrink: 0 }}>{count}명</span>
+                    <span style={{ fontSize: 11, color: 'var(--text2)', minWidth: 20, textAlign: 'right', flexShrink: 0 }}>{count}</span>
                   </div>
                 )
               })}
