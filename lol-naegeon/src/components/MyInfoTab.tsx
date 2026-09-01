@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import type { Line } from '@/lib/data'
 import { LINES, getScoreByTier, TIERS } from '@/lib/data'
-import {
+import { tierBadgeStyle,
   supabase, SummonerMap, SummonerScoreMap, GameRecord, LINE_ORDER,
   checkPassword, isValidLoginId, idToAuthKey, tierFontSize
 } from '@/lib/shared'
@@ -337,7 +337,7 @@ export default function MyInfoTab({ summoners, summonerScores, records, idPrefix
               }}>
                 <div style={{ fontSize: 13, color: 'var(--gold)', marginBottom: 3, fontWeight: 700 }}>{l}</div>
                 {myLines[l] ? (
-                  <span className="badge b-tier" style={{ fontSize: tierFontSize(myLines[l]!), padding: '2px 6px', whiteSpace: 'nowrap' }}>{myLines[l]}</span>
+                  <span className="badge" style={{ fontSize: tierFontSize(myLines[l]!), padding: '2px 6px', whiteSpace: 'nowrap', ...tierBadgeStyle(myLines[l]!) }}>{myLines[l]}</span>
                 ) : (
                   <span style={{ fontSize: 11, color: 'var(--text3)' }}>없음</span>
                 )}

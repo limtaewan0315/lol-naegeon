@@ -5,7 +5,7 @@ import type { Line } from '@/lib/data'
 import { LINES, TIERS, getScore, getTierByScore, getScoreByTier, shuffle } from '@/lib/data'
 import {
   supabase, SummonerMap, SummonerScoreMap, GameRecord, TeamPlayer, BalanceResult,
-  PlayerEntry, NameWithIdBadge, LINE_ORDER, DISCORD_WEBHOOK_URL
+  PlayerEntry, NameWithIdBadge, LINE_ORDER, DISCORD_WEBHOOK_URL, tierBadgeStyle
 } from '@/lib/shared'
 import RoomChat from './RoomChat'
 
@@ -1207,7 +1207,7 @@ export default function RoomsTab({
                               <NameWithIdBadge name={p.name} idPrefixMap={idPrefixMap} userId={p.userId} />
                             )}
                           </span>
-                          <span className="badge b-tier" style={{ fontSize: 10 }}>{p.tier}</span>
+                          <span className="badge" style={{ fontSize: 10, ...tierBadgeStyle(p.tier) }}>{p.tier}</span>
                           <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 4 }}>{p.score.toFixed(1)}</span>
                         </div>
                       )

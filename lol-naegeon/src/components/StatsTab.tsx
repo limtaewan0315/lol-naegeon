@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react'
 import type { Line } from '@/lib/data'
 import { LINES, getScoreByTier } from '@/lib/data'
-import { SummonerMap, SummonerScoreMap, GameRecord, LINE_ORDER, NameWithIdBadge } from '@/lib/shared'
+import { SummonerMap, SummonerScoreMap, GameRecord, LINE_ORDER, NameWithIdBadge, tierBadgeStyle } from '@/lib/shared'
 
 export default function StatsTab({ records, summoners, summonerScores, idPrefixMap, nameByUserId, inactiveNames }: {
   records: GameRecord[]
@@ -274,7 +274,7 @@ export default function StatsTab({ records, summoners, summonerScores, idPrefixM
                       <span className="badge b-line">{l}</span>
                       {summoners[selKey]?.[l] && (
                         <>
-                          <span className="badge b-tier">{summoners[selKey][l]}</span>
+                          <span className="badge" style={tierBadgeStyle(summoners[selKey][l])}>{summoners[selKey][l]}</span>
                           <span style={{ fontSize: 11, color: 'var(--text3)' }}>{summonerScores[selKey]?.[l] ?? '-'}점</span>
                         </>
                       )}

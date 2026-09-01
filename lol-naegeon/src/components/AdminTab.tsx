@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, Fragment } from 'react'
 import type { Line } from '@/lib/data'
 import { LINES, TIERS, getScoreByTier } from '@/lib/data'
-import { supabase, SummonerMap, SummonerScoreMap, GameRecord, NameWithIdBadge, tierFontSize } from '@/lib/shared'
+import { supabase, SummonerMap, SummonerScoreMap, GameRecord, NameWithIdBadge, tierFontSize, tierBadgeStyle } from '@/lib/shared'
 
 export default function AdminTab({ summoners, summonerScores, records, nameByUserId, idPrefixMap, correctionMap, onRefresh }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; records: GameRecord[]; nameByUserId: Record<string, string>; idPrefixMap: Record<string, string>; correctionMap: Record<string, { needs_correction: boolean; correction_note: string | null }>; onRefresh: () => void }) {
   const [subTab, setSubTab] = useState<'summoners' | 'inactive'>('summoners')
@@ -237,7 +237,7 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
                                   ) : tier ? (
                                     <span
                                       onClick={() => startEdit(userId, line, tier)}
-                                      style={{ cursor: 'pointer', color: 'var(--gold2)', fontWeight: 500 }}
+                                      style={{ cursor: 'pointer', padding: '1px 6px', borderRadius: 6, fontSize: 10, ...tierBadgeStyle(tier) }}
                                     >
                                       {tier}
                                     </span>
