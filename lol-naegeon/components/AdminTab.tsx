@@ -174,7 +174,7 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
               <div className="empty">등록된 소환사가 없어요</div>
             ) : (
               allSummoners.map(({ userId, name }) => {
-                const flagged = correctionMap[userId]?.needs_correction
+                const flagged = correctionMap?.[userId]?.needs_correction
                 return (
                 <div key={userId} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '0.5px solid var(--border2)' }}>
                   <div style={{ fontWeight: 700, marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
@@ -200,9 +200,9 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
                       <button className="btn btn-danger btn-sm" onClick={() => deleteSummoner(userId, name)}>삭제</button>
                     </div>
                   </div>
-                  {flagged && correctionMap[userId]?.correction_note && (
+                  {flagged && correctionMap?.[userId]?.correction_note && (
                     <div style={{ fontSize: 11, color: 'var(--red)', marginBottom: 6 }}>
-                      사유: {correctionMap[userId]?.correction_note}
+                      사유: {correctionMap?.[userId]?.correction_note}
                     </div>
                   )}
                   {flaggingUserId === userId && (
