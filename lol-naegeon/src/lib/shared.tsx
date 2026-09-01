@@ -180,7 +180,20 @@ export function tierBadgeStyle(tier: string): React.CSSProperties {
   if (tier.startsWith('다이아')) return { background: 'rgba(79,158,234,0.15)', color: '#6fb6f5' }
   if (tier.startsWith('마스터')) return { background: 'rgba(176,112,224,0.16)', color: '#c48cf0' }
   if (tier.startsWith('그랜드마스터')) return { background: 'rgba(239,84,104,0.16)', color: '#ef5468' }
-  if (tier.startsWith('챌린저')) return { background: 'linear-gradient(135deg,#f4e0a0,#d4a94f)', color: '#4a3308', fontWeight: 700 }
-  if (tier === '리그오브레전드') return { background: '#16213f', color: '#f0d78c', fontWeight: 700 }
+  if (tier.startsWith('챌린저')) return {
+    background: 'linear-gradient(135deg,#eceef0,#a8adb8)',
+    border: '2px solid #d4af6a',
+    boxShadow: '0 0 8px rgba(64,224,208,0.35), inset 0 0 6px rgba(64,224,208,0.15)',
+    color: '#4a4f58',
+    textShadow: '0 1px 0 rgba(255,255,255,0.6), 0 -1px 0 rgba(0,0,0,0.3)',
+    fontWeight: 700,
+  }
+  if (tier === '리그오브레전드') return {
+    background: '#0f1830',
+    border: '2px solid #e0c68f',
+    boxShadow: '0 0 10px rgba(64,224,208,0.4), inset 0 0 8px rgba(64,224,208,0.12)',
+    color: '#f0d78c',
+    fontWeight: 700,
+  }
   return { background: 'rgba(153,145,127,0.15)', color: '#99917f' } // 언랭 등
 }
