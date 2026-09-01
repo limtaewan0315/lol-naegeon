@@ -16,6 +16,7 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
   const [nameInput, setNameInput] = useState('')
   const [flaggingUserId, setFlaggingUserId] = useState<string | null>(null)
   const [noteInput, setNoteInput] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
 
   // 계정ID+이름 쌍 목록 (동명이인도 각자 별개의 항목으로 정확히 구분됨)
   const allSummoners = Object.entries(nameByUserId)
@@ -170,10 +171,20 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
         {subTab === 'summoners' && (
           <div style={{ maxHeight: 600, overflowY: 'auto' }}>
             <div className="card-title" style={{ fontSize: 12, marginBottom: 8 }}>모든 소환사</div>
-            {allSummoners.length === 0 ? (
-              <div className="empty">등록된 소환사가 없어요</div>
-            ) : (
-              allSummoners.map(({ userId, name }) => {
+            <input
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="이름으로 검색"
+              style={{ marginBottom: 10, fontSize: 12 }}
+            />
+            {(() => {
+              const filtered = searchQuery.trim()
+                ? allSummoners.filter(({ name }) => name.includes(searchQuery.trim()))
+                : allSummoners
+              if (filtered.length === 0) {
+                return <div className="empty">{searchQuery.trim() ? '검색 결과가 없어요' : '등록된 소환사가 없어요'}</div>
+              }
+              return filtered.map(({ userId, name }) => {
                 const flagged = correctionMap?.[userId]?.needs_correction
                 return (
                 <div key={userId} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '0.5px solid var(--border2)' }}>
@@ -257,7 +268,7 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
                   </div>
                 </div>
               )})
-            )}
+            })()}
           </div>
         )}
 
