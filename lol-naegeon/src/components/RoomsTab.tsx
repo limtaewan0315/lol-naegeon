@@ -389,135 +389,6 @@ export default function RoomsTab({
       return summonerScores[userId]?.[line] ?? getScoreByTier(tier)
     }
 
-    // 라인별로 "이 라인을 받을 수 있는 사람"이 몇 명인지 미리 계산 (M1/M2/상관없음 기준)
-    const linePossibleUpfront: Record<Line, number> = { 탑: 0, 정글: 0, 미드: 0, 원딜: 0, 서포터: 0 }
-    players.forEach(p => {
-      const allLines = getSummonerLines(p.userId)
-      if (p.most1 === 'any') allLines.forEach(l => { linePossibleUpfront[l] = (linePossibleUpfront[l] ?? 0) + 1 })
-      else linePossibleUpfront[p.most1 as Line] = (linePossibleUpfront[p.most1 as Line] ?? 0) + 1
-      if (p.most2 === 'any') allLines.forEach(l => { linePossibleUpfront[l] = (linePossibleUpfront[l] ?? 0) + 1 })
-      else if (p.most2) linePossibleUpfront[p.most2 as Line] = (linePossibleUpfront[p.most2 as Line] ?? 0) + 1
-    })
-    const supplyInsufficient = LINES.some(l => (linePossibleUpfront[l] ?? 0) < 2)
-
-    // ── 인원 부족 규칙: 원래대로면 라인당 2명이 안 나와서 매칭이 실패했을 상황에서만 발동 ──
-    // M1/M2를 최대한 존중하되, 부족한 라인은 롤의 "라인 튕김"처럼 다른 사람을 배정함.
-    // 튕긴 사람은 이 방이 사라질 때까지 다시 안 튕기고, 바로 다음 판엔 M1이 보장됨.
-    if (supplyInsufficient) {
-      const protectedIds = new Set<string>(myRoom.autofill_protected_ids ?? [])
-      const guaranteedIds = new Set<string>(myRoom.guaranteed_m1_ids ?? [])
-
-      const slots: Record<Line, PlayerEntry[]> = { 탑: [], 정글: [], 미드: [], 원딜: [], 서포터: [] }
-      const assignedIds = new Set<string>()
-      const tryAssign = (p: PlayerEntry, line: Line) => {
-        if (slots[line].length < 2 && !assignedIds.has(p.userId)) {
-          slots[line].push(p)
-          assignedIds.add(p.userId)
-        }
-      }
-
-      // 0순위: 지난판에 튕긴 사람은 이번 판 M1을 무조건 보장
-      shuffle(players.filter(p => guaranteedIds.has(p.userId) && p.most1 !== 'any'))
-        .forEach(p => tryAssign(p, p.most1 as Line))
-
-      // 1순위: M1 희망자
-      for (const line of LINES) {
-        shuffle(players.filter(p => !assignedIds.has(p.userId) && p.most1 === line))
-          .forEach(p => tryAssign(p, line))
-      }
-      // 2순위: M2 희망자
-      for (const line of LINES) {
-        shuffle(players.filter(p => !assignedIds.has(p.userId) && p.most2 === line))
-          .forEach(p => tryAssign(p, line))
-      }
-      // 3순위: "상관없음"인 사람 (본인이 이미 동의한 것이므로 튕김으로 취급 안 함)
-      for (const line of LINES) {
-        if (slots[line].length >= 2) continue
-        shuffle(players.filter(p => !assignedIds.has(p.userId) && p.most1 === 'any'))
-          .forEach(p => tryAssign(p, line))
-      }
-      // 4순위: 진짜 라인 튕김 — 아직 남은 사람을 남은 자리에. 보호 중인 사람은 최대한 피함
-      for (const line of LINES) {
-        while (slots[line].length < 2) {
-          const remaining = players.filter(p => !assignedIds.has(p.userId))
-          if (remaining.length === 0) break
-          const eligible = remaining.filter(p => !protectedIds.has(p.userId))
-          const pool = eligible.length > 0 ? eligible : remaining
-          tryAssign(shuffle(pool)[0], line)
-        }
-      }
-
-      const buildPlayer = (p: PlayerEntry, line: Line): TeamPlayer => {
-        const tier = summoners[p.userId]?.[line] ?? '골드2'
-        return { userId: p.userId, name: p.name, tier, line, score: getAdjustedScore(p.userId, line, tier) }
-      }
-
-      // 라인별 2명을 team1/team2로 나누는 32가지 경우의 수를 전부 만들어서 그중 최선을 고름
-      const pairs = LINES.map(line => slots[line].map(p => buildPlayer(p, line)))
-      const allCombos: BalanceResult[] = []
-      for (let mask = 0; mask < 32; mask++) {
-        const team1: TeamPlayer[] = [], team2: TeamPlayer[] = []
-        LINES.forEach((_, i) => {
-          const [a, b] = pairs[i]
-          const bit = (mask >> i) & 1
-          team1.push(bit === 0 ? a : b)
-          team2.push(bit === 0 ? b : a)
-        })
-        const s1 = team1.reduce((s, p) => s + p.score, 0)
-        const s2 = team2.reduce((s, p) => s + p.score, 0)
-        allCombos.push({ team1, team2, s1, s2 })
-      }
-      allCombos.sort((a, b) => Math.abs(a.s1 - a.s2) - Math.abs(b.s1 - b.s2))
-
-      const lastSigAF = myRoom.last_result ? resultSignature(myRoom.last_result) : null
-      const historyTeamsAF: string[][] = (myRoom.recent_team_history ?? []).flatMap(h => [h.ids1, h.ids2])
-      const violatesRepeatAF = (team: TeamPlayer[]) => {
-        const ids = new Set(team.map(p => p.userId))
-        return historyTeamsAF.some(t => t.filter(id => ids.has(id)).length >= 2)
-      }
-      const isCleanAF = (c: BalanceResult) =>
-        (!lastSigAF || resultSignature(c) !== lastSigAF) && !violatesRepeatAF(c.team1) && !violatesRepeatAF(c.team2)
-
-      const chosen =
-        allCombos.find(c => Math.abs(c.s1 - c.s2) <= 5 && isCleanAF(c)) ??
-        allCombos.find(c => Math.abs(c.s1 - c.s2) <= 5) ??
-        allCombos.find(c => isCleanAF(c)) ??
-        allCombos[0]
-
-      // 이번에 M1/M2가 아닌 라인이 걸린 사람 = "튕긴" 사람
-      const allAssigned = [...chosen.team1, ...chosen.team2]
-      const newlyAutofilled = allAssigned.filter(tp => {
-        const orig = players.find(p => p.userId === tp.userId)!
-        return orig.most1 !== 'any' && orig.most1 !== tp.line && orig.most2 !== tp.line
-      }).map(tp => tp.userId)
-
-      // 지난판 보장을 이번에 실제로 받은 사람은 보장 목록에서 제거
-      const fulfilledGuarantees = allAssigned.filter(tp => {
-        const orig = players.find(p => p.userId === tp.userId)!
-        return guaranteedIds.has(tp.userId) && orig.most1 === tp.line
-      }).map(tp => tp.userId)
-
-      const newProtected = Array.from(new Set([...(myRoom.autofill_protected_ids ?? []), ...newlyAutofilled]))
-      const newGuaranteed = Array.from(new Set([
-        ...(myRoom.guaranteed_m1_ids ?? []).filter((id: string) => !fulfilledGuarantees.includes(id)),
-        ...newlyAutofilled,
-      ]))
-      // 이번 판에서 뭐가 바뀌었는지 기록해둠 — 이 판이 취소되면 이 델타로 되돌림
-      const delta = { added: newlyAutofilled, removedFromGuaranteed: fulfilledGuarantees }
-
-      const startedAt = new Date().toISOString()
-      await supabase.from('rooms').update({
-        pending_result: chosen,
-        balance_started_at: startedAt,
-        autofill_protected_ids: newProtected,
-        guaranteed_m1_ids: newGuaranteed,
-        pending_autofill_delta: delta,
-      }).eq('id', myRoom.id)
-
-      setBalancing(false)
-      return
-    }
-
     const LINE_PREFERENCE: Record<string, Line> = { '공민규': '정글' }
     const PREFERENCE_RATE = 0.95
 
@@ -629,39 +500,127 @@ export default function RoomsTab({
     }
     const isRepeatFree = (c: { result: BalanceResult }) => !violatesRepeat(c.result.team1) && !violatesRepeat(c.result.team2)
 
-    best = candidates.find(c => c.diff <= 5 && isRepeatFree(c))?.result ?? null
-    if (!best) best = candidates.find(c => c.diff <= 5)?.result ?? null
+    best = candidates.find(c => c.diff <= 6 && isRepeatFree(c))?.result ?? null
+    if (!best) best = candidates.find(c => c.diff <= 6)?.result ?? null
     if (!best) best = candidates.find(c => isRepeatFree(c))?.result ?? null
     if (!best) best = candidates[0]?.result ?? null
 
     if (best) {
       const startedAt = new Date().toISOString()
       await supabase.from('rooms').update({ pending_result: best, balance_started_at: startedAt, pending_autofill_delta: null }).eq('id', myRoom.id)
-    } else if (fallback) {
-      setBalanceError(`팀 편성에 필요한 라인 밸런스 조건을 만족하는 조합을 못 찾았어요. (가장 가까운 조합은 ${fallbackDiff.toFixed(1)}점 차이) 다시 시도해보세요.`)
     } else {
-      const linePossible: Record<string, number> = {}
-      LINES.forEach(l => { linePossible[l] = 0 })
-      players.forEach(p => {
-        const allLines = getSummonerLines(p.userId)
-        if (p.most1 === 'any') allLines.forEach(l => { linePossible[l] = (linePossible[l] ?? 0) + 1 })
-        else linePossible[p.most1] = (linePossible[p.most1] ?? 0) + 1
-        if (p.most2 === 'any') allLines.forEach(l => { linePossible[l] = (linePossible[l] ?? 0) + 1 })
-        else if (p.most2) linePossible[p.most2] = (linePossible[p.most2] ?? 0) + 1
-      })
-      const shortLines = LINES.filter(l => (linePossible[l] ?? 0) < 2)
-      if (shortLines.length > 0) {
-        const msg = shortLines.map(l => `${l} (${linePossible[l] ?? 0}명 → 2명 필요)`).join(', ')
-        setBalanceError(`팀 구성 실패. 다음 라인 인원이 부족해요: ${msg}`)
-      } else {
-        const lineOptions = players.map(p => ({ name: p.name, options: getOptions(p) }))
-        const problematic = lineOptions.filter(p => p.options.length === 0)
-        if (problematic.length > 0) {
-          setBalanceError(`팀 구성 실패. ${problematic.map(p => p.name).join(', ')}의 라인 설정을 확인해주세요.`)
-        } else {
-          setBalanceError('팀 구성 실패. 라인 조합이 너무 치우쳐 있어요. M1/M2를 다양하게 설정해보세요.')
+      // 위 무작위 탐색으로 라인 밸런스를 만족하는 조합을 못 찾았을 때(라인 필터에 다 걸렸거나, 2명씩도 안 맞았거나)
+      // 인원부족 때와 동일한 라인 자동배정으로 구제함
+      const protectedIds = new Set<string>(myRoom.autofill_protected_ids ?? [])
+      const guaranteedIds = new Set<string>(myRoom.guaranteed_m1_ids ?? [])
+
+      const slots: Record<Line, PlayerEntry[]> = { 탑: [], 정글: [], 미드: [], 원딜: [], 서포터: [] }
+      const assignedIds = new Set<string>()
+      const tryAssign = (p: PlayerEntry, line: Line) => {
+        if (slots[line].length < 2 && !assignedIds.has(p.userId)) {
+          slots[line].push(p)
+          assignedIds.add(p.userId)
         }
       }
+
+      // 0순위: 지난판에 튕긴 사람은 이번 판 M1을 무조건 보장
+      shuffle(players.filter(p => guaranteedIds.has(p.userId) && p.most1 !== 'any'))
+        .forEach(p => tryAssign(p, p.most1 as Line))
+
+      // 1순위: M1 희망자
+      for (const line of LINES) {
+        shuffle(players.filter(p => !assignedIds.has(p.userId) && p.most1 === line))
+          .forEach(p => tryAssign(p, line))
+      }
+      // 2순위: M2 희망자
+      for (const line of LINES) {
+        shuffle(players.filter(p => !assignedIds.has(p.userId) && p.most2 === line))
+          .forEach(p => tryAssign(p, line))
+      }
+      // 3순위: "상관없음"인 사람 (본인이 이미 동의한 것이므로 튕김으로 취급 안 함)
+      for (const line of LINES) {
+        if (slots[line].length >= 2) continue
+        shuffle(players.filter(p => !assignedIds.has(p.userId) && p.most1 === 'any'))
+          .forEach(p => tryAssign(p, line))
+      }
+      // 4순위: 진짜 라인 튕김 — 아직 남은 사람을 남은 자리에. 보호 중인 사람은 최대한 피함
+      for (const line of LINES) {
+        while (slots[line].length < 2) {
+          const remaining = players.filter(p => !assignedIds.has(p.userId))
+          if (remaining.length === 0) break
+          const eligible = remaining.filter(p => !protectedIds.has(p.userId))
+          const pool = eligible.length > 0 ? eligible : remaining
+          tryAssign(shuffle(pool)[0], line)
+        }
+      }
+
+      const buildPlayer = (p: PlayerEntry, line: Line): TeamPlayer => {
+        const tier = summoners[p.userId]?.[line] ?? '골드2'
+        return { userId: p.userId, name: p.name, tier, line, score: getAdjustedScore(p.userId, line, tier) }
+      }
+
+      // 라인별 2명을 team1/team2로 나누는 32가지 경우의 수를 전부 만들어서 그중 최선을 고름
+      const pairs = LINES.map(line => slots[line].map(p => buildPlayer(p, line)))
+      const allCombos: BalanceResult[] = []
+      for (let mask = 0; mask < 32; mask++) {
+        const team1: TeamPlayer[] = [], team2: TeamPlayer[] = []
+        LINES.forEach((_, i) => {
+          const [a, b] = pairs[i]
+          const bit = (mask >> i) & 1
+          team1.push(bit === 0 ? a : b)
+          team2.push(bit === 0 ? b : a)
+        })
+        const s1 = team1.reduce((s, p) => s + p.score, 0)
+        const s2 = team2.reduce((s, p) => s + p.score, 0)
+        allCombos.push({ team1, team2, s1, s2 })
+      }
+      allCombos.sort((a, b) => Math.abs(a.s1 - a.s2) - Math.abs(b.s1 - b.s2))
+
+      const lastSigAF = myRoom.last_result ? resultSignature(myRoom.last_result) : null
+      const historyTeamsAF: string[][] = (myRoom.recent_team_history ?? []).flatMap(h => [h.ids1, h.ids2])
+      const violatesRepeatAF = (team: TeamPlayer[]) => {
+        const ids = new Set(team.map(p => p.userId))
+        return historyTeamsAF.some(t => t.filter(id => ids.has(id)).length >= 2)
+      }
+      const isCleanAF = (c: BalanceResult) =>
+        (!lastSigAF || resultSignature(c) !== lastSigAF) && !violatesRepeatAF(c.team1) && !violatesRepeatAF(c.team2)
+
+      const chosen =
+        allCombos.find(c => Math.abs(c.s1 - c.s2) <= 6 && isCleanAF(c)) ??
+        allCombos.find(c => Math.abs(c.s1 - c.s2) <= 6) ??
+        allCombos.find(c => isCleanAF(c)) ??
+        allCombos[0]
+
+      // 이번에 M1/M2가 아닌 라인이 걸린 사람 = "튕긴" 사람
+      const allAssigned = [...chosen.team1, ...chosen.team2]
+      const newlyAutofilled = allAssigned.filter(tp => {
+        const orig = players.find(p => p.userId === tp.userId)!
+        return orig.most1 !== 'any' && orig.most1 !== tp.line && orig.most2 !== tp.line
+      }).map(tp => tp.userId)
+
+      // 지난판 보장을 이번에 실제로 받은 사람은 보장 목록에서 제거
+      const fulfilledGuarantees = allAssigned.filter(tp => {
+        const orig = players.find(p => p.userId === tp.userId)!
+        return guaranteedIds.has(tp.userId) && orig.most1 === tp.line
+      }).map(tp => tp.userId)
+
+      const newProtected = Array.from(new Set([...(myRoom.autofill_protected_ids ?? []), ...newlyAutofilled]))
+      const newGuaranteed = Array.from(new Set([
+        ...(myRoom.guaranteed_m1_ids ?? []).filter((id: string) => !fulfilledGuarantees.includes(id)),
+        ...newlyAutofilled,
+      ]))
+      // 이번 판에서 뭐가 바뀌었는지 기록해둠 — 이 판이 취소되면 이 델타로 되돌림
+      const delta = { added: newlyAutofilled, removedFromGuaranteed: fulfilledGuarantees }
+
+      const startedAt = new Date().toISOString()
+      await supabase.from('rooms').update({
+        pending_result: chosen,
+        balance_started_at: startedAt,
+        autofill_protected_ids: newProtected,
+        guaranteed_m1_ids: newGuaranteed,
+        pending_autofill_delta: delta,
+      }).eq('id', myRoom.id)
+
     }
     setBalancing(false)
   }
