@@ -155,7 +155,7 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
             className={`btn btn-sm${subTab === 'summoners' ? ' btn-gold' : ''}`}
             onClick={() => setSubTab('summoners')}
           >
-            소환사 관리
+            소환사 관리12345678
           </button>
           <button
             className={`btn btn-sm${subTab === 'inactive' ? ' btn-gold' : ''}`}
