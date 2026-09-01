@@ -930,16 +930,12 @@ export default function RoomsTab({
                       key={m.user_id}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 10, padding: '10px 13px',
-                        borderRadius: 12,
-                        background: isHostRow
-                          ? 'linear-gradient(135deg, rgba(224,198,143,0.14), rgba(224,198,143,0.05))'
-                          : 'var(--bg3)',
-                        border: isHostRow ? '1px solid rgba(224,198,143,0.4)' : undefined,
+                        borderRadius: 12, background: 'var(--bg3)',
                       }}
                     >
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: isHostRow ? 700 : 600, fontSize: 12.5 }}>
-                          <NameWithIdBadge name={m.summoner_name} idPrefixMap={idPrefixMap} userId={m.user_id} />
+                        <div style={{ fontWeight: 600, fontSize: 12.5 }}>
+                          {m.summoner_name}
                           {isMe && <span style={{ fontSize: 10, color: 'var(--gold2)', marginLeft: 4 }}>(나)</span>}
                           {isHostRow && <span style={{ fontSize: 10, color: 'var(--gold2)', marginLeft: 4 }}>👑</span>}
                         </div>
