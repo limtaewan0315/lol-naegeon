@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, Fragment } from 'react'
 import type { Line } from '@/lib/data'
 import { LINES, TIERS, getScoreByTier } from '@/lib/data'
 import { supabase, SummonerMap, SummonerScoreMap, GameRecord, NameWithIdBadge, tierFontSize } from '@/lib/shared'
@@ -169,7 +169,7 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
         {error && <div className="error">{error}</div>}
 
         {subTab === 'summoners' && (
-          <div style={{ maxHeight: 600, overflowY: 'auto' }}>
+          <div style={{ maxHeight: 600, overflowY: 'auto', paddingRight: 8 }}>
             <div className="card-title" style={{ fontSize: 12, marginBottom: 8 }}>모든 소환사</div>
             <input
               value={searchQuery}
@@ -184,90 +184,103 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
               if (filtered.length === 0) {
                 return <div className="empty">{searchQuery.trim() ? '검색 결과가 없어요' : '등록된 소환사가 없어요'}</div>
               }
-              return filtered.map(({ userId, name }) => {
-                const flagged = correctionMap?.[userId]?.needs_correction
-                return (
-                <div key={userId} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '0.5px solid var(--border2)' }}>
-                  <div style={{ fontWeight: 700, marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
-                    {editingNameUserId === userId ? (
-                      <div style={{ display: 'flex', gap: 4, flex: 1 }}>
-                        <input value={nameInput} onChange={e => setNameInput(e.target.value)} style={{ flex: 1, fontSize: 12 }} />
-                        <button className="btn btn-sm" onClick={() => saveName(userId)}>저장</button>
-                        <button className="btn btn-sm" onClick={() => setEditingNameUserId(null)}>취소</button>
-                      </div>
-                    ) : (
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <NameWithIdBadge name={name} idPrefixMap={idPrefixMap} userId={userId} />
-                        {flagged && <span className="badge b-lose" style={{ fontSize: 10 }}>정보수정요청</span>}
-                        <button className="btn btn-sm" onClick={() => startNameEdit(userId, name)}>이름 수정</button>
-                      </span>
-                    )}
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      {flagged ? (
-                        <button className="btn btn-sm" onClick={() => clearFlag(userId)}>확인 완료</button>
-                      ) : (
-                        <button className="btn btn-sm" onClick={() => startFlag(userId)}>정보 수정 요청</button>
-                      )}
-                      <button className="btn btn-danger btn-sm" onClick={() => deleteSummoner(userId, name)}>삭제</button>
-                    </div>
-                  </div>
-                  {flagged && correctionMap?.[userId]?.correction_note && (
-                    <div style={{ fontSize: 11, color: 'var(--red)', marginBottom: 6 }}>
-                      사유: {correctionMap?.[userId]?.correction_note}
-                    </div>
-                  )}
-                  {flaggingUserId === userId && (
-                    <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
-                      <input value={noteInput} onChange={e => setNoteInput(e.target.value)} placeholder="예: 소환사명에 특수문자, 롤계정 형식 오류" style={{ flex: 1, fontSize: 12 }} />
-                      <button className="btn btn-gold btn-sm" onClick={() => submitFlag(userId)}>등록</button>
-                      <button className="btn btn-sm" onClick={() => setFlaggingUserId(null)}>취소</button>
-                    </div>
-                  )}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
-                    {LINES.map(line => {
-                      const tier = summoners[userId]?.[line]
-                      const isEditing = editingUserId === userId && editingLine === line
+              return (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border2)' }}>
+                      <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text2)', fontWeight: 500 }}>이름</th>
+                      {LINES.map(l => (
+                        <th key={l} style={{ padding: '6px 4px', color: 'var(--text2)', fontWeight: 500 }}>{l}</th>
+                      ))}
+                      <th style={{ padding: '6px 4px' }} />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(({ userId, name }) => {
+                      const flagged = correctionMap?.[userId]?.needs_correction
                       return (
-                        <div key={line} style={{
-                          background: 'var(--bg3)', padding: '12px 6px 10px',
-                          borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-inset)',
-                          textAlign: 'center', transition: 'box-shadow 0.15s',
-                        }}>
-                          <div style={{
-                            fontSize: 10, color: 'var(--text3)', marginBottom: 8,
-                            fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-                          }}>{line}</div>
-                          {isEditing ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                              <select
-                                value={editingTier}
-                                onChange={e => setEditingTier(e.target.value)}
-                                style={{ width: '100%', padding: '2px 4px', fontSize: 10 }}
-                              >
-                                {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
-                              </select>
-                              <div style={{ display: 'flex', gap: 2 }}>
-                                <button className="btn btn-sm" style={{ flex: 1, padding: '2px 0', fontSize: 10 }} onClick={saveEdit}>저장</button>
-                                <button className="btn btn-sm" style={{ flex: 1, padding: '2px 0', fontSize: 10 }} onClick={cancelEdit}>취소</button>
-                              </div>
-                            </div>
-                          ) : tier ? (
-                            <span
-                              className="badge b-tier"
-                              onClick={() => startEdit(userId, line, tier)}
-                              style={{ fontSize: tierFontSize(tier), padding: '2px 6px', whiteSpace: 'nowrap', cursor: 'pointer' }}
-                            >
-                              {tier}
-                            </span>
-                          ) : (
-                            <span style={{ fontSize: 11, color: 'var(--text3)' }}>없음</span>
+                        <Fragment key={userId}>
+                          <tr key={userId} style={{ borderBottom: '1px solid var(--border)' }}>
+                            <td style={{ padding: '7px 8px', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                              {editingNameUserId === userId ? (
+                                <div style={{ display: 'flex', gap: 4 }}>
+                                  <input value={nameInput} onChange={e => setNameInput(e.target.value)} style={{ width: 90, fontSize: 11, padding: '2px 6px' }} />
+                                  <button className="btn btn-sm" style={{ padding: '2px 6px', fontSize: 10 }} onClick={() => saveName(userId)}>저장</button>
+                                  <button className="btn btn-sm" style={{ padding: '2px 6px', fontSize: 10 }} onClick={() => setEditingNameUserId(null)}>취소</button>
+                                </div>
+                              ) : (
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  <NameWithIdBadge name={name} idPrefixMap={idPrefixMap} userId={userId} />
+                                  {flagged && <span className="badge b-lose" style={{ fontSize: 9, padding: '1px 5px' }}>요청중</span>}
+                                </span>
+                              )}
+                            </td>
+                            {LINES.map(line => {
+                              const tier = summoners[userId]?.[line]
+                              const isEditing = editingUserId === userId && editingLine === line
+                              return (
+                                <td key={line} style={{ textAlign: 'center', padding: '4px 2px' }}>
+                                  {isEditing ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                                      <select
+                                        value={editingTier}
+                                        onChange={e => setEditingTier(e.target.value)}
+                                        style={{ width: '100%', padding: '2px', fontSize: 9 }}
+                                      >
+                                        {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
+                                      </select>
+                                      <div style={{ display: 'flex', gap: 2 }}>
+                                        <button className="btn btn-sm" style={{ flex: 1, padding: '1px 0', fontSize: 9 }} onClick={saveEdit}>저장</button>
+                                        <button className="btn btn-sm" style={{ flex: 1, padding: '1px 0', fontSize: 9 }} onClick={cancelEdit}>취소</button>
+                                      </div>
+                                    </div>
+                                  ) : tier ? (
+                                    <span
+                                      onClick={() => startEdit(userId, line, tier)}
+                                      style={{ cursor: 'pointer', color: 'var(--gold2)', fontWeight: 500 }}
+                                    >
+                                      {tier}
+                                    </span>
+                                  ) : (
+                                    <span style={{ color: 'var(--text3)' }}>없음</span>
+                                  )}
+                                </td>
+                              )
+                            })}
+                            <td style={{ padding: 4, whiteSpace: 'nowrap' }}>
+                              <button className="btn btn-sm" style={{ padding: '2px 5px', fontSize: 9 }} onClick={() => startNameEdit(userId, name)}>이름</button>
+                              {flagged ? (
+                                <button className="btn btn-sm" style={{ padding: '2px 5px', fontSize: 9 }} onClick={() => clearFlag(userId)}>확인</button>
+                              ) : (
+                                <button className="btn btn-sm" style={{ padding: '2px 5px', fontSize: 9 }} onClick={() => startFlag(userId)}>요청</button>
+                              )}
+                              <button className="btn btn-danger btn-sm" style={{ padding: '2px 5px', fontSize: 9 }} onClick={() => deleteSummoner(userId, name)}>삭제</button>
+                            </td>
+                          </tr>
+                          {flagged && correctionMap?.[userId]?.correction_note && (
+                            <tr key={userId + '-note'} style={{ borderBottom: '1px solid var(--border)' }}>
+                              <td colSpan={7} style={{ padding: '0 8px 6px', fontSize: 10, color: 'var(--red)' }}>
+                                사유: {correctionMap?.[userId]?.correction_note}
+                              </td>
+                            </tr>
                           )}
-                        </div>
+                          {flaggingUserId === userId && (
+                            <tr key={userId + '-flag'} style={{ borderBottom: '1px solid var(--border)' }}>
+                              <td colSpan={7} style={{ padding: '0 8px 6px' }}>
+                                <div style={{ display: 'flex', gap: 4 }}>
+                                  <input value={noteInput} onChange={e => setNoteInput(e.target.value)} placeholder="예: 소환사명에 특수문자, 롤계정 형식 오류" style={{ flex: 1, fontSize: 11, padding: '3px 8px' }} />
+                                  <button className="btn btn-gold btn-sm" style={{ fontSize: 10 }} onClick={() => submitFlag(userId)}>등록</button>
+                                  <button className="btn btn-sm" style={{ fontSize: 10 }} onClick={() => setFlaggingUserId(null)}>취소</button>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       )
                     })}
-                  </div>
-                </div>
-              )})
+                  </tbody>
+                </table>
+              )
             })()}
           </div>
         )}
