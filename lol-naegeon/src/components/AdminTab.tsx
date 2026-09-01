@@ -5,13 +5,17 @@ import type { Line } from '@/lib/data'
 import { LINES, TIERS, getScoreByTier } from '@/lib/data'
 import { supabase, SummonerMap, SummonerScoreMap, GameRecord, NameWithIdBadge, tierFontSize } from '@/lib/shared'
 
-export default function AdminTab({ summoners, summonerScores, records, nameByUserId, idPrefixMap }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; records: GameRecord[]; nameByUserId: Record<string, string>; idPrefixMap: Record<string, string> }) {
+export default function AdminTab({ summoners, summonerScores, records, nameByUserId, idPrefixMap, correctionMap, onRefresh }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; records: GameRecord[]; nameByUserId: Record<string, string>; idPrefixMap: Record<string, string>; correctionMap: Record<string, { needs_correction: boolean; correction_note: string | null }>; onRefresh: () => void }) {
   const [subTab, setSubTab] = useState<'summoners' | 'inactive'>('summoners')
   const [editingUserId, setEditingUserId] = useState<string | null>(null)
   const [editingLine, setEditingLine] = useState<Line | ''>('')
   const [editingTier, setEditingTier] = useState('')
   const [error, setError] = useState('')
   const [inactiveStatusMap, setInactiveStatusMap] = useState<Map<string, boolean>>(new Map())
+  const [editingNameUserId, setEditingNameUserId] = useState<string | null>(null)
+  const [nameInput, setNameInput] = useState('')
+  const [flaggingUserId, setFlaggingUserId] = useState<string | null>(null)
+  const [noteInput, setNoteInput] = useState('')
 
   // 계정ID+이름 쌍 목록 (동명이인도 각자 별개의 항목으로 정확히 구분됨)
   const allSummoners = Object.entries(nameByUserId)
@@ -107,6 +111,42 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
     setError('')
   }
 
+  const startNameEdit = (userId: string, currentName: string) => {
+    setEditingNameUserId(userId)
+    setNameInput(currentName)
+    setError('')
+  }
+
+  const saveName = async (userId: string) => {
+    const trimmed = nameInput.trim()
+    if (!trimmed) { setError('이름을 입력해주세요.'); return }
+    const { error: err } = await supabase.rpc('admin_update_name', { p_user_id: userId, p_new_name: trimmed })
+    if (err) { setError('이름 수정 실패: ' + err.message); return }
+    setEditingNameUserId(null)
+    onRefresh()
+  }
+
+  const startFlag = (userId: string) => {
+    setFlaggingUserId(userId)
+    setNoteInput('')
+    setError('')
+  }
+
+  const submitFlag = async (userId: string) => {
+    if (!noteInput.trim()) { setError('사유를 입력해주세요.'); return }
+    const { error: err } = await supabase.rpc('set_correction_flag', { p_user_id: userId, p_note: noteInput.trim() })
+    if (err) { setError('요청 등록 실패: ' + err.message); return }
+    setFlaggingUserId(null)
+    onRefresh()
+  }
+
+  const clearFlag = async (userId: string) => {
+    if (!confirm('확인 완료 처리할까요? 준비완료 버튼이 다시 정상적으로 풀려요.')) return
+    const { error: err } = await supabase.rpc('clear_correction_flag', { p_user_id: userId })
+    if (err) { setError('처리 실패: ' + err.message); return }
+    onRefresh()
+  }
+
   return (
     <div>
       <div className="card">
@@ -133,12 +173,45 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
             {allSummoners.length === 0 ? (
               <div className="empty">등록된 소환사가 없어요</div>
             ) : (
-              allSummoners.map(({ userId, name }) => (
+              allSummoners.map(({ userId, name }) => {
+                const flagged = correctionMap?.[userId]?.needs_correction
+                return (
                 <div key={userId} style={{ marginBottom: 12, paddingBottom: 10, borderBottom: '0.5px solid var(--border2)' }}>
-                  <div style={{ fontWeight: 700, marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span><NameWithIdBadge name={name} idPrefixMap={idPrefixMap} userId={userId} /></span>
-                    <button className="btn btn-danger btn-sm" onClick={() => deleteSummoner(userId, name)}>삭제</button>
+                  <div style={{ fontWeight: 700, marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                    {editingNameUserId === userId ? (
+                      <div style={{ display: 'flex', gap: 4, flex: 1 }}>
+                        <input value={nameInput} onChange={e => setNameInput(e.target.value)} style={{ flex: 1, fontSize: 12 }} />
+                        <button className="btn btn-sm" onClick={() => saveName(userId)}>저장</button>
+                        <button className="btn btn-sm" onClick={() => setEditingNameUserId(null)}>취소</button>
+                      </div>
+                    ) : (
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <NameWithIdBadge name={name} idPrefixMap={idPrefixMap} userId={userId} />
+                        {flagged && <span className="badge b-lose" style={{ fontSize: 10 }}>정보수정요청</span>}
+                        <button className="btn btn-sm" onClick={() => startNameEdit(userId, name)}>이름 수정</button>
+                      </span>
+                    )}
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {flagged ? (
+                        <button className="btn btn-sm" onClick={() => clearFlag(userId)}>확인 완료</button>
+                      ) : (
+                        <button className="btn btn-sm" onClick={() => startFlag(userId)}>정보 수정 요청</button>
+                      )}
+                      <button className="btn btn-danger btn-sm" onClick={() => deleteSummoner(userId, name)}>삭제</button>
+                    </div>
                   </div>
+                  {flagged && correctionMap?.[userId]?.correction_note && (
+                    <div style={{ fontSize: 11, color: 'var(--red)', marginBottom: 6 }}>
+                      사유: {correctionMap?.[userId]?.correction_note}
+                    </div>
+                  )}
+                  {flaggingUserId === userId && (
+                    <div style={{ display: 'flex', gap: 4, marginBottom: 6 }}>
+                      <input value={noteInput} onChange={e => setNoteInput(e.target.value)} placeholder="예: 소환사명에 특수문자, 롤계정 형식 오류" style={{ flex: 1, fontSize: 12 }} />
+                      <button className="btn btn-gold btn-sm" onClick={() => submitFlag(userId)}>등록</button>
+                      <button className="btn btn-sm" onClick={() => setFlaggingUserId(null)}>취소</button>
+                    </div>
+                  )}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
                     {LINES.map(line => {
                       const tier = summoners[userId]?.[line]
@@ -183,7 +256,7 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
                     })}
                   </div>
                 </div>
-              ))
+              )})
             )}
           </div>
         )}
