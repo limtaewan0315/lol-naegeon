@@ -197,3 +197,11 @@ export function tierBadgeStyle(tier: string): React.CSSProperties {
   }
   return { background: 'rgba(153,145,127,0.15)', color: '#99917f' } // 언랭 등
 }
+
+export function lineBadgeStyle(line: string): React.CSSProperties {
+  const colors: Record<string, string> = {
+    '탑': '#d98a63', '정글': '#8caa5e', '미드': '#a888d4', '원딜': '#7ba3d4', '서포터': '#d488a3',
+  }
+  const c = colors[line] ?? '#99917f'
+  return { background: `${c}26`, color: c }
+}
