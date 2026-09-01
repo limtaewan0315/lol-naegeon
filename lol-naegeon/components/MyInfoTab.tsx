@@ -18,16 +18,19 @@ export default function MyInfoTab({ summoners, summonerScores, records, idPrefix
   const [riotId, setRiotId] = useState('')
 
   // 인라인 편집 상태: 지금 어떤 필드를 수정 중인지 (한 번에 하나만)
-  const [editingField, setEditingField] = useState<'id' | 'password' | 'riot' | null>(null)
+  const [editingField, setEditingField] = useState<'id' | 'password' | 'riot' | 'name' | null>(null)
   const [saving, setSaving] = useState(false)
   const [fieldError, setFieldError] = useState('')
 
   const [idInput, setIdInput] = useState('')
   const [riotInput, setRiotInput] = useState('')
+  const [nameInput, setNameInput] = useState('')
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [newPassword2, setNewPassword2] = useState('')
   const [myRecordsPage, setMyRecordsPage] = useState(1)
+  const [needsCorrection, setNeedsCorrection] = useState(false)
+  const [correctionNote, setCorrectionNote] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -43,13 +46,15 @@ export default function MyInfoTab({ summoners, summonerScores, records, idPrefix
         // 본인 계정에 연결된 소환사명/롤계정만 조회 (RLS로 보호되어 다른 사람 데이터는 조회 불가)
         const { data } = await supabase
           .from('member_accounts')
-          .select('summoner_name, riot_id')
+          .select('summoner_name, riot_id, needs_correction, correction_note')
           .eq('user_id', user.id)
           .maybeSingle()
         name = data?.summoner_name ?? null
         if (!cancelled) {
           setSummonerName(name)
           setRiotId(data?.riot_id ?? '')
+          setNeedsCorrection(!!data?.needs_correction)
+          setCorrectionNote(data?.correction_note ?? null)
         }
       }
 
@@ -63,11 +68,12 @@ export default function MyInfoTab({ summoners, summonerScores, records, idPrefix
     return () => { cancelled = true }
   }, [])
 
-  const startEdit = (field: 'id' | 'password' | 'riot') => {
+  const startEdit = (field: 'id' | 'password' | 'riot' | 'name') => {
     setEditingField(field)
     setFieldError('')
     setIdInput(displayId)
     setRiotInput(riotId)
+    setNameInput(summonerName ?? '')
     setOldPassword('')
     setNewPassword('')
     setNewPassword2('')
@@ -119,6 +125,24 @@ export default function MyInfoTab({ summoners, summonerScores, records, idPrefix
       setFieldError('저장 실패: ' + err.message)
     } else {
       setRiotId(trimmed)
+      setEditingField(null)
+    }
+    setSaving(false)
+  }
+
+  const saveName = async () => {
+    const trimmed = nameInput.trim()
+    if (!trimmed) {
+      setFieldError('이름을 입력해주세요')
+      return
+    }
+    setSaving(true)
+    setFieldError('')
+    const { error: err } = await supabase.rpc('self_update_name_if_flagged', { p_new_name: trimmed })
+    if (err) {
+      setFieldError('저장 실패: ' + err.message)
+    } else {
+      setSummonerName(trimmed)
       setEditingField(null)
     }
     setSaving(false)
@@ -231,11 +255,37 @@ export default function MyInfoTab({ summoners, summonerScores, records, idPrefix
             </div>
           )}
 
-          {/* 소환사명 (수정 불가 — 경기 기록 등 여러 곳에서 식별자로 쓰여서 바꾸면 데이터가 꼬임) */}
-          <div style={rowStyle}>
-            <span style={labelStyle}>소환사명:</span>
-            <strong style={{ flex: 1 }}>{summonerName}</strong>
-          </div>
+          {/* 소환사명: 평소엔 수정 불가, 관리자가 "정보 수정 요청"을 걸어둔 경우에만 수정 가능 */}
+          {needsCorrection && (
+            <div style={{
+              fontSize: 11, color: 'var(--red)', marginBottom: 6,
+              background: 'var(--red-bg)', border: '0.5px solid var(--red-border)',
+              borderRadius: 'var(--radius)', padding: '6px 10px',
+            }}>
+              ⚠ 관리자가 정보 수정을 요청했어요: {correctionNote || '내용 없음'}
+            </div>
+          )}
+          {editingField === 'name' ? (
+            <div style={rowStyle}>
+              <span style={labelStyle}>소환사명:</span>
+              <input
+                value={nameInput}
+                onChange={e => setNameInput(e.target.value)}
+                disabled={saving}
+                style={{ flex: 1 }}
+              />
+              <button className="btn btn-gold btn-sm" onClick={saveName} disabled={saving} style={editBtnStyle}>{saving ? '저장 중...' : '저장'}</button>
+              <button className="btn btn-sm" onClick={cancelEdit} disabled={saving} style={editBtnStyle}>취소</button>
+            </div>
+          ) : (
+            <div style={rowStyle}>
+              <span style={labelStyle}>소환사명:</span>
+              <strong style={{ flex: 1 }}>{summonerName}</strong>
+              {needsCorrection && (
+                <button className="btn btn-gold btn-sm" onClick={() => startEdit('name')} style={editBtnStyle}>수정</button>
+              )}
+            </div>
+          )}
 
           {/* 롤 계정 */}
           {editingField === 'riot' ? (

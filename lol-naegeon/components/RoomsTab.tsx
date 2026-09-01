@@ -57,6 +57,7 @@ export default function RoomsTab({
   records,
   idPrefixMap,
   riotIdMap,
+  correctionMap,
   onRecord,
   dbIsAdmin,
   inactiveNames,
@@ -67,6 +68,7 @@ export default function RoomsTab({
   records: GameRecord[]
   idPrefixMap: Record<string, string>
   riotIdMap: Record<string, string>
+  correctionMap: Record<string, { needs_correction: boolean; correction_note: string | null }>
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
   dbIsAdmin: boolean
   inactiveNames: Set<string>
@@ -1051,7 +1053,8 @@ export default function RoomsTab({
 
               {myMember && (() => {
                 const hasRiotId = !!(myUserId && riotIdMap[myUserId])
-                if (myMember.ready || hasRiotId) {
+                const isFlagged = !!(myUserId && correctionMap[myUserId]?.needs_correction)
+                if (myMember.ready || (hasRiotId && !isFlagged)) {
                   return (
                     <button
                       className={`btn ${myMember.ready ? '' : 'btn-gold'}`}
@@ -1069,14 +1072,21 @@ export default function RoomsTab({
                       background: 'var(--red-bg)', border: '0.5px solid var(--red-border)',
                       borderRadius: 'var(--radius)', padding: '6px 10px',
                     }}>
-                      ⚠ 롤 계정이 등록되어 있지 않아요. "내 정보"에서 롤 계정을 입력한 뒤 이 탭으로 돌아와 새로고침하면 준비완료를 누를 수 있어요.
+                      {isFlagged ? (
+                        <>
+                          ⚠ 관리자가 정보 수정을 요청했어요: {correctionMap[myUserId!]?.correction_note || '내용 없음'}
+                          <br />"내 정보"에서 수정하고 관리자 확인을 기다려주세요.
+                        </>
+                      ) : (
+                        '⚠ 롤 계정이 등록되어 있지 않아요. "내 정보"에서 롤 계정을 입력한 뒤 이 탭으로 돌아와 새로고침하면 준비완료를 누를 수 있어요.'
+                      )}
                     </div>
                     <button
                       className="btn btn-danger"
                       disabled
                       style={{ width: '100%', opacity: 0.6, cursor: 'not-allowed', padding: '8px 16px', fontSize: 13, fontWeight: 500 }}
                     >
-                      준비완료 (롤 계정 등록 필요)
+                      {isFlagged ? '준비완료 (정보 수정 필요)' : '준비완료 (롤 계정 등록 필요)'}
                     </button>
                   </div>
                 )

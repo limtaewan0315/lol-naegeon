@@ -25,15 +25,17 @@ export default function MainApp() {
 
   const [idPrefixMap, setIdPrefixMap] = useState<Record<string, string>>({})
   const [riotIdMap, setRiotIdMap] = useState<Record<string, string>>({})
+  const [correctionMap, setCorrectionMap] = useState<Record<string, { needs_correction: boolean; correction_note: string | null }>>({})
   const [inactiveNames, setInactiveNames] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
 
   const fetchAll = useCallback(async () => {
-    const [{ data: recs }, { data: sums }, { data: prefixes }, { data: riotIds }] = await Promise.all([
+    const [{ data: recs }, { data: sums }, { data: prefixes }, { data: riotIds }, { data: flags }] = await Promise.all([
       supabase.from('records').select('*').order('created_at', { ascending: false }),
       supabase.from('summoners').select('*'),
       supabase.rpc('summoner_id_prefixes'),
       supabase.rpc('member_riot_ids'),
+      supabase.rpc('member_correction_flags'),
     ])
     if (recs) setRecords(recs)
     if (prefixes) {
@@ -45,6 +47,13 @@ export default function MainApp() {
       const rm: Record<string, string> = {}
       riotIds.forEach((r: { user_id: string; riot_id: string }) => { rm[r.user_id] = r.riot_id })
       setRiotIdMap(rm)
+    }
+    if (flags) {
+      const cm: Record<string, { needs_correction: boolean; correction_note: string | null }> = {}
+      flags.forEach((f: { user_id: string; needs_correction: boolean; correction_note: string | null }) => {
+        cm[f.user_id] = { needs_correction: f.needs_correction, correction_note: f.correction_note }
+      })
+      setCorrectionMap(cm)
     }
     if (sums) {
       const map: SummonerMap = {}
@@ -252,7 +261,7 @@ export default function MainApp() {
             <div className="empty">불러오는 중...</div>
           ) : (
             <>
-              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} riotIdMap={riotIdMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} inactiveNames={inactiveNames} nameByUserId={nameByUserId} />}
+              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} riotIdMap={riotIdMap} correctionMap={correctionMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} inactiveNames={inactiveNames} nameByUserId={nameByUserId} />}
               {tab === 'record' && dbIsAdmin && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
               {tab === 'ranking' && <RankingTab records={records} idPrefixMap={idPrefixMap} />}
               {tab === 'hall' && <HallOfFameTab records={records} idPrefixMap={idPrefixMap} />}
@@ -264,7 +273,7 @@ export default function MainApp() {
 
               {tab === 'admin' && dbIsAdmin && (
                 <div>
-                  <AdminTab summoners={summoners} summonerScores={summonerScores} records={records} nameByUserId={nameByUserId} idPrefixMap={idPrefixMap} />
+                  <AdminTab summoners={summoners} summonerScores={summonerScores} records={records} nameByUserId={nameByUserId} idPrefixMap={idPrefixMap} correctionMap={correctionMap} onRefresh={fetchAll} />
                 </div>
               )}
             </>
