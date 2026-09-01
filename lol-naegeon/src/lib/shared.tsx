@@ -171,3 +171,16 @@ export const PRIVACY_CONSENT_DETAIL = `[개인정보 수집·이용 동의]
    - 수집된 개인정보는 명시된 목적 외 다른 용도로 사용되지 않으며, 본인 동의 없이 제3자에게 제공하지 않습니다.`
 
 // ── 로그인 페이지 ──────────────────────────────────────────────
+
+export function tierBadgeStyle(tier: string): React.CSSProperties {
+  if (tier.startsWith('실버')) return { background: 'rgba(159,168,181,0.15)', color: '#c3cad4' }
+  if (tier.startsWith('골드')) return { background: 'rgba(224,198,143,0.16)', color: '#e0c68f' }
+  if (tier.startsWith('플래티넘')) return { background: 'rgba(79,209,197,0.15)', color: '#4fd1c5' }
+  if (tier.startsWith('에메랄드')) return { background: 'rgba(62,207,142,0.15)', color: '#3ecf8e' }
+  if (tier.startsWith('다이아')) return { background: 'rgba(79,158,234,0.15)', color: '#6fb6f5' }
+  if (tier.startsWith('마스터')) return { background: 'rgba(176,112,224,0.16)', color: '#c48cf0' }
+  if (tier.startsWith('그랜드마스터')) return { background: 'rgba(239,84,104,0.16)', color: '#ef5468' }
+  if (tier.startsWith('챌린저')) return { background: 'linear-gradient(135deg,#f4e0a0,#d4a94f)', color: '#4a3308', fontWeight: 700 }
+  if (tier === '리그오브레전드') return { background: '#16213f', color: '#f0d78c', fontWeight: 700 }
+  return { background: 'rgba(153,145,127,0.15)', color: '#99917f' } // 언랭 등
+}
