@@ -113,7 +113,7 @@ export default function RoomChat({ roomId, myName, myUserId }: { roomId: number;
           disabled={sending}
           maxLength={300}
           rows={2}
-          style={{ resize: 'none', overflowY: 'auto', maxHeight: 72, fontFamily: 'inherit', lineHeight: 1.4, borderRadius: 20 }}
+          style={{ resize: 'none', overflowY: 'auto', maxHeight: 72, fontFamily: 'inherit', lineHeight: 1.4, borderRadius: 10, paddingLeft: 14 }}
         />
         <button
           onClick={send}

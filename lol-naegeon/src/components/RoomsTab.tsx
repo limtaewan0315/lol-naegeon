@@ -897,21 +897,25 @@ export default function RoomsTab({
           <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {myRoom.name}
             {isHost && <span style={{ fontSize: 11, color: 'var(--gold, #d4af37)' }}>👑 방장</span>}
-          </div>
-          <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span>참가자 {myRoom.members.length}/10</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }} title={`이번 방에서 ${myRoom.recent_team_history?.length ?? 0}/4판 진행됨 (4판을 채우면 방이 자동으로 사라져요)`}>
-              {[0, 1, 2, 3].map(i => (
-                <span
-                  key={i}
-                  style={{
-                    width: 7, height: 7, borderRadius: '50%',
-                    background: i < (myRoom.recent_team_history?.length ?? 0) ? 'var(--gold, #d4af37)' : 'transparent',
-                    border: `1px solid ${i < (myRoom.recent_team_history?.length ?? 0) ? 'var(--gold, #d4af37)' : 'var(--border2)'}`,
-                  }}
-                />
-              ))}
+            <span style={{ display: 'flex', alignItems: 'center', gap: 3 }} title={`이번 방에서 ${4 - (myRoom.recent_team_history?.length ?? 0)}/4판 남음 (다 쓰면 방이 자동으로 사라져요)`}>
+              {[0, 1, 2, 3].map(i => {
+                const remaining = 4 - (myRoom.recent_team_history?.length ?? 0)
+                const filled = i < remaining
+                return (
+                  <span
+                    key={i}
+                    style={{
+                      width: 8, height: 8, borderRadius: 2,
+                      background: filled ? 'var(--gold2)' : 'var(--text3)',
+                      opacity: filled ? 1 : 0.4,
+                    }}
+                  />
+                )
+              })}
             </span>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 10 }}>
+            참가자 {myRoom.members.length}/10
           </div>
 
           {!myRoom.result && countdown === null && (
@@ -1053,62 +1057,65 @@ export default function RoomsTab({
               {myMember && (() => {
                 const hasRiotId = !!(myUserId && riotIdMap[myUserId])
                 const isFlagged = !!(myUserId && correctionMap[myUserId]?.needs_correction)
-                if (myMember.ready || (hasRiotId && !isFlagged)) {
-                  return (
-                    <button
-                      className={`btn ${myMember.ready ? '' : 'btn-gold'}`}
-                      onClick={toggleReady}
-                      style={{ width: '100%', marginBottom: 8 }}
-                    >
-                      {myMember.ready ? '준비 취소' : '준비완료'}
-                    </button>
-                  )
-                }
+                const canReady = myMember.ready || (hasRiotId && !isFlagged)
+
                 return (
-                  <div style={{ marginBottom: 8 }}>
-                    <div style={{
-                      fontSize: 11, color: 'var(--red)', marginBottom: 6,
-                      background: 'var(--red-bg)', border: '0.5px solid var(--red-border)',
-                      borderRadius: 'var(--radius)', padding: '6px 10px',
-                    }}>
-                      {isFlagged ? (
-                        <>
-                          ⚠ 관리자가 정보 수정을 요청했어요: {correctionMap[myUserId!]?.correction_note || '내용 없음'}
-                          <br />"내 정보"에서 수정하고 관리자 확인을 기다려주세요.
-                        </>
+                  <>
+                    {!canReady && (
+                      <div style={{
+                        fontSize: 11, color: 'var(--red)', marginBottom: 6,
+                        background: 'var(--red-bg)', border: '0.5px solid var(--red-border)',
+                        borderRadius: 'var(--radius)', padding: '6px 10px',
+                      }}>
+                        {isFlagged ? (
+                          <>
+                            ⚠ 관리자가 정보 수정을 요청했어요: {correctionMap[myUserId!]?.correction_note || '내용 없음'}
+                            <br />"내 정보"에서 수정하고 관리자 확인을 기다려주세요.
+                          </>
+                        ) : (
+                          '⚠ 롤 계정이 등록되어 있지 않아요. "내 정보"에서 롤 계정을 입력한 뒤 이 탭으로 돌아와 새로고침하면 준비완료를 누를 수 있어요.'
+                        )}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn btn-danger" onClick={leaveRoom} style={{ flex: 1 }}>
+                        나가기
+                      </button>
+                      {canReady ? (
+                        <button
+                          className={`btn ${myMember.ready ? '' : 'btn-gold'}`}
+                          onClick={toggleReady}
+                          style={{ flex: 2 }}
+                        >
+                          {myMember.ready ? '준비 취소' : '준비완료'}
+                        </button>
                       ) : (
-                        '⚠ 롤 계정이 등록되어 있지 않아요. "내 정보"에서 롤 계정을 입력한 뒤 이 탭으로 돌아와 새로고침하면 준비완료를 누를 수 있어요.'
+                        <button
+                          className="btn btn-danger"
+                          disabled
+                          style={{ flex: 2, opacity: 0.6, cursor: 'not-allowed' }}
+                        >
+                          {isFlagged ? '준비 불가 (정보 수정 필요)' : '준비 불가 (롤 계정 등록 필요)'}
+                        </button>
+                      )}
+                      {isHost && (
+                        <button
+                          className="btn btn-gold"
+                          onClick={runBalance}
+                          disabled={!allReady || balancing}
+                          style={{
+                            flex: 2,
+                            ...(allReady ? { boxShadow: '0 0 20px rgba(224,198,143,0.5), 0 4px 14px rgba(200,170,110,0.35)', fontWeight: 800 } : {}),
+                          }}
+                        >
+                          {balancing ? '편성 중...' : allReady ? `✓ 팀편성 시작` : `팀편성 (${myRoom.members.filter(m => m.ready).length}/${myRoom.members.length})`}
+                        </button>
                       )}
                     </div>
-                    <button
-                      className="btn btn-danger"
-                      disabled
-                      style={{ width: '100%', opacity: 0.6, cursor: 'not-allowed', padding: '8px 16px', fontSize: 13, fontWeight: 500 }}
-                    >
-                      {isFlagged ? '준비완료 (정보 수정 필요)' : '준비완료 (롤 계정 등록 필요)'}
-                    </button>
-                  </div>
+                  </>
                 )
               })()}
-
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn btn-danger" onClick={leaveRoom} style={{ flex: 1 }}>
-                  나가기
-                </button>
-                {isHost && (
-                  <button
-                    className="btn btn-gold"
-                    onClick={runBalance}
-                    disabled={!allReady || balancing}
-                    style={{
-                      flex: 2,
-                      ...(allReady ? { boxShadow: '0 0 20px rgba(224,198,143,0.5), 0 4px 14px rgba(200,170,110,0.35)', fontWeight: 800 } : {}),
-                    }}
-                  >
-                    {balancing ? '편성 중...' : allReady ? `✓ 전원 준비완료 — 팀편성 시작` : `팀편성 (${myRoom.members.filter(m => m.ready).length}/${myRoom.members.length})`}
-                  </button>
-                )}
-              </div>
               {balanceError && <div className="error" style={{ marginTop: 8 }}>{balanceError}</div>}
             </>
           )}
