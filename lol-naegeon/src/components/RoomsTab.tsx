@@ -628,11 +628,14 @@ export default function RoomsTab({
   }, [countdown, myRoom?.id])
 
   const [isRecording, setIsRecording] = useState(false)
+  // 전적 기록 2중 확인장치: 버튼 누르면 바로 기록하지 않고, 한 번 더 확인받은 후에만 기록
+  const [confirmingWinner, setConfirmingWinner] = useState<'blue' | 'red' | null>(null)
   const recordingRef = useRef(false)
 
   const recordWin = async (winner: 'blue' | 'red') => {
     if (!myRoom?.result || recordingRef.current || !isHost) return
     recordingRef.current = true
+    setConfirmingWinner(null)
     setIsRecording(true)
 
     // 동시 클릭 방지: DB에서 원자적으로 선점 (이미 result가 null이면 다른 사람이 처리한 것)
@@ -1333,13 +1336,37 @@ export default function RoomsTab({
                 <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>🏆 이긴 팀은 티어 UP, 진 팀은 티어 DOWN</div>
                 {!isHost ? (
                   <div className="empty">방장만 경기 결과를 기록할 수 있어요</div>
-                ) : !isRecording ? (
-                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-                    <button className="btn btn-blue" onClick={() => recordWin('blue')}>🔵 블루팀 승리</button>
-                    <button className="btn btn-red" onClick={() => recordWin('red')}>🔴 레드팀 승리</button>
+                ) : isRecording ? (
+                  <div className="empty">기록 중...</div>
+                ) : confirmingWinner ? (
+                  <div>
+                    <div style={{
+                      fontSize: 13, fontWeight: 700, marginBottom: 10,
+                      color: confirmingWinner === 'blue' ? 'var(--blue, #4a90e2)' : 'var(--red)',
+                    }}>
+                      {confirmingWinner === 'blue' ? '🔵 블루팀 승리' : '🔴 레드팀 승리'}가 맞나요?
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10 }}>
+                      한 번 기록하면 점수가 즉시 반영돼요. 다시 한번 확인해주세요.
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                      <button className="btn btn-sm" onClick={() => setConfirmingWinner(null)} style={{ flex: 1 }}>
+                        아니요, 다시 선택
+                      </button>
+                      <button
+                        className={`btn ${confirmingWinner === 'blue' ? 'btn-blue' : 'btn-red'}`}
+                        onClick={() => recordWin(confirmingWinner)}
+                        style={{ flex: 1 }}
+                      >
+                        맞아요, 전적 기록
+                      </button>
+                    </div>
                   </div>
                 ) : (
-                  <div className="empty">기록 중...</div>
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                    <button className="btn btn-blue" onClick={() => setConfirmingWinner('blue')}>🔵 블루팀 승리</button>
+                    <button className="btn btn-red" onClick={() => setConfirmingWinner('red')}>🔴 레드팀 승리</button>
+                  </div>
                 )}
               </div>
             </>
