@@ -221,6 +221,11 @@ export default function MainApp() {
         <button
           className="btn btn-sm"
           onClick={async () => {
+            // 방장인 채로 로그아웃하면 방이 방치되고 안 없어졌으므로, 로그아웃 전에 내가 방장인 방을 먼저 정리
+            const { data: { user } } = await supabase.auth.getUser()
+            if (user) {
+              await supabase.from('rooms').delete().eq('host_user_id', user.id)
+            }
             await supabase.auth.signOut()
             window.location.reload()
           }}
@@ -273,7 +278,7 @@ export default function MainApp() {
 
               {tab === 'admin' && dbIsAdmin && (
                 <div>
-                  <AdminTab summoners={summoners} summonerScores={summonerScores} records={records} nameByUserId={nameByUserId} idPrefixMap={idPrefixMap} correctionMap={correctionMap} onRefresh={fetchAll} />
+                  <AdminTab summoners={summoners} summonerScores={summonerScores} records={records} nameByUserId={nameByUserId} idPrefixMap={idPrefixMap} riotIdMap={riotIdMap} correctionMap={correctionMap} onRefresh={fetchAll} />
                 </div>
               )}
             </>
