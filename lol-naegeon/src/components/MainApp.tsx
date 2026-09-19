@@ -26,16 +26,18 @@ export default function MainApp() {
   const [idPrefixMap, setIdPrefixMap] = useState<Record<string, string>>({})
   const [riotIdMap, setRiotIdMap] = useState<Record<string, string>>({})
   const [correctionMap, setCorrectionMap] = useState<Record<string, { needs_correction: boolean; correction_note: string | null }>>({})
+  const [loginIdStatusMap, setLoginIdStatusMap] = useState<Record<string, boolean>>({})
   const [inactiveNames, setInactiveNames] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
 
   const fetchAll = useCallback(async () => {
-    const [{ data: recs }, { data: sums }, { data: prefixes }, { data: riotIds }, { data: flags }] = await Promise.all([
+    const [{ data: recs }, { data: sums }, { data: prefixes }, { data: riotIds }, { data: flags }, { data: loginIdStatuses }] = await Promise.all([
       supabase.from('records').select('*').order('created_at', { ascending: false }),
       supabase.from('summoners').select('*'),
       supabase.rpc('summoner_id_prefixes'),
       supabase.rpc('member_riot_ids'),
       supabase.rpc('member_correction_flags'),
+      supabase.rpc('member_login_id_status'),
     ])
     if (recs) setRecords(recs)
     if (prefixes) {
@@ -47,6 +49,11 @@ export default function MainApp() {
       const rm: Record<string, string> = {}
       riotIds.forEach((r: { user_id: string; riot_id: string }) => { rm[r.user_id] = r.riot_id })
       setRiotIdMap(rm)
+    }
+    if (loginIdStatuses) {
+      const lm: Record<string, boolean> = {}
+      loginIdStatuses.forEach((s: { user_id: string; has_login_id: boolean }) => { lm[s.user_id] = s.has_login_id })
+      setLoginIdStatusMap(lm)
     }
     if (flags) {
       const cm: Record<string, { needs_correction: boolean; correction_note: string | null }> = {}
@@ -266,7 +273,7 @@ export default function MainApp() {
             <div className="empty">불러오는 중...</div>
           ) : (
             <>
-              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} riotIdMap={riotIdMap} correctionMap={correctionMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} inactiveNames={inactiveNames} nameByUserId={nameByUserId} />}
+              {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} riotIdMap={riotIdMap} correctionMap={correctionMap} loginIdStatusMap={loginIdStatusMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} inactiveNames={inactiveNames} nameByUserId={nameByUserId} />}
               {tab === 'record' && dbIsAdmin && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
               {tab === 'ranking' && <RankingTab records={records} idPrefixMap={idPrefixMap} inactiveNames={inactiveNames} />}
               {tab === 'hall' && <HallOfFameTab records={records} idPrefixMap={idPrefixMap} inactiveNames={inactiveNames} />}
