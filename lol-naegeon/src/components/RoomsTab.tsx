@@ -5,7 +5,8 @@ import type { Line } from '@/lib/data'
 import { LINES, TIERS, getScore, getTierByScore, getScoreByTier, shuffle } from '@/lib/data'
 import {
   supabase, SummonerMap, SummonerScoreMap, GameRecord, TeamPlayer, BalanceResult,
-  PlayerEntry, NameWithIdBadge, LINE_ORDER, DISCORD_WEBHOOK_URL, tierBadgeStyle, lineBadgeStyle
+  PlayerEntry, NameWithIdBadge, LINE_ORDER, DISCORD_WEBHOOK_URL, tierBadgeStyle, lineBadgeStyle,
+  riotIdToLolPsUrl
 } from '@/lib/shared'
 import RoomChat from './RoomChat'
 
@@ -41,14 +42,6 @@ function resultSignature(r: BalanceResult): string {
   const teamSig = (team: TeamPlayer[]) => team.map(p => `${p.userId}:${p.line}`).sort().join(',')
   const sigs = [teamSig(r.team1), teamSig(r.team2)].sort()
   return sigs.join('|')
-}
-
-function riotIdToLolPsUrl(riotId: string): string | null {
-  const parts = riotId.split('#')
-  if (parts.length !== 2) return null
-  const [gameName, tag] = parts
-  if (!gameName.trim() || !tag.trim()) return null
-  return `https://lol.ps/summoner/${encodeURIComponent(`${gameName.trim()}_${tag.trim()}`)}?region=kr`
 }
 
 export default function RoomsTab({
@@ -884,7 +877,21 @@ export default function RoomsTab({
                     >
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 600, fontSize: 12.5 }}>
-                          {m.summoner_name}
+                          {(() => {
+                            const riotId = riotIdMap[m.user_id]
+                            const lolPsUrl = riotId ? riotIdToLolPsUrl(riotId) : null
+                            return lolPsUrl ? (
+                              <a
+                                href={lolPsUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ color: 'inherit', textDecoration: 'none', cursor: 'pointer' }}
+                                title="lol.ps에서 전적 보기"
+                              >
+                                {m.summoner_name}
+                              </a>
+                            ) : m.summoner_name
+                          })()}
                           {isMe && <span style={{ fontSize: 10, color: 'var(--gold2)', marginLeft: 4 }}>(나)</span>}
                           {isHostRow && <span style={{ fontSize: 10, color: 'var(--gold2)', marginLeft: 4 }}>👑</span>}
                         </div>
@@ -1152,7 +1159,7 @@ export default function RoomsTab({
                                 href={lolPsUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                style={{ color: 'inherit', textDecoration: 'underline dotted', textUnderlineOffset: 2, cursor: 'pointer' }}
+                                style={{ color: 'inherit', textDecoration: 'none', cursor: 'pointer' }}
                                 title="lol.ps에서 전적 보기"
                               >
                                 <NameWithIdBadge name={p.name} idPrefixMap={idPrefixMap} userId={p.userId} />
