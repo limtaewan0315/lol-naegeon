@@ -445,9 +445,6 @@ export default function RoomsTab({
     const candidates: { diff: number; result: BalanceResult }[] = []
 
     if (remainingLines.length > 0 && remainingPlayers.length === remainingLines.length * 2) {
-      const LINE_PREFERENCE: Record<string, Line> = { '공민규': '정글' }
-      const PREFERENCE_RATE = 0.95
-
       for (let i = 0; i < 3000; i++) {
         const assigned = remainingPlayers.map(p => {
           // 전판에 튕겼던 사람의 M1 보장 — 이 라인이 충분한 라인이라 강제확정 대상은 아니지만,
@@ -456,12 +453,7 @@ export default function RoomsTab({
             const tier = summoners[p.userId]?.[p.most1 as Line] ?? '골드2'
             return { userId: p.userId, name: p.name, line: p.most1 as Line, score: getAdjustedScore(p.userId, p.most1 as Line, tier) }
           }
-          const preferredLine = LINE_PREFERENCE[p.name]
           const allLines = getSummonerLines(p.userId)
-          if (preferredLine && remainingLines.includes(preferredLine) && allLines.includes(preferredLine) && Math.random() < PREFERENCE_RATE) {
-            const tier = summoners[p.userId]?.[preferredLine] ?? '골드2'
-            return { userId: p.userId, name: p.name, line: preferredLine, score: getAdjustedScore(p.userId, preferredLine, tier) }
-          }
           let line: Line
           if (p.most1 === 'any') {
             const opts = allLines.filter(l => remainingLines.includes(l))
