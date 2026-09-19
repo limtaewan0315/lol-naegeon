@@ -4,11 +4,16 @@ import { useState } from 'react'
 import type { Line } from '@/lib/data'
 import { LINE_ORDER, GameRecord } from '@/lib/shared'
 
-export default function RecordTab({ records, onDelete, onClear, isAdmin }: {
+type Season = { id: number; name: string; starts_at: string; ends_at: string | null }
+
+export default function RecordTab({ records, onDelete, onClear, isAdmin, seasons, selectedSeasonId, onSeasonChange }: {
   records: GameRecord[]
   onDelete: (id: number) => void
   onClear: () => void
   isAdmin: boolean
+  seasons?: Season[]
+  selectedSeasonId?: number | 'all'
+  onSeasonChange?: (id: number | 'all') => void
 }) {
   const [page, setPage] = useState(1)
   const PAGE_SIZE = 10
@@ -54,7 +59,21 @@ export default function RecordTab({ records, onDelete, onClear, isAdmin }: {
           </div>
         </div>
 
-        <div className="card-title">경기 기록</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="card-title" style={{ marginBottom: 0 }}>경기 기록</div>
+          {seasons && seasons.length > 0 && onSeasonChange && (
+            <select
+              value={selectedSeasonId}
+              onChange={e => onSeasonChange(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+              style={{ fontSize: 12, padding: '4px 8px' }}
+            >
+              <option value="all">전체</option>
+              {seasons.map(s => (
+                <option key={s.id} value={s.id}>{s.name}{s.ends_at === null ? ' (진행중)' : ''}</option>
+              ))}
+            </select>
+          )}
+        </div>
         {records.length === 0
           ? <div className="empty">아직 기록된 경기가 없어요.</div>
           : pagedRecords.map((r, i) => {
