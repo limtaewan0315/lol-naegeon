@@ -88,11 +88,11 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
     if (!editingUserId || editingLine === '') return
     setError('')
 
-    const { error: err } = await supabase
-      .from('summoners')
-      .update({ tier: editingTier, score: getScoreByTier(editingTier) })
-      .eq('user_id', editingUserId)
-      .eq('line', editingLine)
+    const { error: err } = await supabase.rpc('admin_update_summoner_tier', {
+      p_user_id: editingUserId,
+      p_line: editingLine,
+      p_new_tier: editingTier
+    })
 
     if (err) {
       setError('업데이트 실패: ' + err.message)
