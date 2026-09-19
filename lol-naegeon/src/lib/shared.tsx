@@ -44,6 +44,15 @@ export interface PlayerEntry {
   assignedScore?: number
 }
 
+// 롤 계정("이름#태그")을 lol.ps 전적 검색 URL로 변환 (형식이 아니면 null)
+export function riotIdToLolPsUrl(riotId: string): string | null {
+  const parts = riotId.split('#')
+  if (parts.length !== 2) return null
+  const [gameName, tag] = parts
+  if (!gameName.trim() || !tag.trim()) return null
+  return `https://lol.ps/summoner/${encodeURIComponent(`${gameName.trim()}_${tag.trim()}`)}?region=kr`
+}
+
 export function checkPassword(): boolean {
   const input = prompt('보안 코드를 입력해주세요')
   if (input === null) return false
