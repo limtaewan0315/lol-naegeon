@@ -91,6 +91,25 @@ export default function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void
         setLoading(false)
         return
       }
+
+      // 장기 미접속으로 비활성화된 계정은 로그인 자체를 막음
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: inactiveRow } = await supabase
+          .from('summoners')
+          .select('is_inactive')
+          .eq('user_id', user.id)
+          .eq('is_inactive', true)
+          .limit(1)
+          .maybeSingle()
+        if (inactiveRow) {
+          await supabase.auth.signOut()
+          setError('장기미접속으로 인해 비활성화된 계정입니다. 관리자에게 문의부탁드립니다')
+          setLoading(false)
+          return
+        }
+      }
+
       onAuthSuccess()
     } catch (err) {
       setError('오류 발생: ' + (err as any).message)
@@ -106,7 +125,7 @@ export default function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void
       return
     }
     if (!isValidLoginId(newLoginId)) {
-      setError('아이디는 영문/숫자/언더스코어(_)로 5~20자여야 해요')
+      setError('아이디는 영문/숫자/언더스코어(_)포함 5~20자 입니다')
       return
     }
     if (!r.includes('#')) {
@@ -143,7 +162,7 @@ export default function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void
         return
       }
 
-      alert('가입 신청완료! 관리자 승인 후 로그인할 수 있어요.')
+      alert('가입 신청이 접수됐어요! 관리자 승인 후 로그인할 수 있어요.')
       setIsSignUp(false)
       resetSignUpFields()
     } catch (err) {
@@ -174,7 +193,7 @@ export default function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
             <input
               type="text"
-              placeholder="아이디 (영문/숫자/_ 5~20자)"
+              placeholder="아이디 (영문/숫자/_ 포함 5~20자)"
               value={loginId}
               onChange={e => setLoginId(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleAuth()}
@@ -203,7 +222,7 @@ export default function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void
                 borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 8
               }}>
                 <div style={{ fontSize: 11, color: 'var(--text3)' }}>
-                  아이디, 소환사명, 롤계정을 입력하면 비밀번호가 <strong>1234</strong>로 초기화됩니다. 로그인 후 반드시 새 비밀번호로 변경하세요.
+                  아이디, 소환사명, 롤계정을 입력하면 비밀번호가 <strong>1234</strong>로 초기화돼요. 로그인 후 반드시 새 비밀번호로 변경해야 해요.
                 </div>
                 <input
                   type="text"
