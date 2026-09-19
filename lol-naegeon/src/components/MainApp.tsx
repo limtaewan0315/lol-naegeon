@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import type { Line } from '@/lib/data'
 import { getScoreByTier, getTierByScore } from '@/lib/data'
 import { supabase, GameRecord, SummonerMap, SummonerScoreMap, checkPassword } from '@/lib/shared'
@@ -30,16 +30,27 @@ export default function MainApp() {
   const [inactiveNames, setInactiveNames] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
 
+  type Season = { id: number; name: string; starts_at: string; ends_at: string | null }
+  const [seasons, setSeasons] = useState<Season[]>([])
+  const [selectedSeasonId, setSelectedSeasonId] = useState<number | 'all'>('all')
+
   const fetchAll = useCallback(async () => {
-    const [{ data: recs }, { data: sums }, { data: prefixes }, { data: riotIds }, { data: flags }, { data: loginIdStatuses }] = await Promise.all([
+    const [{ data: recs }, { data: sums }, { data: prefixes }, { data: riotIds }, { data: flags }, { data: loginIdStatuses }, { data: seasonRows }] = await Promise.all([
       supabase.from('records').select('*').order('created_at', { ascending: false }),
       supabase.from('summoners').select('*'),
       supabase.rpc('summoner_id_prefixes'),
       supabase.rpc('member_riot_ids'),
       supabase.rpc('member_correction_flags'),
       supabase.rpc('member_login_id_status'),
+      supabase.from('seasons').select('*').order('starts_at', { ascending: true }),
     ])
     if (recs) setRecords(recs)
+    if (seasonRows) {
+      setSeasons(seasonRows)
+      // 기본값: 진행중인(ends_at이 null인) 가장 최근 시즌을 자동 선택. 없으면 '전체'
+      const ongoing = [...seasonRows].reverse().find((s: Season) => s.ends_at === null)
+      if (ongoing) setSelectedSeasonId(prev => prev === 'all' ? ongoing.id : prev)
+    }
     if (prefixes) {
       const pm: Record<string, string> = {}
       prefixes.forEach((p: { user_id: string; summoner_name: string; id_prefix: string }) => { pm[p.user_id] = p.id_prefix })
@@ -100,6 +111,19 @@ export default function MainApp() {
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
+
+  // 선택된 시즌 범위에 맞춰 경기 기록 필터링 (랭킹/명예의 전당/개인 통계/전적 기록 탭에서 사용)
+  const filteredRecords = useMemo(() => {
+    if (selectedSeasonId === 'all') return records
+    const season = seasons.find(s => s.id === selectedSeasonId)
+    if (!season) return records
+    const startMs = new Date(season.starts_at).getTime()
+    const endMs = season.ends_at ? new Date(season.ends_at).getTime() : Infinity
+    return records.filter(r => {
+      const t = new Date((r as any).created_at ?? '').getTime()
+      return !isNaN(t) && t >= startMs && t < endMs
+    })
+  }, [records, seasons, selectedSeasonId])
 
   // 진짜 관리자 여부 확인 (DB의 member_accounts.is_admin 기준 — 비밀번호가 아니라 계정 자체의 권한)
   useEffect(() => {
@@ -246,6 +270,22 @@ export default function MainApp() {
         <ForcePasswordChangeGate onDone={() => setMustChangePassword(false)} />
       ) : (
         <>
+          {(['ranking', 'hall', 'stats', 'record'] as const).includes(tab as any) && seasons.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 10px' }}>
+              <span style={{ fontSize: 12, color: 'var(--text3)' }}>시즌</span>
+              <select
+                value={selectedSeasonId}
+                onChange={e => setSelectedSeasonId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                style={{ fontSize: 12, padding: '4px 8px' }}
+              >
+                <option value="all">전체</option>
+                {seasons.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}{s.ends_at === null ? ' (진행중)' : ''}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="tabs" style={{ background: 'rgba(6,17,31,0.75)' }}>
             {(['team', 'ranking', 'hall', 'stats', 'summoners'] as const).map((t, i) => (
               <button key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
@@ -274,10 +314,10 @@ export default function MainApp() {
           ) : (
             <>
               {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} riotIdMap={riotIdMap} correctionMap={correctionMap} loginIdStatusMap={loginIdStatusMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} inactiveNames={inactiveNames} nameByUserId={nameByUserId} />}
-              {tab === 'record' && dbIsAdmin && <RecordTab records={records} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
-              {tab === 'ranking' && <RankingTab records={records} idPrefixMap={idPrefixMap} inactiveNames={inactiveNames} />}
-              {tab === 'hall' && <HallOfFameTab records={records} idPrefixMap={idPrefixMap} inactiveNames={inactiveNames} />}
-              {tab === 'stats' && <StatsTab records={records} summoners={summoners} summonerScores={summonerScores} idPrefixMap={idPrefixMap} riotIdMap={riotIdMap} nameByUserId={nameByUserId} inactiveNames={inactiveNames} />}
+              {tab === 'record' && dbIsAdmin && <RecordTab records={filteredRecords} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
+              {tab === 'ranking' && <RankingTab records={filteredRecords} idPrefixMap={idPrefixMap} inactiveNames={inactiveNames} />}
+              {tab === 'hall' && <HallOfFameTab records={filteredRecords} idPrefixMap={idPrefixMap} inactiveNames={inactiveNames} />}
+              {tab === 'stats' && <StatsTab records={filteredRecords} summoners={summoners} summonerScores={summonerScores} idPrefixMap={idPrefixMap} riotIdMap={riotIdMap} nameByUserId={nameByUserId} inactiveNames={inactiveNames} />}
 
               {tab === 'summoners' && <MyInfoTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} onRefresh={fetchAll} />}
 
