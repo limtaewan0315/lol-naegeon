@@ -254,6 +254,13 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
                               ) : (
                                 <button className="btn btn-sm" style={{ padding: '2px 5px', fontSize: 9 }} onClick={() => startFlag(userId)}>요청</button>
                               )}
+                              <button
+                                className="btn btn-sm"
+                                style={{ padding: '2px 5px', fontSize: 9, ...(inactiveStatusMap.get(userId) ? { background: 'var(--red-bg)', color: 'var(--red)', borderColor: 'var(--red-border)' } : {}) }}
+                                onClick={() => toggleInactive(userId, inactiveStatusMap.get(userId) ?? false)}
+                              >
+                                {inactiveStatusMap.get(userId) ? '활성화' : '비활성화'}
+                              </button>
                               <button className="btn btn-danger btn-sm" style={{ padding: '2px 5px', fontSize: 9 }} onClick={() => deleteSummoner(userId, name)}>삭제</button>
                             </td>
                           </tr>
