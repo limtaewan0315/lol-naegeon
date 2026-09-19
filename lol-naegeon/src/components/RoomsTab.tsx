@@ -287,14 +287,6 @@ export default function RoomsTab({
     if (err) { console.error('강퇴 실패:', err.message); await loadRooms() }
   }
 
-  // 매칭 방식(라인밸런싱/올랜덤)은 방장만 변경 가능
-  const updateMatchMode = async (mode: 'line' | 'random') => {
-    if (!myRoom || !isHost) return
-    const roomId = myRoom.id
-    setRooms(prev => prev.map(r => (r.id === roomId ? { ...r, match_mode: mode } : r)))
-    await supabase.from('rooms').update({ match_mode: mode, updated_at: new Date().toISOString() }).eq('id', roomId)
-  }
-
   // 관리자 전용 테스트 기능: 등록된 다른 소환사들로 방을 10명까지 자동으로 채우고
   // 전부 준비완료 상태로 만들어서, 혼자서도 매칭 테스트를 해볼 수 있게 함.
   // 무작위로 뽑으면 라인이 한쪽으로 쏠려서 밸런싱이 실패할 수 있으므로,
@@ -518,14 +510,14 @@ export default function RoomsTab({
     candidates.sort((a, b) => a.diff - b.diff)
     const isRepeatFree = (c: { result: BalanceResult }) => !violatesRepeat(c.result.team1) && !violatesRepeat(c.result.team2)
 
-    // 6점을 넘는 조합은 어떤 경우에도 쓰지 않음
+    // 5점을 넘는 조합은 어떤 경우에도 쓰지 않음
     let chosen: BalanceResult | null =
-      candidates.find(c => c.diff <= 6 && isRepeatFree(c))?.result ??
-      candidates.find(c => c.diff <= 6)?.result ??
+      candidates.find(c => c.diff <= 5 && isRepeatFree(c))?.result ??
+      candidates.find(c => c.diff <= 5)?.result ??
       null
 
     // 위에서도 못 찾았으면(남은 라인들도 밸런스가 전혀 안 맞았던 경우), 남은 라인까지 전부 강제 배정으로 완성한 뒤
-    // 팀을 나누는 32가지 경우의 수 중 최선을 찾음 (그래도 6점 넘으면 실패 처리)
+    // 팀을 나누는 32가지 경우의 수 중 최선을 찾음 (그래도 5점 넘으면 실패 처리)
     if (!chosen) {
       remainingLines.forEach(priorityFillLine)
 
@@ -560,13 +552,13 @@ export default function RoomsTab({
       }
 
       chosen =
-        allCombos.find(c => Math.abs(c.s1 - c.s2) <= 6 && isCleanAF(c) && isFairAF(c)) ??
-        allCombos.find(c => Math.abs(c.s1 - c.s2) <= 6 && isFairAF(c)) ??
+        allCombos.find(c => Math.abs(c.s1 - c.s2) <= 5 && isCleanAF(c) && isFairAF(c)) ??
+        allCombos.find(c => Math.abs(c.s1 - c.s2) <= 5 && isFairAF(c)) ??
         null
     }
 
     if (!chosen) {
-      setBalanceError('점수차 6점 이내로 맞는 조합을 찾지 못했어요. M1/M2 설정을 조정하거나 인원 구성을 바꿔서 다시 시도해주세요.')
+      setBalanceError('점수차 5점 이내로 맞는 조합을 찾지 못했어요. M1/M2 설정을 조정하거나 인원 구성을 바꿔서 다시 시도해주세요.')
       setBalancing(false)
       return
     }
@@ -957,40 +949,6 @@ export default function RoomsTab({
                     </div>
                   )
                 })}
-              </div>
-
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8,
-                padding: '8px 10px', background: 'var(--bg3)', borderRadius: 'var(--radius)',
-                border: '0.5px solid var(--border)', flexWrap: 'nowrap', overflowX: 'auto'
-              }}>
-                <span style={{ fontSize: 12, color: 'var(--text3)', whiteSpace: 'nowrap', flexShrink: 0 }}>매칭 방식</span>
-                {isHost ? (
-                  <div style={{ display: 'flex', gap: 12, flexWrap: 'nowrap' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                      <input
-                        type="radio"
-                        checked={(myRoom.match_mode ?? 'line') === 'line'}
-                        onChange={() => updateMatchMode('line')}
-                        style={{ width: 'auto', flexShrink: 0 }}
-                      />
-                      라인밸런싱
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                      <input
-                        type="radio"
-                        checked={myRoom.match_mode === 'random'}
-                        onChange={() => updateMatchMode('random')}
-                        style={{ width: 'auto', flexShrink: 0 }}
-                      />
-                      올랜덤
-                    </label>
-                  </div>
-                ) : (
-                  <span style={{ fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                    {(myRoom.match_mode ?? 'line') === 'line' ? '라인밸런싱' : '올랜덤'}
-                  </span>
-                )}
               </div>
 
               {isHost && dbIsAdmin && myRoom.members.length < 10 && (
