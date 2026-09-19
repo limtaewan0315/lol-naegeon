@@ -12,6 +12,8 @@ export interface GameRecord {
   blue: { userId?: string; name: string; line: Line }[]
   red: { userId?: string; name: string; line: Line }[]
   time: string
+  blue_score?: number | null
+  red_score?: number | null
 }
 
 export const ADMIN_PASSWORD = 'daumathematics'
