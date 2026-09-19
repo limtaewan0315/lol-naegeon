@@ -5,7 +5,7 @@ import type { Line } from '@/lib/data'
 import { LINES, TIERS, getScoreByTier } from '@/lib/data'
 import { supabase, SummonerMap, SummonerScoreMap, GameRecord, NameWithIdBadge, tierFontSize, tierBadgeStyle } from '@/lib/shared'
 
-export default function AdminTab({ summoners, summonerScores, records, nameByUserId, idPrefixMap, correctionMap, onRefresh }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; records: GameRecord[]; nameByUserId: Record<string, string>; idPrefixMap: Record<string, string>; correctionMap: Record<string, { needs_correction: boolean; correction_note: string | null }>; onRefresh: () => void }) {
+export default function AdminTab({ summoners, summonerScores, records, nameByUserId, idPrefixMap, riotIdMap, correctionMap, onRefresh }: { summoners: SummonerMap; summonerScores: SummonerScoreMap; records: GameRecord[]; nameByUserId: Record<string, string>; idPrefixMap: Record<string, string>; riotIdMap: Record<string, string>; correctionMap: Record<string, { needs_correction: boolean; correction_note: string | null }>; onRefresh: () => void }) {
   const [subTab, setSubTab] = useState<'summoners' | 'inactive'>('summoners')
   const [editingUserId, setEditingUserId] = useState<string | null>(null)
   const [editingLine, setEditingLine] = useState<Line | ''>('')
@@ -189,6 +189,7 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--border2)' }}>
                       <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text2)', fontWeight: 500 }}>이름</th>
+                      <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text2)', fontWeight: 500 }}>롤 계정</th>
                       {LINES.map(l => (
                         <th key={l} style={{ padding: '6px 4px', color: 'var(--text2)', fontWeight: 500 }}>{l}</th>
                       ))}
@@ -214,6 +215,9 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
                                   {flagged && <span className="badge b-lose" style={{ fontSize: 9, padding: '1px 5px' }}>요청중</span>}
                                 </span>
                               )}
+                            </td>
+                            <td style={{ padding: '7px 8px', whiteSpace: 'nowrap', color: riotIdMap[userId] ? 'var(--text2)' : 'var(--text3)' }}>
+                              {riotIdMap[userId] || '미등록'}
                             </td>
                             {LINES.map(line => {
                               const tier = summoners[userId]?.[line]
@@ -266,14 +270,14 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
                           </tr>
                           {flagged && correctionMap?.[userId]?.correction_note && (
                             <tr key={userId + '-note'} style={{ borderBottom: '1px solid var(--border)' }}>
-                              <td colSpan={7} style={{ padding: '0 8px 6px', fontSize: 10, color: 'var(--red)' }}>
+                              <td colSpan={8} style={{ padding: '0 8px 6px', fontSize: 10, color: 'var(--red)' }}>
                                 사유: {correctionMap?.[userId]?.correction_note}
                               </td>
                             </tr>
                           )}
                           {flaggingUserId === userId && (
                             <tr key={userId + '-flag'} style={{ borderBottom: '1px solid var(--border)' }}>
-                              <td colSpan={7} style={{ padding: '0 8px 6px' }}>
+                              <td colSpan={8} style={{ padding: '0 8px 6px' }}>
                                 <div style={{ display: 'flex', gap: 4 }}>
                                   <input value={noteInput} onChange={e => setNoteInput(e.target.value)} placeholder="예: 소환사명에 특수문자, 롤계정 형식 오류" style={{ flex: 1, fontSize: 11, padding: '3px 8px' }} />
                                   <button className="btn btn-gold btn-sm" style={{ fontSize: 10 }} onClick={() => submitFlag(userId)}>등록</button>
