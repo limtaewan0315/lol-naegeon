@@ -5,7 +5,9 @@ import type { Line } from '@/lib/data'
 import { LINES, getScoreByTier } from '@/lib/data'
 import { SummonerMap, SummonerScoreMap, GameRecord, LINE_ORDER, NameWithIdBadge, tierBadgeStyle, riotIdToLolPsUrl } from '@/lib/shared'
 
-export default function StatsTab({ records, summoners, summonerScores, idPrefixMap, riotIdMap, nameByUserId, inactiveNames }: {
+type Season = { id: number; name: string; starts_at: string; ends_at: string | null }
+
+export default function StatsTab({ records, summoners, summonerScores, idPrefixMap, riotIdMap, nameByUserId, inactiveNames, seasons, selectedSeasonId, onSeasonChange }: {
   records: GameRecord[]
   summoners: SummonerMap
   summonerScores: SummonerScoreMap
@@ -13,6 +15,9 @@ export default function StatsTab({ records, summoners, summonerScores, idPrefixM
   riotIdMap: Record<string, string>
   nameByUserId: Record<string, string>
   inactiveNames: Set<string>
+  seasons?: Season[]
+  selectedSeasonId?: number | 'all'
+  onSeasonChange?: (id: number | 'all') => void
 }) {
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<{ key: string; name: string } | null>(null)
@@ -201,7 +206,21 @@ export default function StatsTab({ records, summoners, summonerScores, idPrefixM
   return (
     <div>
       <div className="card">
-        <div className="card-title">개인 통계 검색</div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="card-title" style={{ marginBottom: 0 }}>개인 통계 검색</div>
+          {seasons && seasons.length > 0 && onSeasonChange && (
+            <select
+              value={selectedSeasonId}
+              onChange={e => onSeasonChange(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+              style={{ fontSize: 12, padding: '4px 8px' }}
+            >
+              <option value="all">전체</option>
+              {seasons.map(s => (
+                <option key={s.id} value={s.id}>{s.name}{s.ends_at === null ? ' (진행중)' : ''}</option>
+              ))}
+            </select>
+          )}
+        </div>
         <div style={{ position: 'relative', marginBottom: 10 }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <input value={search} onChange={e => handleSearch(e.target.value)} placeholder="소환사명 검색" autoComplete="off" style={{ flex: 1 }} />
