@@ -185,13 +185,14 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
                 return <div className="empty">{searchQuery.trim() ? '검색 결과가 없어요' : '등록된 소환사가 없어요'}</div>
               }
               return (
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', minWidth: 720, borderCollapse: 'collapse', fontSize: 11 }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--border2)' }}>
-                      <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text2)', fontWeight: 500 }}>이름</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text2)', fontWeight: 500 }}>롤 계정</th>
+                      <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text2)', fontWeight: 500, whiteSpace: 'nowrap' }}>이름</th>
+                      <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text2)', fontWeight: 500, whiteSpace: 'nowrap' }}>롤 계정</th>
                       {LINES.map(l => (
-                        <th key={l} style={{ padding: '6px 4px', color: 'var(--text2)', fontWeight: 500 }}>{l}</th>
+                        <th key={l} style={{ padding: '6px 4px', color: 'var(--text2)', fontWeight: 500, whiteSpace: 'nowrap', minWidth: 64 }}>{l}</th>
                       ))}
                       <th style={{ padding: '6px 4px' }} />
                     </tr>
@@ -216,7 +217,13 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
                                 </span>
                               )}
                             </td>
-                            <td style={{ padding: '7px 8px', whiteSpace: 'nowrap', color: riotIdMap[userId] ? 'var(--text2)' : 'var(--text3)' }}>
+                            <td
+                              title={riotIdMap[userId] || undefined}
+                              style={{
+                                padding: '7px 8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                                maxWidth: 110, color: riotIdMap[userId] ? 'var(--text2)' : 'var(--text3)',
+                              }}
+                            >
                               {riotIdMap[userId] || '미등록'}
                             </td>
                             {LINES.map(line => {
@@ -241,7 +248,7 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
                                   ) : tier ? (
                                     <span
                                       onClick={() => startEdit(userId, line, tier)}
-                                      style={{ cursor: 'pointer', padding: '1px 6px', borderRadius: 6, fontSize: 10, ...tierBadgeStyle(tier) }}
+                                      style={{ cursor: 'pointer', padding: '1px 6px', borderRadius: 6, fontSize: 10, whiteSpace: 'nowrap', display: 'inline-block', ...tierBadgeStyle(tier) }}
                                     >
                                       {tier}
                                     </span>
@@ -291,6 +298,7 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
                     })}
                   </tbody>
                 </table>
+                </div>
               )
             })()}
           </div>
