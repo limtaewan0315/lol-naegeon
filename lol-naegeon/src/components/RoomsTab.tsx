@@ -223,6 +223,16 @@ export default function RoomsTab({
     else await loadRooms()
   }
 
+  // 관리자가 방 목록에서 임의의 방을 강제 삭제 (방장이 나가면 방장 본인 방은 어차피 자동삭제되므로,
+  // 이건 방장이 아니라 관리자용 — 방치되거나 꼬인 방을 정리하기 위한 기능)
+  const deleteRoomAsAdmin = async (room: Room) => {
+    if (!dbIsAdmin) return
+    if (!confirm(`"${room.name}" 방을 삭제할까요? 참가자 전원이 방에서 나가지게 돼요.`)) return
+    const { error: err } = await supabase.rpc('admin_delete_room', { p_room_id: room.id })
+    if (err) setError('방 삭제 실패: ' + err.message)
+    else await loadRooms()
+  }
+
   const leaveRoom = async () => {
     if (!myRoom || !myUserId) return
     if (isHost) {
@@ -1416,6 +1426,11 @@ export default function RoomsTab({
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text3)' }}>방장: {r.host_summoner_name} · {r.members.length}/10명</div>
               </div>
+              {dbIsAdmin && (
+                <button className="btn btn-sm btn-danger" onClick={() => deleteRoomAsAdmin(r)}>
+                  삭제
+                </button>
+              )}
               <button className="btn btn-sm" onClick={() => joinRoom(r)} disabled={r.members.length >= 10}>
                 {r.members.length >= 10 ? '가득참' : '입장'}
               </button>
