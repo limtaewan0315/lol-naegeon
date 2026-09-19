@@ -6,7 +6,6 @@ import { TIERS } from '@/lib/data'
 
 type SignupRequest = {
   id: number
-  login_id: string
   summoner_name: string
   riot_id: string | null
   m1_line: string
@@ -27,9 +26,10 @@ export function SignupRequestsTab({ onRefresh }: { onRefresh: () => void }) {
 
   const load = useCallback(async () => {
     setLoading(true)
+    // 아이디/비밀번호(해시)는 관리자도 볼 필요 없는 정보라 애초에 조회 대상에서 뺌
     const { data, error: err } = await supabase
       .from('signup_requests')
-      .select('*')
+      .select('id, summoner_name, riot_id, m1_line, m1_tier, m2_line, m2_tier, status, created_at')
       .order('created_at', { ascending: false })
     if (err) {
       setError(err.message)
@@ -103,7 +103,6 @@ export function SignupRequestsTab({ onRefresh }: { onRefresh: () => void }) {
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                   <span style={{ fontWeight: 700 }}>{r.summoner_name}</span>
-                  <span style={{ fontSize: 11, color: 'var(--text3)' }}>{r.login_id}</span>
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>
                   롤 계정: <strong>{r.riot_id || '미입력'}</strong>
@@ -158,7 +157,7 @@ export function SignupRequestsTab({ onRefresh }: { onRefresh: () => void }) {
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 padding: '6px 4px', fontSize: 12, borderBottom: '0.5px solid var(--border2)'
               }}>
-                <span>{r.summoner_name} ({r.login_id})</span>
+                <span>{r.summoner_name}</span>
                 <span style={{ color: r.status === 'approved' ? 'var(--gold, #d4af37)' : 'var(--red)' }}>
                   {r.status === 'approved' ? '승인됨' : '거절됨'}
                 </span>
