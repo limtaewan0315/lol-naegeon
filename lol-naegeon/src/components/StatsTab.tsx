@@ -3,13 +3,14 @@
 import { useState, useMemo } from 'react'
 import type { Line } from '@/lib/data'
 import { LINES, getScoreByTier } from '@/lib/data'
-import { SummonerMap, SummonerScoreMap, GameRecord, LINE_ORDER, NameWithIdBadge, tierBadgeStyle } from '@/lib/shared'
+import { SummonerMap, SummonerScoreMap, GameRecord, LINE_ORDER, NameWithIdBadge, tierBadgeStyle, riotIdToLolPsUrl } from '@/lib/shared'
 
-export default function StatsTab({ records, summoners, summonerScores, idPrefixMap, nameByUserId, inactiveNames }: {
+export default function StatsTab({ records, summoners, summonerScores, idPrefixMap, riotIdMap, nameByUserId, inactiveNames }: {
   records: GameRecord[]
   summoners: SummonerMap
   summonerScores: SummonerScoreMap
   idPrefixMap: Record<string, string>
+  riotIdMap: Record<string, string>
   nameByUserId: Record<string, string>
   inactiveNames: Set<string>
 }) {
@@ -27,9 +28,13 @@ export default function StatsTab({ records, summoners, summonerScores, idPrefixM
   // 한 사람을 가리키는 키: 계정ID가 있으면 계정ID(정확), 없으면(탈퇴 계정 등 옛날 기록) 이름으로 대체
   const keyOf = (p: { userId?: string; name: string }) => p.userId ?? p.name
 
-  // 전체 플레이어 목록 (records 기반, 계정ID로 동명이인 구분) — 비활성화된 사람은 검색/조회에서 제외
+  // 전체 플레이어 목록: 등록된 계정 전체(nameByUserId) + 경기 기록에만 남아있는 옛날/탈퇴 계정까지 합침
+  // (계정ID로 동명이인 구분, 비활성화된 사람은 검색/조회에서 제외)
   const allPeople = useMemo(() => {
     const map = new Map<string, string>()
+    Object.entries(nameByUserId).forEach(([userId, name]) => {
+      if (!inactiveNames.has(userId)) map.set(userId, name)
+    })
     records.forEach(r => {
       ;[...r.blue, ...r.red].forEach(p => {
         const key = keyOf(p)
@@ -37,7 +42,7 @@ export default function StatsTab({ records, summoners, summonerScores, idPrefixM
       })
     })
     return Array.from(map.entries()).map(([key, name]) => ({ key, name })).sort((a, b) => a.name.localeCompare(b.name))
-  }, [records, inactiveNames])
+  }, [records, inactiveNames, nameByUserId])
 
   const handleSearch = (val: string) => {
     setSearch(val)
@@ -245,7 +250,22 @@ export default function StatsTab({ records, summoners, summonerScores, idPrefixM
               <div style={{ padding: '10px 12px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)', marginBottom: 12 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                   <span style={{ fontWeight: 700, fontSize: 15, flex: '0 0 100px' }}>
-                    <NameWithIdBadge name={selName} idPrefixMap={idPrefixMap} userId={selKey} />
+                    {(() => {
+                      const riotId = riotIdMap[selKey]
+                      const lolPsUrl = riotId ? riotIdToLolPsUrl(riotId) : null
+                      const label = <NameWithIdBadge name={selName} idPrefixMap={idPrefixMap} userId={selKey} />
+                      return lolPsUrl ? (
+                        <a
+                          href={lolPsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: 'inherit', textDecoration: 'none', cursor: 'pointer' }}
+                          title="lol.ps에서 전적 보기"
+                        >
+                          {label}
+                        </a>
+                      ) : label
+                    })()}
                   </span>
                   <span className="badge b-win">{win}승</span>
                   <span className="badge b-lose">{lose}패</span>
