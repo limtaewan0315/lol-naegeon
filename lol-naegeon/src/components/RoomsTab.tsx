@@ -664,7 +664,7 @@ export default function RoomsTab({
     const scoreResults: Record<string, { old_score: number; old_tier: string; new_score: number; new_tier: string; delta_applied: number }> = {}
     const scoreFailures: string[] = []
 
-    const { data: newRecord } = await supabase.from('records').insert([{ winner, blue: blueData, red: redData, time }]).select()
+    const { data: newRecord } = await supabase.from('records').insert([{ winner, blue: blueData, red: redData, time, blue_score: result.s1, red_score: result.s2 }]).select()
     const recId = newRecord?.[0]?.id
 
     const { data: latestRecs } = await supabase.from('records').select('*').order('created_at', { ascending: false })
