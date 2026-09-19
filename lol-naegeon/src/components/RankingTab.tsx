@@ -3,7 +3,16 @@
 import { useState } from 'react'
 import { GameRecord, NameWithIdBadge } from '@/lib/shared'
 
-export default function RankingTab({ records, idPrefixMap, inactiveNames }: { records: GameRecord[]; idPrefixMap: Record<string, string>; inactiveNames: Set<string> }) {
+type Season = { id: number; name: string; starts_at: string; ends_at: string | null }
+
+export default function RankingTab({ records, idPrefixMap, inactiveNames, seasons, selectedSeasonId, onSeasonChange }: {
+  records: GameRecord[]
+  idPrefixMap: Record<string, string>
+  inactiveNames: Set<string>
+  seasons?: Season[]
+  selectedSeasonId?: number | 'all'
+  onSeasonChange?: (id: number | 'all') => void
+}) {
   const [page, setPage] = useState(1)
   const PAGE_SIZE = 10
 
@@ -34,8 +43,22 @@ export default function RankingTab({ records, idPrefixMap, inactiveNames }: { re
 
   return (
     <div className="card">
-      <div className="card-title">전체 랭킹</div>
-      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="card-title" style={{ marginBottom: 0 }}>전체 랭킹</div>
+        {seasons && seasons.length > 0 && onSeasonChange && (
+          <select
+            value={selectedSeasonId}
+            onChange={e => onSeasonChange(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+            style={{ fontSize: 12, padding: '4px 8px' }}
+          >
+            <option value="all">전체</option>
+            {seasons.map(s => (
+              <option key={s.id} value={s.id}>{s.name}{s.ends_at === null ? ' (진행중)' : ''}</option>
+            ))}
+          </select>
+        )}
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 12, marginTop: 6 }}>
         🏆 70판 이상 참가한 소환사만 집계돼요
       </div>
       {entries.length === 0
