@@ -270,22 +270,6 @@ export default function MainApp() {
         <ForcePasswordChangeGate onDone={() => setMustChangePassword(false)} />
       ) : (
         <>
-          {(['ranking', 'hall', 'stats', 'record'] as const).includes(tab as any) && seasons.length > 0 && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 10px' }}>
-              <span style={{ fontSize: 12, color: 'var(--text3)' }}>시즌</span>
-              <select
-                value={selectedSeasonId}
-                onChange={e => setSelectedSeasonId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                style={{ fontSize: 12, padding: '4px 8px' }}
-              >
-                <option value="all">전체</option>
-                {seasons.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}{s.ends_at === null ? ' (진행중)' : ''}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
           <div className="tabs" style={{ background: 'rgba(6,17,31,0.75)' }}>
             {(['team', 'ranking', 'hall', 'stats', 'summoners'] as const).map((t, i) => (
               <button key={t} className={`tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
@@ -314,10 +298,10 @@ export default function MainApp() {
           ) : (
             <>
               {tab === 'team' && <RoomsTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} riotIdMap={riotIdMap} correctionMap={correctionMap} loginIdStatusMap={loginIdStatusMap} onRecord={addRecord} dbIsAdmin={dbIsAdmin} inactiveNames={inactiveNames} nameByUserId={nameByUserId} />}
-              {tab === 'record' && dbIsAdmin && <RecordTab records={filteredRecords} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} />}
-              {tab === 'ranking' && <RankingTab records={filteredRecords} idPrefixMap={idPrefixMap} inactiveNames={inactiveNames} />}
-              {tab === 'hall' && <HallOfFameTab records={filteredRecords} idPrefixMap={idPrefixMap} inactiveNames={inactiveNames} />}
-              {tab === 'stats' && <StatsTab records={filteredRecords} summoners={summoners} summonerScores={summonerScores} idPrefixMap={idPrefixMap} riotIdMap={riotIdMap} nameByUserId={nameByUserId} inactiveNames={inactiveNames} />}
+              {tab === 'record' && dbIsAdmin && <RecordTab records={filteredRecords} onDelete={deleteRecord} onClear={clearRecords} isAdmin={dbIsAdmin} seasons={seasons} selectedSeasonId={selectedSeasonId} onSeasonChange={setSelectedSeasonId} />}
+              {tab === 'ranking' && <RankingTab records={filteredRecords} idPrefixMap={idPrefixMap} inactiveNames={inactiveNames} seasons={seasons} selectedSeasonId={selectedSeasonId} onSeasonChange={setSelectedSeasonId} />}
+              {tab === 'hall' && <HallOfFameTab records={filteredRecords} idPrefixMap={idPrefixMap} inactiveNames={inactiveNames} seasons={seasons} selectedSeasonId={selectedSeasonId} onSeasonChange={setSelectedSeasonId} />}
+              {tab === 'stats' && <StatsTab records={filteredRecords} summoners={summoners} summonerScores={summonerScores} idPrefixMap={idPrefixMap} riotIdMap={riotIdMap} nameByUserId={nameByUserId} inactiveNames={inactiveNames} seasons={seasons} selectedSeasonId={selectedSeasonId} onSeasonChange={setSelectedSeasonId} />}
 
               {tab === 'summoners' && <MyInfoTab summoners={summoners} summonerScores={summonerScores} records={records} idPrefixMap={idPrefixMap} onRefresh={fetchAll} />}
 
