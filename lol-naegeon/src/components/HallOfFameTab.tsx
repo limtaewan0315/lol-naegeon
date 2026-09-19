@@ -61,7 +61,7 @@ export default function HallOfFameTab({ records, idPrefixMap, inactiveNames, sea
           <select
             value={selectedSeasonId}
             onChange={e => onSeasonChange(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-            style={{ fontSize: 12, padding: '4px 8px' }}
+            style={{ fontSize: 11, padding: '1px 4px', height: 'auto', lineHeight: 1.4, width: 'auto', flexShrink: 0 }}
           >
             <option value="all">전체</option>
             {seasons.map(s => (
