@@ -51,6 +51,7 @@ export default function RoomsTab({
   idPrefixMap,
   riotIdMap,
   correctionMap,
+  loginIdStatusMap,
   onRecord,
   dbIsAdmin,
   inactiveNames,
@@ -62,6 +63,7 @@ export default function RoomsTab({
   idPrefixMap: Record<string, string>
   riotIdMap: Record<string, string>
   correctionMap: Record<string, { needs_correction: boolean; correction_note: string | null }>
+  loginIdStatusMap: Record<string, boolean>
   onRecord: (r: { winner: 'blue' | 'red'; blue: { name: string; line: Line }[]; red: { name: string; line: Line }[]; skipInsert?: boolean }) => void
   dbIsAdmin: boolean
   inactiveNames: Set<string>
@@ -1009,7 +1011,8 @@ export default function RoomsTab({
               {myMember && (() => {
                 const hasRiotId = !!(myUserId && riotIdMap[myUserId])
                 const isFlagged = !!(myUserId && correctionMap[myUserId]?.needs_correction)
-                const canReady = myMember.ready || (hasRiotId && !isFlagged)
+                const needsLoginIdChange = !!(myUserId && loginIdStatusMap[myUserId] === false)
+                const canReady = myMember.ready || (hasRiotId && !isFlagged && !needsLoginIdChange)
 
                 return (
                   <>
@@ -1024,6 +1027,8 @@ export default function RoomsTab({
                             ⚠ 관리자가 정보 수정을 요청했어요: {correctionMap[myUserId!]?.correction_note || '내용 없음'}
                             <br />"내 정보"에서 수정하고 관리자 확인을 기다려주세요.
                           </>
+                        ) : needsLoginIdChange ? (
+                          '⚠ 아이디와 비밀번호를 새로 변경하세요. "내 정보"에서 아이디를 변경한 뒤 이 탭으로 돌아와 새로고침하면 준비완료를 누를 수 있어요.'
                         ) : (
                           '⚠ 롤 계정이 등록되어 있지 않아요. "내 정보"에서 롤 계정을 입력한 뒤 이 탭으로 돌아와 새로고침하면 준비완료를 누를 수 있어요.'
                         )}
@@ -1048,7 +1053,7 @@ export default function RoomsTab({
                           disabled
                           style={{ flex: 2, opacity: 0.6, cursor: 'not-allowed' }}
                         >
-                          {isFlagged ? '준비 불가 (정보 수정 필요)' : '준비 불가 (롤 계정 등록 필요)'}
+                          {isFlagged ? '준비 불가 (정보 수정 필요)' : needsLoginIdChange ? '준비 불가 (아이디 변경 필요)' : '준비 불가 (롤 계정 등록 필요)'}
                         </button>
                       )}
                       {isHost && (
