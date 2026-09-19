@@ -143,7 +143,7 @@ export default function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void
         return
       }
 
-      alert('가입 신청이 접수됐어요! 관리자 승인 후 로그인할 수 있어요.')
+      alert('가입 신청완료! 관리자 승인 후 로그인할 수 있어요.')
       setIsSignUp(false)
       resetSignUpFields()
     } catch (err) {
@@ -174,7 +174,7 @@ export default function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 }}>
             <input
               type="text"
-              placeholder="아이디 (또는 소환사명)"
+              placeholder="아이디 (영문/숫자/_ 5~20자)"
               value={loginId}
               onChange={e => setLoginId(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && handleAuth()}
@@ -203,7 +203,7 @@ export default function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void
                 borderRadius: 6, display: 'flex', flexDirection: 'column', gap: 8
               }}>
                 <div style={{ fontSize: 11, color: 'var(--text3)' }}>
-                  아이디, 소환사명, 롤계정을 입력하면 비밀번호가 <strong>1234</strong>로 초기화돼요. 로그인 후 반드시 새 비밀번호로 변경해야 해요.
+                  아이디, 소환사명, 롤계정을 입력하면 비밀번호가 <strong>1234</strong>로 초기화됩니다. 로그인 후 반드시 새 비밀번호로 변경하세요.
                 </div>
                 <input
                   type="text"
@@ -255,7 +255,7 @@ export default function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void
             />
             <input
               type="text"
-              placeholder="소환사명 (인게임 이름)"
+              placeholder="소환사명 (본명)"
               value={summonerName}
               onChange={e => setSummonerName(e.target.value)}
               disabled={loading}
