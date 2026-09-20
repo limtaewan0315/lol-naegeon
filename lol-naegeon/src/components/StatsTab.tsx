@@ -29,6 +29,7 @@ export default function StatsTab({ records, summoners, summonerScores, idPrefixM
   const [detailLineB, setDetailLineB] = useState<Line | ''>('')
   const [sameTeamLineA, setSameTeamLineA] = useState<Line | ''>('')
   const [sameTeamLineB, setSameTeamLineB] = useState<Line | ''>('')
+  const [selRecordsPage, setSelRecordsPage] = useState(1)
 
   // 한 사람을 가리키는 키: 계정ID가 있으면 계정ID(정확), 없으면(탈퇴 계정 등 옛날 기록) 이름으로 대체
   const keyOf = (p: { userId?: string; name: string }) => p.userId ?? p.name
@@ -62,6 +63,7 @@ export default function StatsTab({ records, summoners, summonerScores, idPrefixM
     setSuggestions([])
     setOppSelected(null)
     setOppSearch('')
+    setSelRecordsPage(1)
   }
 
   // 선택된 소환사 통계 계산
@@ -224,7 +226,7 @@ export default function StatsTab({ records, summoners, summonerScores, idPrefixM
         <div style={{ position: 'relative', marginBottom: 10 }}>
           <div style={{ display: 'flex', gap: 8 }}>
             <input value={search} onChange={e => handleSearch(e.target.value)} placeholder="소환사명 검색" autoComplete="off" style={{ flex: 1 }} />
-            {selected && <button className="btn btn-sm" onClick={() => { setSearch(''); setSelected(null); setSuggestions([]); setOppSearch(''); setOppSelected(null); setOppSuggestions([]) }}>초기화</button>}
+            {selected && <button className="btn btn-sm" onClick={() => { setSearch(''); setSelected(null); setSuggestions([]); setOppSearch(''); setOppSelected(null); setOppSuggestions([]); setSelRecordsPage(1) }}>초기화</button>}
           </div>
           {suggestions.length > 0 && (
             <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--bg3)', border: '0.5px solid var(--border2)', borderRadius: 'var(--radius)', marginTop: 2, overflow: 'hidden' }}>
@@ -332,6 +334,98 @@ export default function StatsTab({ records, summoners, summonerScores, idPrefixM
                   </div>
                 )
               })}
+
+              {/* 경기 기록 (내정보 탭의 "내 경기 기록"과 동일한 형태, 검색된 대상 기준) */}
+              {(() => {
+                const selRecords = records.filter(r => r.blue.some(p => keyOf(p) === selKey) || r.red.some(p => keyOf(p) === selKey))
+                const PAGE_SIZE = 10
+                const totalPages = Math.ceil(selRecords.length / PAGE_SIZE)
+                const paged = selRecords.slice((selRecordsPage - 1) * PAGE_SIZE, selRecordsPage * PAGE_SIZE)
+
+                const sortTeam = (team: GameRecord['blue']) => [...team].sort((a, b) => (LINE_ORDER[a.line] ?? 9) - (LINE_ORDER[b.line] ?? 9))
+                const renderPlayer = (p: GameRecord['blue'][number], bg: string, border: string) => {
+                  const isSel = keyOf(p) === selKey
+                  return (
+                    <div key={p.userId ?? p.name} style={{
+                      display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px',
+                      background: bg, borderRadius: 999, fontSize: 11,
+                      border: isSel ? '1px solid var(--gold, #d4af37)' : `0.5px solid ${border}`,
+                      boxShadow: isSel ? '0 0 0 1px rgba(200,170,110,0.4)' : undefined,
+                    }}>
+                      <span style={{ color: 'var(--text2)', fontSize: 10 }}>{p.line}</span>
+                      <span style={{ color: isSel ? 'var(--gold, #d4af37)' : 'var(--text)', fontWeight: isSel ? 700 : 500 }}>
+                        {p.name}{isSel ? ` (${selName})` : ''}
+                      </span>
+                    </div>
+                  )
+                }
+
+                return (
+                  <div style={{ marginTop: 14 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text3)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>
+                      경기 기록 {selRecords.length > 0 ? `(${selRecords.length}전)` : ''}
+                    </div>
+                    {selRecords.length === 0 ? (
+                      <div className="empty">참여한 경기가 없어요.</div>
+                    ) : (
+                      paged.map((r, i) => {
+                        const inBlue = r.blue.some(p => keyOf(p) === selKey)
+                        const isWin = (inBlue && r.winner === 'blue') || (!inBlue && r.winner === 'red')
+                        return (
+                          <div key={r.id} style={{ background: 'var(--bg3)', borderRadius: 'var(--radius)', marginBottom: 8, border: '0.5px solid var(--border)', overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderBottom: '0.5px solid var(--border)' }}>
+                              <span style={{ fontSize: 12, color: 'var(--text3)', width: 20, flexShrink: 0 }}>
+                                {selRecords.length - ((selRecordsPage - 1) * PAGE_SIZE + i)}
+                              </span>
+                              <span className={`badge ${isWin ? 'b-win' : 'b-lose'}`} style={{ fontSize: 11 }}>
+                                {r.winner === 'blue' ? '🔵 블루승' : '🔴 레드승'} ({isWin ? '승리' : '패배'})
+                              </span>
+                              <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text3)' }}>{r.time}</span>
+                            </div>
+                            <div style={{ padding: '6px 12px', borderBottom: '0.5px solid var(--border)' }}>
+                              <div style={{ fontSize: 10, color: 'var(--blue)', fontWeight: 600, marginBottom: 4 }}>🔵 블루팀</div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                {sortTeam(r.blue).map(p => renderPlayer(p, 'var(--blue-bg)', 'var(--blue-border)'))}
+                              </div>
+                            </div>
+                            <div style={{ padding: '6px 12px' }}>
+                              <div style={{ fontSize: 10, color: 'var(--red)', fontWeight: 600, marginBottom: 4 }}>🔴 레드팀</div>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                {sortTeam(r.red).map(p => renderPlayer(p, 'var(--red-bg)', 'var(--red-border)'))}
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })
+                    )}
+
+                    {totalPages > 1 && (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 }}>
+                        <button className="btn btn-sm" onClick={() => setSelRecordsPage(1)} disabled={selRecordsPage === 1}>{'<<'}</button>
+                        <button className="btn btn-sm" onClick={() => setSelRecordsPage(p => Math.max(1, p - 1))} disabled={selRecordsPage === 1}>{'<'}</button>
+                        {Array.from({ length: totalPages }, (_, idx) => idx + 1)
+                          .filter(p => p === 1 || p === totalPages || Math.abs(p - selRecordsPage) <= 1)
+                          .reduce((acc: (number | string)[], p, idx, arr) => {
+                            if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push('...')
+                            acc.push(p)
+                            return acc
+                          }, [])
+                          .map((p, idx) => typeof p === 'string'
+                            ? <span key={idx} style={{ fontSize: 12, color: 'var(--text3)' }}>...</span>
+                            : <button key={idx} className="btn btn-sm" onClick={() => setSelRecordsPage(p as number)}
+                                style={{ background: selRecordsPage === p ? 'var(--blue2)' : undefined, color: selRecordsPage === p ? '#fff' : undefined }}>
+                                {p}
+                              </button>
+                          )
+                        }
+                        <button className="btn btn-sm" onClick={() => setSelRecordsPage(p => Math.min(totalPages, p + 1))} disabled={selRecordsPage === totalPages}>{'>'}</button>
+                        <button className="btn btn-sm" onClick={() => setSelRecordsPage(totalPages)} disabled={selRecordsPage === totalPages}>{'>>'}</button>
+                        <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 4 }}>{selRecordsPage}/{totalPages}페이지</span>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
 
               {/* 상대 전적 검색 */}
               <div style={{ marginTop: 14, padding: '12px 14px', background: 'var(--bg3)', borderRadius: 'var(--radius)', border: '0.5px solid var(--border)' }}>
