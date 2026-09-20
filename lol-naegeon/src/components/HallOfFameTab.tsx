@@ -14,9 +14,7 @@ export default function HallOfFameTab({ records, idPrefixMap, inactiveNames, sea
   selectedSeasonId?: number | 'all'
   onSeasonChange?: (id: number | 'all') => void
 }) {
-  const totalGames = records.length
-  const minGames = 70 // 전체 70판 이상
-  const minLineGames = 30 // 라인별 30판 이상
+  const minLineGames = 70 // 라인별 70판 이상
 
   // 라인별 승률 집계 — 계정ID 기준 (동명이인이 안 섞임). 예전 기록에 계정ID가 없으면 이름으로 대체.
   const lineMap: Record<string, Record<string, { name: string; userId?: string; win: number; lose: number }>> = {}
@@ -71,7 +69,7 @@ export default function HallOfFameTab({ records, idPrefixMap, inactiveNames, sea
         )}
       </div>
       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 14, marginTop: 6 }}>
-        라인별 30판 이상 참여한 소환사 기준 · 승률 순위
+        라인별 70판 이상 참여한 소환사 기준 · 승률 순위
       </div>
 
       {LINES.map(line => {
