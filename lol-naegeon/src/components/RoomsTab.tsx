@@ -1175,6 +1175,27 @@ export default function RoomsTab({
                 ))}
               </div>
 
+              {/* 해당 라인 전적이 적은(10판 미만) 배치 인원이 있으면 경고 문구 표시 —
+                  이런 선수의 점수는 실전적 대신 추정치(resolveTierScore 등)에 기반해 밸런싱됐을 가능성이 높아
+                  팀 언밸런싱이 발생할 수 있음 */}
+              {(() => {
+                const allPlayers = [...myRoom.result.team1, ...myRoom.result.team2]
+                const linePlayCount = (userId: string, line: Line) => records.filter(r =>
+                  r.blue.some(p => p.userId === userId && p.line === line) ||
+                  r.red.some(p => p.userId === userId && p.line === line)
+                ).length
+                const lowExpPlayers = allPlayers.filter(p => linePlayCount(p.userId, p.line) < 10)
+                if (lowExpPlayers.length === 0) return null
+                return (
+                  <div style={{
+                    fontSize: 10, color: 'var(--red)', textAlign: 'center', marginBottom: 8,
+                    opacity: 0.85,
+                  }}>
+                    ⚠ {lowExpPlayers.map(p => `${p.name}(${p.line})`).join(', ')} — 해당 라인 10판 미만(배치 인원)이라 팀 밸런싱이 부정확할 수 있어요
+                  </div>
+                )
+              })()}
+
               <div style={{ textAlign: 'center', marginBottom: 8 }}>
                 <span style={{ fontSize: 13, color: 'var(--text2)' }}>
                   점수 차이: <strong style={{ color: 'var(--gold)' }}>{Math.abs(myRoom.result.s1 - myRoom.result.s2).toFixed(1)}점</strong>
