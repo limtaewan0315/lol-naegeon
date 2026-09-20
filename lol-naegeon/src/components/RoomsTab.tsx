@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Line } from '@/lib/data'
-import { LINES, TIERS, getScore, getTierByScore, getScoreByTier, shuffle } from '@/lib/data'
+import { LINES, getScore, getTierByScore, getScoreByTier, shuffle } from '@/lib/data'
 import {
   supabase, SummonerMap, SummonerScoreMap, GameRecord, TeamPlayer, BalanceResult,
   PlayerEntry, NameWithIdBadge, LINE_ORDER, DISCORD_WEBHOOK_URL, tierBadgeStyle, lineBadgeStyle,
@@ -1186,8 +1186,17 @@ export default function RoomsTab({
                 const result = myRoom.result!
                 const blue1 = sortByLine(result.team1)
                 const red1 = sortByLine(result.team2)
-                const TIER_SCORE_MAP: Record<string, number> = {}
-                TIERS.forEach((t, i) => { TIER_SCORE_MAP[t] = (TIERS.length - i) * 10 })
+                // 라인별 맞대결 전적이 없을 때의 승률 추정 — 별도 간이 점수(TIER_SCORE_MAP) 대신
+                // 실제 밸런싱에 쓰인 점수(score)를 그대로 사용. 시즌1 데이터 분석 결과 diff 0~5점은
+                // 실제 승률에 거의 영향이 없었고(diff 0-5 구간 47~48%대, 50%와 통계적으로 구분 안 됨),
+                // diff 6점부터 실제로 승률이 갈리기 시작(diff 6+ 구간 58.8%)하는 패턴이 검증됐으므로 이를 반영.
+                const estimateWrFromScoreDiff = (diff2: number): number => {
+                  const abs = Math.abs(diff2)
+                  if (abs <= 5) return 0.5
+                  const extra = Math.min(0.35, 0.09 + (abs - 6) * 0.02)
+                  const wr = 0.5 + Math.sign(diff2) * extra
+                  return Math.min(0.9, Math.max(0.1, wr))
+                }
 
                 const lineWrs = LINES.map(line => {
                   const bp = blue1.find(p => p.line === line)
@@ -1208,10 +1217,7 @@ export default function RoomsTab({
                     }).length
                     return { line, wr: bpWin / total, total, estimated: false }
                   } else {
-                    const bs = TIER_SCORE_MAP[bp.tier] ?? 50
-                    const rs = TIER_SCORE_MAP[rp.tier] ?? 50
-                    const diff2 = bs - rs
-                    const wr = Math.min(0.9, Math.max(0.1, 0.5 + diff2 * 0.01))
+                    const wr = estimateWrFromScoreDiff(bp.score - rp.score)
                     return { line, wr, total: 0, estimated: true }
                   }
                 }).filter(Boolean) as { line: string; wr: number; total: number; estimated: boolean }[]
