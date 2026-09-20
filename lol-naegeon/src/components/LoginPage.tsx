@@ -57,9 +57,9 @@ export default function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void
   const [summonerName, setSummonerName] = useState('')
   const [riotId, setRiotId] = useState('')
   const [m1Line, setM1Line] = useState<Line>(LINES[0])
-  const [m1Tier, setM1Tier] = useState('골드2')
+  const [m1Tier, setM1Tier] = useState('')
   const [m2Line, setM2Line] = useState<Line>(LINES[1])
-  const [m2Tier, setM2Tier] = useState('골드2')
+  const [m2Tier, setM2Tier] = useState('')
 
   const resetSignUpFields = () => {
     setNewLoginId('')
@@ -69,9 +69,9 @@ export default function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void
     setSummonerName('')
     setRiotId('')
     setM1Line(LINES[0])
-    setM1Tier('골드2')
+    setM1Tier('')
     setM2Line(LINES[1])
-    setM2Tier('골드2')
+    setM2Tier('')
   }
 
   const handleLogin = async () => {
@@ -134,6 +134,10 @@ export default function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void
     }
     if (m1Line === m2Line) {
       setError('M1 라인과 M2 라인은 서로 다르게 선택해주세요')
+      return
+    }
+    if (!m1Tier || !m2Tier) {
+      setError('M1, M2 티어를 직접 선택해주세요')
       return
     }
     if (!agreed) {
@@ -292,6 +296,7 @@ export default function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void
                 {LINES.map(l => <option key={l} value={l}>M1: {l}</option>)}
               </select>
               <select value={m1Tier} onChange={e => setM1Tier(e.target.value)} disabled={loading} style={{ flex: 1 }}>
+                <option value="" disabled>티어 선택</option>
                 {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
@@ -301,6 +306,7 @@ export default function LoginPage({ onAuthSuccess }: { onAuthSuccess: () => void
                 {LINES.filter(l => l !== m1Line).map(l => <option key={l} value={l}>M2: {l}</option>)}
               </select>
               <select value={m2Tier} onChange={e => setM2Tier(e.target.value)} disabled={loading} style={{ flex: 1 }}>
+                <option value="" disabled>티어 선택</option>
                 {TIERS.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
