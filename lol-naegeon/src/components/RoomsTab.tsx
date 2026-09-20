@@ -376,9 +376,25 @@ export default function RoomsTab({
     const getAdjustedScore = (userId: string, line: Line, tier: string): number => {
       return summonerScores[userId]?.[line] ?? getScoreByTier(tier)
     }
+    // 등록되지 않은 라인(M1/M2 외 라인)에 배정될 때의 점수 추정 — 고정 골드2 대신,
+    // 본인 M2 라인 점수보다 5점 낮게 잡음 (M2 등록 정보가 없으면 M1 기준으로 5점 낮게, 그마저 없으면 최후 수단으로 골드2)
+    const resolveTierScore = (p: PlayerEntry, line: Line): { tier: string; score: number } => {
+      const regTier = summoners[p.userId]?.[line]
+      if (regTier) return { tier: regTier, score: getAdjustedScore(p.userId, line, regTier) }
+      const m2Line = (p.most2 && p.most2 !== 'any') ? p.most2 as Line : null
+      const m1Line = (p.most1 && p.most1 !== 'any') ? p.most1 as Line : null
+      const baseLine = m2Line ?? m1Line
+      const baseTier = baseLine ? summoners[p.userId]?.[baseLine] : undefined
+      if (baseLine && baseTier) {
+        const score = getAdjustedScore(p.userId, baseLine, baseTier) - 5
+        return { tier: getTierByScore(score), score }
+      }
+      // 등록된 라인 정보가 전혀 없는 예외적인 경우의 최후 fallback
+      return { tier: '골드2', score: getScoreByTier('골드2') }
+    }
     const buildPlayer = (p: PlayerEntry, line: Line): TeamPlayer => {
-      const tier = summoners[p.userId]?.[line] ?? '골드2'
-      return { userId: p.userId, name: p.name, tier, line, score: getAdjustedScore(p.userId, line, tier) }
+      const { tier, score } = resolveTierScore(p, line)
+      return { userId: p.userId, name: p.name, tier, line, score }
     }
 
     const protectedIds = new Set<string>(myRoom.autofill_protected_ids ?? [])
@@ -442,8 +458,9 @@ export default function RoomsTab({
           // 전판에 튕겼던 사람의 M1 보장 — 이 라인이 충분한 라인이라 강제확정 대상은 아니지만,
           // 랜덤 탐색 안에서 아주 높은 확률로 M1을 받도록 우선 처리 (거의 모든 후보에서 보장이 지켜짐)
           if (guaranteedIds.has(p.userId) && p.most1 !== 'any' && remainingLines.includes(p.most1 as Line) && Math.random() < 0.97) {
-            const tier = summoners[p.userId]?.[p.most1 as Line] ?? '골드2'
-            return { userId: p.userId, name: p.name, line: p.most1 as Line, score: getAdjustedScore(p.userId, p.most1 as Line, tier) }
+            const line = p.most1 as Line
+            const { score } = resolveTierScore(p, line)
+            return { userId: p.userId, name: p.name, line, score }
           }
           const allLines = getSummonerLines(p.userId)
           let line: Line
@@ -457,8 +474,8 @@ export default function RoomsTab({
             const isM2 = Math.random() >= 0.7
             line = isM2 ? p.most2 as Line : p.most1 as Line
           }
-          const tier = summoners[p.userId]?.[line] ?? '골드2'
-          return { userId: p.userId, name: p.name, line, score: getAdjustedScore(p.userId, line, tier) }
+          const { score } = resolveTierScore(p, line)
+          return { userId: p.userId, name: p.name, line, score }
         })
 
         const lineCounts: Record<string, number> = {}
@@ -473,7 +490,11 @@ export default function RoomsTab({
           if (insufficientLines.includes(l)) {
             pair = slots[l].map(p => buildPlayer(p, l))
           } else {
-            pair = shuffle(assigned.filter(p => p.line === l)).map(p => ({ userId: p.userId, name: p.name, tier: summoners[p.userId]?.[l] ?? '골드2', line: l, score: p.score }))
+            pair = shuffle(assigned.filter(p => p.line === l)).map(p => {
+              const entry = remainingPlayers.find(pl => pl.userId === p.userId)!
+              const { tier } = resolveTierScore(entry, l)
+              return { userId: p.userId, name: p.name, tier, line: l, score: p.score }
+            })
           }
           if (pair.length < 2) { ok = false; break }
           t1.push(pair[0]); t2.push(pair[1])
@@ -673,6 +694,25 @@ export default function RoomsTab({
         if (rpcErr) { console.error('점수 반영 실패:', p.name, p.line, rpcErr.message); scoreFailures.push(`${p.name}(${p.line})`) }
         else if (rpcData?.[0]) scoreResults[p.userId] = rpcData[0]
       }
+
+      // 서버(apply_match_score_delta)가 돌려준 "적용 직전 정확한 점수"를 그대로 blue/red JSON에 박아둠 —
+      // 이제부턴 경기 시점 점수를 나중에 score_events로 역산할 필요 없이, records 테이블만 보면 항상 정확한 매치 당시 점수를 알 수 있음.
+      // (RPC가 실패한 극히 드문 경우에만 팀편성 당시 클라이언트 점수로 대체)
+      const withScore = (arr: { userId: string; name: string; line: Line }[], side: TeamPlayer[]) =>
+        arr.map(p => ({
+          ...p,
+          score: scoreResults[p.userId]?.old_score ?? side.find(t => t.userId === p.userId)?.score ?? null,
+        }))
+      const blueDataFinal = withScore(blueData, result.team1)
+      const redDataFinal = withScore(redData, result.team2)
+      const blueScoreBefore = blueDataFinal.reduce((a, p) => a + (p.score ?? 0), 0)
+      const redScoreBefore = redDataFinal.reduce((a, p) => a + (p.score ?? 0), 0)
+      await supabase.from('records').update({
+        blue: blueDataFinal,
+        red: redDataFinal,
+        blue_score: blueScoreBefore,
+        red_score: redScoreBefore,
+      }).eq('id', recId)
     }
 
     onRecord({ winner, blue: blueData, red: redData, skipInsert: true })
