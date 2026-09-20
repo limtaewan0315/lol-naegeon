@@ -12,6 +12,7 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
   const [editingTier, setEditingTier] = useState('')
   const [error, setError] = useState('')
   const [inactiveStatusMap, setInactiveStatusMap] = useState<Map<string, boolean>>(new Map())
+  const [deletedStatusMap, setDeletedStatusMap] = useState<Map<string, boolean>>(new Map())
   const [editingNameUserId, setEditingNameUserId] = useState<string | null>(null)
   const [nameInput, setNameInput] = useState('')
   const [flaggingUserId, setFlaggingUserId] = useState<string | null>(null)
@@ -38,29 +39,41 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
     return result.sort((a, b) => b.days - a.days)
   }, [allSummoners, records])
 
-  // 페이지 로드 시 DB에서 기존 비활성화 상태 읽어오기 (계정ID 기준)
+  // 페이지 로드 시 DB에서 기존 비활성화/삭제 상태 읽어오기 (계정ID 기준)
   useEffect(() => {
     const loadInactiveStatus = async () => {
-      const { data } = await supabase.from('summoners').select('user_id, is_inactive').eq('is_inactive', true)
+      const { data } = await supabase.from('summoners').select('user_id, is_inactive, is_deleted')
       if (data) {
         const statusMap = new Map<string, boolean>()
-        for (const record of data) {
-          if ((record as any).user_id) statusMap.set((record as any).user_id, true)
+        const deletedMap = new Map<string, boolean>()
+        for (const record of data as any[]) {
+          if (!record.user_id) continue
+          if (record.is_inactive) statusMap.set(record.user_id, true)
+          if (record.is_deleted) deletedMap.set(record.user_id, true)
         }
         setInactiveStatusMap(statusMap)
+        setDeletedStatusMap(deletedMap)
       }
     }
     loadInactiveStatus()
   }, [])
 
+  // 탈퇴(삭제): 비활성화랑 별개의 영구 상태. 라이엇처럼 "탈퇴한 계정"으로 표시만 하고
+  // 과거 경기 기록 연결(userId)은 그대로 남겨둠. 비활성화(is_inactive)와 달리 이 화면에서
+  // 다시 되돌릴 수 없음 — 되돌려야 하면 DB에서 직접 처리.
   const deleteSummoner = async (userId: string, name: string) => {
-    if (!confirm(`${name}을(를) 완전히 삭제할까요?`)) return
+    if (!confirm(`${name}을(를) 탈퇴 처리할까요? 로그인 불가 + 활성 인원 목록에서 "삭제된 계정"으로 표시되고, 여기서는 되돌릴 수 없습니다. (과거 경기 기록은 그대로 보존됩니다)`)) return
     setError('')
-    await supabase.from('summoners').delete().eq('user_id', userId)
+    // 예전엔 summoners 행을 완전 삭제(delete)했는데, 그러면 그 유저가 참가했던 과거 records의
+    // userId가 고아 참조가 돼서 이후 점수 복원/통계 작업이 다 꼬였음.
+    // is_deleted=true (+ is_inactive=true)로 표시만 하면 행은 그대로 남고, 로그인 차단 /
+    // 활성 인원 제외는 is_inactive 기반 로직이 그대로 처리함.
+    await supabase.from('summoners').update({ is_inactive: true, is_deleted: true }).eq('user_id', userId)
     window.location.reload()
   }
 
   const toggleInactive = async (userId: string, currentInactive: boolean) => {
+    if (deletedStatusMap.get(userId)) return // 탈퇴한 계정은 비활성화 토글로 되돌릴 수 없음
     const newInactiveStatus = !currentInactive
     // 로컬 상태에 즉시 반영 (UI 업데이트)
     setInactiveStatusMap(prev => new Map(prev).set(userId, newInactiveStatus))
@@ -265,14 +278,20 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
                               ) : (
                                 <button className="btn btn-sm" style={{ padding: '2px 5px', fontSize: 9 }} onClick={() => startFlag(userId)}>요청</button>
                               )}
-                              <button
-                                className="btn btn-sm"
-                                style={{ padding: '2px 5px', fontSize: 9, ...(inactiveStatusMap.get(userId) ? { background: 'var(--red-bg)', color: 'var(--red)', borderColor: 'var(--red-border)' } : {}) }}
-                                onClick={() => toggleInactive(userId, inactiveStatusMap.get(userId) ?? false)}
-                              >
-                                {inactiveStatusMap.get(userId) ? '활성화' : '비활성화'}
-                              </button>
-                              <button className="btn btn-danger btn-sm" style={{ padding: '2px 5px', fontSize: 9 }} onClick={() => deleteSummoner(userId, name)}>삭제</button>
+                              {deletedStatusMap.get(userId) ? (
+                                <span style={{ padding: '2px 5px', fontSize: 9, color: 'var(--red)', fontWeight: 700 }}>탈퇴한 계정</span>
+                              ) : (
+                                <>
+                                  <button
+                                    className="btn btn-sm"
+                                    style={{ padding: '2px 5px', fontSize: 9, ...(inactiveStatusMap.get(userId) ? { background: 'var(--red-bg)', color: 'var(--red)', borderColor: 'var(--red-border)' } : {}) }}
+                                    onClick={() => toggleInactive(userId, inactiveStatusMap.get(userId) ?? false)}
+                                  >
+                                    {inactiveStatusMap.get(userId) ? '활성화' : '비활성화'}
+                                  </button>
+                                  <button className="btn btn-danger btn-sm" style={{ padding: '2px 5px', fontSize: 9 }} onClick={() => deleteSummoner(userId, name)}>삭제(탈퇴)</button>
+                                </>
+                              )}
                             </td>
                           </tr>
                           {flagged && correctionMap?.[userId]?.correction_note && (
@@ -312,6 +331,7 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
             ) : (
               inactiveList.map(({ userId, name, days }) => {
                 const isInactive = inactiveStatusMap.get(userId) ?? false
+                const isDeleted = deletedStatusMap.get(userId) ?? false
                 return (
                   <div key={userId} style={{
                     marginBottom: 10, padding: '10px 12px', background: 'var(--bg3)',
@@ -322,15 +342,21 @@ export default function AdminTab({ summoners, summonerScores, records, nameByUse
                       <span style={{ fontWeight: 700 }}><NameWithIdBadge name={name} idPrefixMap={idPrefixMap} userId={userId} /></span>
                       <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 8 }}>
                         {days}일 미참여
-                        {isInactive && <span style={{ marginLeft: 8, color: 'var(--red)', fontWeight: 700 }}>비활성화</span>}
+                        {isDeleted ? (
+                          <span style={{ marginLeft: 8, color: 'var(--red)', fontWeight: 700 }}>탈퇴한 계정</span>
+                        ) : isInactive && (
+                          <span style={{ marginLeft: 8, color: 'var(--red)', fontWeight: 700 }}>비활성화</span>
+                        )}
                       </span>
                     </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button className="btn btn-sm" onClick={() => toggleInactive(userId, isInactive)}>
-                        {isInactive ? '활성화' : '비활성화'}
-                      </button>
-                      <button className="btn btn-danger btn-sm" onClick={() => deleteSummoner(userId, name)}>삭제</button>
-                    </div>
+                    {!isDeleted && (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="btn btn-sm" onClick={() => toggleInactive(userId, isInactive)}>
+                          {isInactive ? '활성화' : '비활성화'}
+                        </button>
+                        <button className="btn btn-danger btn-sm" onClick={() => deleteSummoner(userId, name)}>삭제(탈퇴)</button>
+                      </div>
+                    )}
                   </div>
                 )
               })
