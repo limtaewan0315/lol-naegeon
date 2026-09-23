@@ -571,6 +571,50 @@ export default function RoomsTab({
         : [p.most1 as Line, ...(p.most2 && p.most2 !== 'any' ? [p.most2 as Line] : [])].filter(l => lines.includes(l))
     }
 
+    // 예상승률 50:50 근접도를 후보 선택 기준으로 쓰면서(아래), 3000번 탐색으로 나온 후보 하나하나마다
+    // records 전체를 훑는 predictTeamWinRate를 그대로 호출하면 매번 O(5라인 × 전체 기록)이 들어서 버벅이거나
+    // 멈춘 것처럼 느려짐 — (라인, 두 사람) 조합은 몇 안 되니까 여기서 한 번 계산한 값을 재사용(메모이즈)함
+    const h2hCache = new Map<string, { wr: number; total: number; blended: boolean }>()
+    const cachedLineWr = (line: Line, bp: TeamPlayer, rp: TeamPlayer): { wr: number; total: number; blended: boolean } => {
+      const key = `${line}#${bp.userId}#${rp.userId}`
+      const cached = h2hCache.get(key)
+      if (cached) return cached
+      const scoreWr = estimateWrFromScoreDiff(bp.score - rp.score, line)
+      const matchRecs = records.filter(r => {
+        const bpInBlue = r.blue.some(p => p.userId === bp.userId && p.line === line)
+        const bpInRed = r.red.some(p => p.userId === bp.userId && p.line === line)
+        const rpInBlue = r.blue.some(p => p.userId === rp.userId && p.line === line)
+        const rpInRed = r.red.some(p => p.userId === rp.userId && p.line === line)
+        return (bpInBlue && rpInRed) || (bpInRed && rpInBlue)
+      })
+      const total = matchRecs.length
+      let result: { wr: number; total: number; blended: boolean }
+      if (total >= MIN_H2H_SAMPLE) {
+        const bpWin = matchRecs.filter(r => {
+          const bpInBlue = r.blue.some(p => p.userId === bp.userId && p.line === line)
+          return (bpInBlue && r.winner === 'blue') || (!bpInBlue && r.winner === 'red')
+        }).length
+        const h2hWr = bpWin / total
+        const h2hWeight = Math.min(0.8, total / 25)
+        result = { wr: h2hWeight * h2hWr + (1 - h2hWeight) * scoreWr, total, blended: true }
+      } else {
+        result = { wr: scoreWr, total, blended: false }
+      }
+      h2hCache.set(key, result)
+      return result
+    }
+    const cachedPredictWinRate = (team1: TeamPlayer[], team2: TeamPlayer[]): number => {
+      const lineWrs = LINES.map(line => {
+        const bp = team1.find(p => p.line === line)
+        const rp = team2.find(p => p.line === line)
+        if (!bp || !rp) return null
+        return cachedLineWr(line, bp, rp)
+      }).filter((x): x is { wr: number; total: number; blended: boolean } => !!x)
+      const lineWeight = (l: { total: number; blended: boolean }) => l.blended ? 5 + l.total : 1
+      const totalWeight = lineWrs.reduce((s, l) => s + lineWeight(l), 0)
+      return totalWeight > 0 ? lineWrs.reduce((s, l) => s + l.wr * lineWeight(l), 0) / totalWeight : 0.5
+    }
+
     // ── 최고수준팀편성 ──────────────────────
     const useDetailedMatching = !!myRoom.detailed_matching
     const MIN_PROVEN_GAMES = 10
@@ -854,7 +898,7 @@ export default function RoomsTab({
       // 최소 편차 기준 아주 좁은 오차범위(±0.5%p) 안에 든 후보만 "50:50에 근접한" 후보로 인정하고,
       // 그 안에서만 반복회피/라인 다양성을 2차 기준으로 적용함.
       const withDev = okCandidates.map(c => ({
-        c, dev: Math.abs(predictTeamWinRate(c.result.team1, c.result.team2, records).blueWr - 0.5),
+        c, dev: Math.abs(cachedPredictWinRate(c.result.team1, c.result.team2) - 0.5),
       }))
       const minDev = withDev.length > 0 ? Math.min(...withDev.map(w => w.dev)) : 0
       const fairPool = withDev.filter(w => w.dev <= minDev + 0.005).map(w => w.c)
@@ -951,7 +995,7 @@ export default function RoomsTab({
       } else {
         // 여기서도 예상승률 50:50 근접을 최우선 기준으로 삼고, 그 안에서 반복회피/라인 다양성을 2차 기준으로 적용
         const withDev = fairCombos.map(c => ({
-          c, dev: Math.abs(predictTeamWinRate(c.team1, c.team2, records).blueWr - 0.5),
+          c, dev: Math.abs(cachedPredictWinRate(c.team1, c.team2) - 0.5),
         }))
         const minDev = withDev.length > 0 ? Math.min(...withDev.map(w => w.dev)) : 0
         const winRateFairPool = withDev.filter(w => w.dev <= minDev + 0.005).map(w => w.c)
