@@ -9,8 +9,8 @@ export interface BalanceResult { team1: TeamPlayer[]; team2: TeamPlayer[]; s1: n
 export interface GameRecord {
   id: number
   winner: 'blue' | 'red'
-  blue: { userId?: string; name: string; line: Line }[]
-  red: { userId?: string; name: string; line: Line }[]
+  blue: { userId?: string; name: string; line: Line; champion?: string | null }[]
+  red: { userId?: string; name: string; line: Line; champion?: string | null }[]
   time: string
   blue_score?: number | null
   red_score?: number | null
