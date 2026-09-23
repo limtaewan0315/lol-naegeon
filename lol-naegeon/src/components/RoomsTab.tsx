@@ -848,10 +848,18 @@ export default function RoomsTab({
       // 최고수준팀편성: 반복회피/라인 다양성 같은 소프트 제약은 전부 무시하고 diff<=5 후보 전체를 대상으로 함
       basePickPool = okCandidates
     } else {
-      const bestPool = okCandidates.filter(c => isRepeatFree(c) && isDiverse(c))
-      const diversePool = bestPool.length > 0 ? bestPool : okCandidates.filter(isDiverse)
-      const repeatFreePool = diversePool.length > 0 ? diversePool : okCandidates.filter(isRepeatFree)
-      basePickPool = repeatFreePool.length > 0 ? repeatFreePool : okCandidates
+      // 예상승률이 50:50에 최대한 가까워야 함 — 내전매니저의 핵심 목적이라 최우선 기준으로 둠.
+      // 최소 편차 기준 아주 좁은 오차범위(±0.5%p) 안에 든 후보만 "50:50에 근접한" 후보로 인정하고,
+      // 그 안에서만 반복회피/라인 다양성을 2차 기준으로 적용함.
+      const withDev = okCandidates.map(c => ({
+        c, dev: Math.abs(predictTeamWinRate(c.result.team1, c.result.team2, records).blueWr - 0.5),
+      }))
+      const minDev = withDev.length > 0 ? Math.min(...withDev.map(w => w.dev)) : 0
+      const fairPool = withDev.filter(w => w.dev <= minDev + 0.005).map(w => w.c)
+      const bestPool = fairPool.filter(c => isRepeatFree(c) && isDiverse(c))
+      const diversePool = bestPool.length > 0 ? bestPool : fairPool.filter(isDiverse)
+      const repeatFreePool = diversePool.length > 0 ? diversePool : fairPool.filter(isRepeatFree)
+      basePickPool = repeatFreePool.length > 0 ? repeatFreePool : fairPool
     }
     // 최고수준팀편성 on: diff<=5 후보들 중에서 총점(s1+s2)이 가장 높은 조합을 최우선으로 고름.
     // 완전히 매번 똑같은 조합만 나오진 않게, 최고 총점 기준 아주 좁은 오차범위(±1점) 안에 든 조합들 중에서만 무작위 선택.
@@ -907,10 +915,16 @@ export default function RoomsTab({
         // 최고수준팀편성: 반복회피/라인 다양성 무시하고 diff<=5 조합 전체를 대상으로 함
         baseComboPool = fairCombos
       } else {
-        const bestFairCombos = fairCombos.filter(c => isCleanAF(c) && isLineDiverse(c))
-        const diverseFairCombos = bestFairCombos.length > 0 ? bestFairCombos : fairCombos.filter(isLineDiverse)
-        const cleanFairCombos = diverseFairCombos.length > 0 ? diverseFairCombos : fairCombos.filter(isCleanAF)
-        baseComboPool = cleanFairCombos.length > 0 ? cleanFairCombos : fairCombos
+        // 여기서도 예상승률 50:50 근접을 최우선 기준으로 삼고, 그 안에서 반복회피/라인 다양성을 2차 기준으로 적용
+        const withDev = fairCombos.map(c => ({
+          c, dev: Math.abs(predictTeamWinRate(c.team1, c.team2, records).blueWr - 0.5),
+        }))
+        const minDev = withDev.length > 0 ? Math.min(...withDev.map(w => w.dev)) : 0
+        const winRateFairPool = withDev.filter(w => w.dev <= minDev + 0.005).map(w => w.c)
+        const bestFairCombos = winRateFairPool.filter(c => isCleanAF(c) && isLineDiverse(c))
+        const diverseFairCombos = bestFairCombos.length > 0 ? bestFairCombos : winRateFairPool.filter(isLineDiverse)
+        const cleanFairCombos = diverseFairCombos.length > 0 ? diverseFairCombos : winRateFairPool.filter(isCleanAF)
+        baseComboPool = cleanFairCombos.length > 0 ? cleanFairCombos : winRateFairPool
       }
       let comboPool = baseComboPool
       if (useDetailedMatching && baseComboPool.length > 1) {
