@@ -466,14 +466,38 @@ export default function RoomsTab({
       return historyTeams.some(histTeam => histTeam.filter(id => ids.has(id)).length >= 2)
     }
 
+    // ── 직전 판과 비교해서, 같은 라인에서 같은 두 명이 다시 붙는 경우(팀은 바뀌어도 매치업 자체가 동일)를 세어서
+    // 5라인 중 3라인까지만 허용 (4~5라인이 겹치면 사실상 팀이 거의 그대로인 거라 제외) ──
+    const lastResult = myRoom.last_result ?? null
+    const MAX_SAME_LINE_MATCHUPS = 3
+    const getLinePair = (r: BalanceResult, line: Line): Set<string> | null => {
+      const a = r.team1.find(p => p.line === line)?.userId
+      const b = r.team2.find(p => p.line === line)?.userId
+      return (a && b) ? new Set([a, b]) : null
+    }
+    const countSameLineMatchups = (r: BalanceResult): number => {
+      if (!lastResult) return 0
+      let count = 0
+      for (const l of LINES) {
+        const prevPair = getLinePair(lastResult, l)
+        const curPair = getLinePair(r, l)
+        if (prevPair && curPair && prevPair.size === 2 && [...prevPair].every(id => curPair.has(id))) count++
+      }
+      return count
+    }
+    const isLineDiverse = (r: BalanceResult): boolean => countSameLineMatchups(r) <= MAX_SAME_LINE_MATCHUPS
+
     // ── 라인별 공급 계산: M1/M2/상관없음을 다 합쳐서 2명이 안 되는 라인만 "부족한 라인"으로 취급 ──
+    // M1='상관없음'은 실제로 전 라인에 랜덤 배정될 수 있으므로 모든 라인의 공급으로 카운트.
+    // M2='상관없음'은 실제 배정 로직상 항상 M1으로 고정되고(=없음과 동일), 다른 라인에는 절대 안 걸리므로
+    // '없음'과 똑같이 공급 계산에서 제외 — 예전엔 여기서 전 라인 공급으로 잘못 카운트해서
+    // 실제로는 부족한 라인이 "충분한 라인"으로 착각되는 불일치가 있었음
     const linePossible: Record<Line, number> = { 탑: 0, 정글: 0, 미드: 0, 원딜: 0, 서포터: 0 }
     players.forEach(p => {
       const allLines = getSummonerLines(p.userId)
       if (p.most1 === 'any') allLines.forEach(l => { linePossible[l] = (linePossible[l] ?? 0) + 1 })
       else linePossible[p.most1 as Line] = (linePossible[p.most1 as Line] ?? 0) + 1
-      if (p.most2 === 'any') allLines.forEach(l => { linePossible[l] = (linePossible[l] ?? 0) + 1 })
-      else if (p.most2) linePossible[p.most2 as Line] = (linePossible[p.most2 as Line] ?? 0) + 1
+      if (p.most2 && p.most2 !== 'any') linePossible[p.most2 as Line] = (linePossible[p.most2 as Line] ?? 0) + 1
     })
     const insufficientLines = LINES.filter(l => linePossible[l] < 2)
     const sufficientLines = LINES.filter(l => linePossible[l] >= 2)
@@ -589,14 +613,18 @@ export default function RoomsTab({
     }
 
     const isRepeatFree = (c: { result: BalanceResult }) => !violatesRepeat(c.result.team1) && !violatesRepeat(c.result.team2)
+    const isDiverse = (c: { result: BalanceResult }) => isLineDiverse(c.result)
 
     // 5점을 넘는 조합은 어떤 경우에도 쓰지 않음.
     // diff가 가장 낮은 조합 "딱 1개"만 쓰면 같은 멤버로 여러 판 돌릴 때 매번 거의 같은 팀 구성이 나오는 경향이 있어서,
-    // diff<=5(안전 기준)를 만족하는 후보들 중에서는 밸런스 차이가 없다고 보고 무작위로 하나를 뽑음
-    // (반복 회피 조합이 있으면 그 안에서, 없으면 전체 diff<=5 후보 안에서 무작위 선택)
+    // diff<=5(안전 기준)를 만족하는 후보들 중에서는 밸런스 차이가 없다고 보고 무작위로 하나를 뽑음.
+    // 우선순위: (반복회피 + 직전판 라인매치업 3라인 이하) > (라인매치업 3라인 이하) > (반복회피만) > 아무거나
+    // — 라인 다양성 조건을 못 맞추면 단계적으로 완화해서, 그래도 5점 이내 조합이 있으면 반드시 하나는 뽑음
     const okCandidates = candidates.filter(c => c.diff <= 5)
-    const repeatFreeCandidates = okCandidates.filter(isRepeatFree)
-    const pickPool = repeatFreeCandidates.length > 0 ? repeatFreeCandidates : okCandidates
+    const bestPool = okCandidates.filter(c => isRepeatFree(c) && isDiverse(c))
+    const diversePool = bestPool.length > 0 ? bestPool : okCandidates.filter(isDiverse)
+    const repeatFreePool = diversePool.length > 0 ? diversePool : okCandidates.filter(isRepeatFree)
+    const pickPool = repeatFreePool.length > 0 ? repeatFreePool : okCandidates
     let chosen: BalanceResult | null =
       pickPool.length > 0 ? pickPool[Math.floor(Math.random() * pickPool.length)].result : null
 
@@ -634,9 +662,11 @@ export default function RoomsTab({
       }
 
       // 여기도 마찬가지로 diff<=5를 만족하는 후보 중 "가장 낮은 diff 1개"가 아니라 무작위로 선택해서
-      // 매번 같은 팀 모양이 나오는 걸 줄임
+      // 매번 같은 팀 모양이 나오는 걸 줄임. 우선순위는 메인 탐색과 동일하게 단계적으로 완화
       const fairCombos = allCombos.filter(c => Math.abs(c.s1 - c.s2) <= 5 && isFairAF(c))
-      const cleanFairCombos = fairCombos.filter(isCleanAF)
+      const bestFairCombos = fairCombos.filter(c => isCleanAF(c) && isLineDiverse(c))
+      const diverseFairCombos = bestFairCombos.length > 0 ? bestFairCombos : fairCombos.filter(isLineDiverse)
+      const cleanFairCombos = diverseFairCombos.length > 0 ? diverseFairCombos : fairCombos.filter(isCleanAF)
       const comboPool = cleanFairCombos.length > 0 ? cleanFairCombos : fairCombos
       chosen = comboPool.length > 0 ? comboPool[Math.floor(Math.random() * comboPool.length)] : null
     }
@@ -1007,7 +1037,7 @@ export default function RoomsTab({
                                 disabled={m.most1 === 'any' || m.ready}
                                 style={{ width: 78, padding: '2px 4px', fontSize: 10, opacity: (m.most1 === 'any' || m.ready) ? 0.4 : 1, cursor: m.ready ? 'not-allowed' : 'pointer' }}
                               >
-                                <option value=''>없음</option>
+                                <option value=''>상관없음</option>
                                 {lines.filter(l => l !== m.most1 && m.most1 !== 'any').map(l => (
                                   <option key={l} value={l}>{l}</option>
                                 ))}
