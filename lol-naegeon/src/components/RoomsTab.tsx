@@ -51,7 +51,7 @@ function resultSignature(r: BalanceResult): string {
 }
 
 // 라인 영향력(캐리력) 가중치 — 2026-09 시즌1 데이터 분석 결과(미드>원딜>탑>정글 >> 서포터)를 약하게 반영.
-// 최고수준팀편성(runBalance)과 예상 승률 카드가 같은 값을 공유하도록 모듈 레벨로 뺌.
+// "예상 승률" 카드에서 쓰기 위해 모듈 레벨로 뺌.
 const LINE_CARRY_WEIGHT: Record<Line, number> = { 미드: 1.0, 원딜: 1.0, 탑: 1.0, 정글: 1.0, 서포터: 0.7 }
 // 상대전적을 신뢰할 수 있다고 보는 최소 표본 수
 const MIN_H2H_SAMPLE = 10
@@ -68,10 +68,8 @@ function estimateWrFromScoreDiff(diff: number, line?: Line): number {
   return Math.min(0.9, Math.max(0.1, wr))
 }
 
-// team1(블루) 승률 예측 — "예상 승률" 카드에 쓰는 것과 완전히 동일한 로직(라인별 티어차이+라인영향력 +
-// 상대전적 10판 이상 블렌딩 → 라인별 신뢰도 가중평균)을 최고수준팀편성(runBalance)에서도 그대로 재사용.
-// 두 곳이 서로 다른 기준으로 계산하면 화면에 보이는 예상 승률과 실제 선택 기준이 어긋날 수 있으므로
-// 하나의 함수로 통일함(최고수준팀편성 자체는 승률이 아니라 총점 기준으로 고르지만, 점수 산정 로직은 공유).
+// team1(블루) 승률 예측 — "예상 승률" 카드에 표시할 때 사용.
+// 라인별 티어차이+라인영향력 + 상대전적 10판 이상 블렌딩 → 라인별 신뢰도 가중평균.
 function predictTeamWinRate(team1: TeamPlayer[], team2: TeamPlayer[], records: GameRecord[]): {
   blueWr: number
   lineWrs: { line: Line; wr: number; total: number; blended: boolean }[]
@@ -570,79 +568,7 @@ export default function RoomsTab({
         ? allLines.filter(l => lines.includes(l))
         : [p.most1 as Line, ...(p.most2 && p.most2 !== 'any' ? [p.most2 as Line] : [])].filter(l => lines.includes(l))
     }
-
-    // 예상승률 50:50 근접도를 후보 선택 기준으로 쓰면서(아래), 3000번 탐색으로 나온 후보 하나하나마다
-    // records 전체를 훑는 predictTeamWinRate를 그대로 호출하면 매번 O(5라인 × 전체 기록)이 들어서 버벅이거나
-    // 멈춘 것처럼 느려짐 — (라인, 두 사람) 조합은 몇 안 되니까 여기서 한 번 계산한 값을 재사용(메모이즈)함
-    const h2hCache = new Map<string, { wr: number; total: number; blended: boolean }>()
-    const cachedLineWr = (line: Line, bp: TeamPlayer, rp: TeamPlayer): { wr: number; total: number; blended: boolean } => {
-      const key = `${line}#${bp.userId}#${rp.userId}`
-      const cached = h2hCache.get(key)
-      if (cached) return cached
-      const scoreWr = estimateWrFromScoreDiff(bp.score - rp.score, line)
-      const matchRecs = records.filter(r => {
-        const bpInBlue = r.blue.some(p => p.userId === bp.userId && p.line === line)
-        const bpInRed = r.red.some(p => p.userId === bp.userId && p.line === line)
-        const rpInBlue = r.blue.some(p => p.userId === rp.userId && p.line === line)
-        const rpInRed = r.red.some(p => p.userId === rp.userId && p.line === line)
-        return (bpInBlue && rpInRed) || (bpInRed && rpInBlue)
-      })
-      const total = matchRecs.length
-      let result: { wr: number; total: number; blended: boolean }
-      if (total >= MIN_H2H_SAMPLE) {
-        const bpWin = matchRecs.filter(r => {
-          const bpInBlue = r.blue.some(p => p.userId === bp.userId && p.line === line)
-          return (bpInBlue && r.winner === 'blue') || (!bpInBlue && r.winner === 'red')
-        }).length
-        const h2hWr = bpWin / total
-        const h2hWeight = Math.min(0.8, total / 25)
-        result = { wr: h2hWeight * h2hWr + (1 - h2hWeight) * scoreWr, total, blended: true }
-      } else {
-        result = { wr: scoreWr, total, blended: false }
-      }
-      h2hCache.set(key, result)
-      return result
-    }
-    const cachedPredictWinRate = (team1: TeamPlayer[], team2: TeamPlayer[]): number => {
-      const lineWrs = LINES.map(line => {
-        const bp = team1.find(p => p.line === line)
-        const rp = team2.find(p => p.line === line)
-        if (!bp || !rp) return null
-        return cachedLineWr(line, bp, rp)
-      }).filter((x): x is { wr: number; total: number; blended: boolean } => !!x)
-      const lineWeight = (l: { total: number; blended: boolean }) => l.blended ? 5 + l.total : 1
-      const totalWeight = lineWrs.reduce((s, l) => s + lineWeight(l), 0)
-      return totalWeight > 0 ? lineWrs.reduce((s, l) => s + l.wr * lineWeight(l), 0) / totalWeight : 0.5
-    }
-
-    // ── 최고수준팀편성 ──────────────────────
-    const useDetailedMatching = !!myRoom.detailed_matching
-    const MIN_PROVEN_GAMES = 10
-    const MAX_DIFF = useDetailedMatching ? 2 : 5
-    const linePlayCountCache = new Map<string, number>()
-    const linePlayCount = (userId: string, line: Line): number => {
-      const key = `${userId}|${line}`
-      const cached = linePlayCountCache.get(key)
-      if (cached !== undefined) return cached
-      const n = records.filter(r =>
-        r.blue.some(p => p.userId === userId && p.line === line) ||
-        r.red.some(p => p.userId === userId && p.line === line)
-      ).length
-      linePlayCountCache.set(key, n)
-      return n
-    }
-    // 최고수준팀편성: 라인별 점수뿐 아니라 "이 사람 자체가 전체적으로 고티어인지"도 우선순위에 반영 —
-    // 본인이 등록한 라인들 중 가장 높은 점수(피크 티어)를 그 사람의 전체 수준으로 봄.
-    const overallScoreCache = new Map<string, number>()
-    const overallScore = (userId: string): number => {
-      const cached = overallScoreCache.get(userId)
-      if (cached !== undefined) return cached
-      const lines = getSummonerLines(userId)
-      const scores = lines.map(l => summonerScores[userId]?.[l]).filter((s): s is number => typeof s === 'number')
-      const s = scores.length > 0 ? Math.max(...scores) : 0
-      overallScoreCache.set(userId, s)
-      return s
-    }
+    const MAX_DIFF = 5
 
     const protectedIds = new Set<string>(myRoom.autofill_protected_ids ?? [])
     const guaranteedIds = new Set<string>(myRoom.guaranteed_m1_ids ?? [])
@@ -704,27 +630,16 @@ export default function RoomsTab({
     // 부족한 라인만 먼저 우선순위대로 강제 확정 (M1 → M2 → 상관없음 → 진짜 튕김)
     const priorityFillLine = (line: Line) => {
       // 부족한 라인은 정의상 M1+M2+상관없음을 합쳐도 2명 미만이라, 굳이 순서를 나눌 필요 없이
-      // 그 라인을 원했던 사람(M1/M2/상관없음)이 있으면 그대로 쓰고, 나머지는 강제 배정.
-      // 최고수준팀편성일 때는 여기서도 무작위(shuffle) 대신 점수 높은 사람을 우선해서, 같은 멤버로 여러 번
-      // 눌러도 부족한 라인에 매번 다른 티어의 사람이 랜덤하게 끼어들어 총점이 들쭉날쭉해지는 걸 막음.
-      // 최고수준팀편성 우선순위: 전체적으로 고티어인 사람(overallScore)을 먼저 보고, 같은 수준이면 그 라인 점수로 판가름
-      const detailedPriority = (a: PlayerEntry, b: PlayerEntry) =>
-        (overallScore(b.userId) - overallScore(a.userId)) || (resolveTierScore(b, line).score - resolveTierScore(a, line).score)
-      const wantsLine = players.filter(p => !assignedIds.has(p.userId) && (p.most1 === line || p.most2 === line || p.most1 === 'any'))
-      ;(useDetailedMatching
-        ? [...wantsLine].sort(detailedPriority)
-        : shuffle(wantsLine)
-      ).forEach(p => tryAssign(p, line))
+      // 그 라인을 원했던 사람(M1/M2/상관없음)이 있으면 그대로 쓰고, 나머지는 강제 배정
+      shuffle(players.filter(p => !assignedIds.has(p.userId) && (p.most1 === line || p.most2 === line || p.most1 === 'any')))
+        .forEach(p => tryAssign(p, line))
       while (slots[line].length < 2) {
         const remaining = players.filter(p => !assignedIds.has(p.userId))
         if (remaining.length === 0) break
         // 보호 대상(직전 판에 튕겼던 사람)은 무조건 피함 — 후보가 없으면 이 자리는 그냥 비워둠(강제로 보호 깨지 않음)
         const eligible = remaining.filter(p => !protectedIds.has(p.userId))
         if (eligible.length === 0) break
-        const pick = useDetailedMatching
-          ? [...eligible].sort(detailedPriority)[0]
-          : shuffle(eligible)[0]
-        tryAssign(pick, line)
+        tryAssign(shuffle(eligible)[0], line)
       }
     }
     insufficientLines.forEach(priorityFillLine)
@@ -733,68 +648,6 @@ export default function RoomsTab({
     const remainingPlayers = players.filter(p => !assignedIds.has(p.userId))
     const remainingLines = sufficientLines
     const candidates: { diff: number; result: BalanceResult }[] = []
-
-    // 최고수준팀편성 전용: 라인 배정에 "우선순위"를 둠 — 같은 라인(특히 M1)을 원하는 사람들끼리는
-    // 검증된 라인(10판 이상) 중 티어(점수) 높은 사람이 먼저 그 라인을 가져가도록 미리 한 번만 계산해둠.
-    // (일반 모드처럼 매 반복마다 무작위로 배정하면 고티어가 밀려날 수 있어서, 이 모드에서는 결정론적으로 고정함)
-    const detailedFixedLine = new Map<string, Line>()
-    if (useDetailedMatching && remainingLines.length > 0) {
-      const capacity: Partial<Record<Line, number>> = {}
-      remainingLines.forEach(l => { capacity[l] = 2 })
-      const unassigned = new Set(remainingPlayers.map(p => p.userId))
-      type Req = { p: PlayerEntry; line: Line; score: number; overall: number; isM1: boolean }
-      const buildRequests = (): Req[] => {
-        const reqs: Req[] = []
-        remainingPlayers.forEach(p => {
-          if (!unassigned.has(p.userId)) return
-          const candidateLines = candidateLinesFor(p, remainingLines)
-          const provenLines = candidateLines.filter(l => linePlayCount(p.userId, l) >= MIN_PROVEN_GAMES)
-          const useLines = provenLines.length > 0 ? provenLines : candidateLines
-          useLines.forEach(l => reqs.push({ p, line: l, score: resolveTierScore(p, l).score, overall: overallScore(p.userId), isM1: p.most1 === l }))
-        })
-        return reqs
-      }
-      // 전체적으로 고티어인 사람(overall)을 최우선으로, 같은 수준이면 그 라인에서의 점수로 판가름
-      const reqPriority = (a: Req, b: Req) => (b.overall - a.overall) || (b.score - a.score)
-      // 1단계: M1 요청만 우선순위 순으로 우선 배정
-      for (let round = 0; unassigned.size > 0 && round < 10; round++) {
-        const m1Reqs = buildRequests().filter(r => r.isM1 && (capacity[r.line] ?? 0) > 0).sort(reqPriority)
-        if (m1Reqs.length === 0) break
-        let progressed = false
-        for (const r of m1Reqs) {
-          if (!unassigned.has(r.p.userId) || (capacity[r.line] ?? 0) <= 0) continue
-          detailedFixedLine.set(r.p.userId, r.line)
-          capacity[r.line] = (capacity[r.line] ?? 0) - 1
-          unassigned.delete(r.p.userId)
-          progressed = true
-        }
-        if (!progressed) break
-      }
-      // 2단계: 남은 사람은 M2/그 외 검증된 후보 중 우선순위 순으로, 자리가 남은 라인에 배정
-      for (let round = 0; unassigned.size > 0 && round < 10; round++) {
-        const reqs = buildRequests().filter(r => (capacity[r.line] ?? 0) > 0).sort(reqPriority)
-        if (reqs.length === 0) break
-        let progressed = false
-        for (const r of reqs) {
-          if (!unassigned.has(r.p.userId) || (capacity[r.line] ?? 0) <= 0) continue
-          detailedFixedLine.set(r.p.userId, r.line)
-          capacity[r.line] = (capacity[r.line] ?? 0) - 1
-          unassigned.delete(r.p.userId)
-          progressed = true
-        }
-        if (!progressed) break
-      }
-      // 3단계: 그래도 남으면(후보 라인이 전부 꽉 찼거나 후보 자체가 없는 예외 상황) 남은 라인에 강제 배정
-      Array.from(unassigned).forEach(uid => {
-        const p = remainingPlayers.find(pl => pl.userId === uid)!
-        const openLine = remainingLines.find(l => (capacity[l] ?? 0) > 0)
-        if (openLine) {
-          detailedFixedLine.set(uid, openLine)
-          capacity[openLine] = (capacity[openLine] ?? 0) - 1
-          unassigned.delete(uid)
-        }
-      })
-    }
 
     if (remainingLines.length > 0 && remainingPlayers.length === remainingLines.length * 2) {
       for (let i = 0; i < 3000; i++) {
@@ -808,12 +661,7 @@ export default function RoomsTab({
           }
           const allLines = getSummonerLines(p.userId)
           let line: Line
-          if (useDetailedMatching) {
-            // 최고수준팀편성: 위에서 미리 계산해둔 우선순위 기반(검증된 라인 + 고티어 M1 우선) 배정을 그대로 사용
-            line = detailedFixedLine.get(p.userId) ?? (
-              remainingLines.includes(p.most1 as Line) ? p.most1 as Line : remainingLines[0]
-            )
-          } else if (p.most1 === 'any') {
+          if (p.most1 === 'any') {
             const opts = allLines.filter(l => remainingLines.includes(l))
             const pool = opts.length > 0 ? opts : remainingLines
             line = pool[Math.floor(Math.random() * pool.length)]
@@ -860,10 +708,7 @@ export default function RoomsTab({
         if (t1MaxPlayer >= s1 * 2 / 5 || t2MaxPlayer >= s2 * 2 / 5) continue
 
         const candidateResult: BalanceResult = { team1: t1, team2: t2, s1, s2 }
-        // 최고수준팀편성은 라인 배정 자체가 고정이라 나올 수 있는 조합의 가짓수가 원래도 적은데,
-        // "직전 판과 똑같은 조합이면 제외" 규칙까지 걸리면 하필 그 유일한 조합이 걸려서 매칭이 통째로 실패할 수 있음
-        // → 반복회피 규칙은 이 모드에서 애초에 무시하기로 했으니 여기서도 적용 안 함
-        if (!useDetailedMatching && lastSig && resultSignature(candidateResult) === lastSig) continue
+        if (lastSig && resultSignature(candidateResult) === lastSig) continue
 
         let maxLineDiff = 0
         for (const l of LINES) {
@@ -889,34 +734,10 @@ export default function RoomsTab({
     // 우선순위: (반복회피 + 직전판 라인매치업 3라인 이하) > (라인매치업 3라인 이하) > (반복회피만) > 아무거나
     // — 라인 다양성 조건을 못 맞추면 단계적으로 완화해서, 그래도 5점 이내 조합이 있으면 반드시 하나는 뽑음
     const okCandidates = candidates.filter(c => c.diff <= MAX_DIFF)
-    let basePickPool: typeof okCandidates
-    if (useDetailedMatching) {
-      // 최고수준팀편성: 반복회피/라인 다양성 같은 소프트 제약은 전부 무시하고 diff<=5 후보 전체를 대상으로 함
-      basePickPool = okCandidates
-    } else {
-      // 예상승률이 50:50에 최대한 가까워야 함 — 내전매니저의 핵심 목적이라 최우선 기준으로 둠.
-      // 최소 편차 기준 아주 좁은 오차범위(±0.5%p) 안에 든 후보만 "50:50에 근접한" 후보로 인정하고,
-      // 그 안에서만 반복회피/라인 다양성을 2차 기준으로 적용함.
-      const withDev = okCandidates.map(c => ({
-        c, dev: Math.abs(cachedPredictWinRate(c.result.team1, c.result.team2) - 0.5),
-      }))
-      const minDev = withDev.length > 0 ? Math.min(...withDev.map(w => w.dev)) : 0
-      const fairPool = withDev.filter(w => w.dev <= minDev + 0.005).map(w => w.c)
-      const bestPool = fairPool.filter(c => isRepeatFree(c) && isDiverse(c))
-      const diversePool = bestPool.length > 0 ? bestPool : fairPool.filter(isDiverse)
-      const repeatFreePool = diversePool.length > 0 ? diversePool : fairPool.filter(isRepeatFree)
-      basePickPool = repeatFreePool.length > 0 ? repeatFreePool : fairPool
-    }
-    // 최고수준팀편성 on: diff<=5 후보들 중에서 총점(s1+s2)이 가장 높은 조합을 최우선으로 고름.
-    // 완전히 매번 똑같은 조합만 나오진 않게, 최고 총점 기준 아주 좁은 오차범위(±1점) 안에 든 조합들 중에서만 무작위 선택.
-    let pickPool = basePickPool
-    if (useDetailedMatching && basePickPool.length > 1) {
-      const scored = basePickPool
-        .map(c => ({ c, total: c.result.s1 + c.result.s2 }))
-        .sort((a, b) => b.total - a.total)
-      const bestTotal = scored[0].total
-      pickPool = scored.filter(s => s.total >= bestTotal - 1).map(s => s.c)
-    }
+    const bestPool = okCandidates.filter(c => isRepeatFree(c) && isDiverse(c))
+    const diversePool = bestPool.length > 0 ? bestPool : okCandidates.filter(isDiverse)
+    const repeatFreePool = diversePool.length > 0 ? diversePool : okCandidates.filter(isRepeatFree)
+    const pickPool = repeatFreePool.length > 0 ? repeatFreePool : okCandidates
     let chosen: BalanceResult | null =
       pickPool.length > 0 ? pickPool[Math.floor(Math.random() * pickPool.length)].result : null
 
@@ -988,30 +809,10 @@ export default function RoomsTab({
       // 여기도 마찬가지로 diff<=5를 만족하는 후보 중 "가장 낮은 diff 1개"가 아니라 무작위로 선택해서
       // 매번 같은 팀 모양이 나오는 걸 줄임. 우선순위는 메인 탐색과 동일하게 단계적으로 완화
       const fairCombos = allCombos.filter(c => Math.abs(c.s1 - c.s2) <= MAX_DIFF && isFairAF(c))
-      let baseComboPool: BalanceResult[]
-      if (useDetailedMatching) {
-        // 최고수준팀편성: 반복회피/라인 다양성 무시하고 diff<=5 조합 전체를 대상으로 함
-        baseComboPool = fairCombos
-      } else {
-        // 여기서도 예상승률 50:50 근접을 최우선 기준으로 삼고, 그 안에서 반복회피/라인 다양성을 2차 기준으로 적용
-        const withDev = fairCombos.map(c => ({
-          c, dev: Math.abs(cachedPredictWinRate(c.team1, c.team2) - 0.5),
-        }))
-        const minDev = withDev.length > 0 ? Math.min(...withDev.map(w => w.dev)) : 0
-        const winRateFairPool = withDev.filter(w => w.dev <= minDev + 0.005).map(w => w.c)
-        const bestFairCombos = winRateFairPool.filter(c => isCleanAF(c) && isLineDiverse(c))
-        const diverseFairCombos = bestFairCombos.length > 0 ? bestFairCombos : winRateFairPool.filter(isLineDiverse)
-        const cleanFairCombos = diverseFairCombos.length > 0 ? diverseFairCombos : winRateFairPool.filter(isCleanAF)
-        baseComboPool = cleanFairCombos.length > 0 ? cleanFairCombos : winRateFairPool
-      }
-      let comboPool = baseComboPool
-      if (useDetailedMatching && baseComboPool.length > 1) {
-        const scoredCombos = baseComboPool
-          .map(c => ({ c, total: c.s1 + c.s2 }))
-          .sort((a, b) => b.total - a.total)
-        const bestTotal = scoredCombos[0].total
-        comboPool = scoredCombos.filter(s => s.total >= bestTotal - 1).map(s => s.c)
-      }
+      const bestFairCombos = fairCombos.filter(c => isCleanAF(c) && isLineDiverse(c))
+      const diverseFairCombos = bestFairCombos.length > 0 ? bestFairCombos : fairCombos.filter(isLineDiverse)
+      const cleanFairCombos = diverseFairCombos.length > 0 ? diverseFairCombos : fairCombos.filter(isCleanAF)
+      const comboPool = cleanFairCombos.length > 0 ? cleanFairCombos : fairCombos
       chosen = comboPool.length > 0 ? comboPool[Math.floor(Math.random() * comboPool.length)] : null
     }
 
@@ -1528,21 +1329,6 @@ export default function RoomsTab({
                           '⚠ 롤 계정이 등록되어 있지 않아요. "내 정보"에서 롤 계정을 입력한 뒤 이 탭으로 돌아와 새로고침하면 준비완료를 누를 수 있어요.'
                         )}
                       </div>
-                    )}
-
-                    {isHost && (
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text3)', marginBottom: 8, cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={!!myRoom.detailed_matching}
-                          onChange={async e => {
-                            const checked = e.target.checked
-                            setRooms(prev => prev.map(r => r.id === myRoom.id ? { ...r, detailed_matching: checked } : r))
-                            await supabase.from('rooms').update({ detailed_matching: checked }).eq('id', myRoom.id)
-                          }}
-                        />
-                        🏆 최고수준팀편성
-                      </label>
                     )}
 
                     <div style={{ display: 'flex', gap: 8 }}>
