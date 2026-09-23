@@ -537,7 +537,7 @@ export default function RoomsTab({
       for (const l of LINES) {
         const prevPair = getLinePair(lastResult, l)
         const curPair = getLinePair(r, l)
-        if (prevPair && curPair && prevPair.size === 2 && [...prevPair].every(id => curPair.has(id))) count++
+        if (prevPair && curPair && prevPair.size === 2 && Array.from(prevPair).every(id => curPair.has(id))) count++
       }
       return count
     }
