@@ -794,6 +794,29 @@ export default function RoomsTab({
   const [confirmingWinner, setConfirmingWinner] = useState<'blue' | 'red' | null>(null)
   const recordingRef = useRef(false)
 
+  // 피어리스+챔피언 전적 기록용: 라이엇 Data Dragon에서 최신 챔피언 목록을 받아와 드롭다운으로 씀
+  // (패치마다 새 챔피언이 나와도 코드 수정 없이 항상 최신 목록을 유지하기 위해, 하드코딩 대신 런타임에 가져옴)
+  const [championList, setChampionList] = useState<{ id: string; name: string }[]>([])
+  useEffect(() => {
+    (async () => {
+      try {
+        const versRes = await fetch('https://ddragon.leagueoflegends.com/api/versions.json')
+        const vers: string[] = await versRes.json()
+        const latest = vers[0]
+        const champRes = await fetch(`https://ddragon.leagueoflegends.com/cdn/${latest}/data/ko_KR/champion.json`)
+        const champJson = await champRes.json()
+        const list = Object.values(champJson.data as Record<string, { id: string; name: string }>)
+          .map(c => ({ id: c.id, name: c.name }))
+          .sort((a, b) => a.name.localeCompare(b.name, 'ko'))
+        setChampionList(list)
+      } catch (e) {
+        console.error('챔피언 목록을 불러오지 못했어요:', e)
+      }
+    })()
+  }, [])
+  // userId -> 이번 판에 등록한 챔피언
+  const [pendingChampions, setPendingChampions] = useState<Record<string, string>>({})
+
   const recordWin = async (winner: 'blue' | 'red') => {
     if (!myRoom?.result || recordingRef.current || !isHost) return
     recordingRef.current = true
@@ -819,8 +842,8 @@ export default function RoomsTab({
     const losers = winner === 'blue' ? result.team2 : result.team1
     const now = new Date()
     const time = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-    const blueData = result.team1.map(p => ({ userId: p.userId, name: p.name, line: p.line }))
-    const redData = result.team2.map(p => ({ userId: p.userId, name: p.name, line: p.line }))
+    const blueData = result.team1.map(p => ({ userId: p.userId, name: p.name, line: p.line, champion: pendingChampions[p.userId] ?? null }))
+    const redData = result.team2.map(p => ({ userId: p.userId, name: p.name, line: p.line, champion: pendingChampions[p.userId] ?? null }))
     // 서버(apply_match_score_delta)가 실제로 적용한 정확한 적용전/후 값을 여기 담아둠 —
     // 디스코드 메시지가 이 값을 그대로 써서, 화면(브라우저)이 새로고침 안 됐어도 항상 정확하게 표시됨
     const scoreResults: Record<string, { old_score: number; old_tier: string; new_score: number; new_tier: string; delta_applied: number }> = {}
@@ -847,7 +870,7 @@ export default function RoomsTab({
       // 서버(apply_match_score_delta)가 돌려준 "적용 직전 정확한 점수"를 그대로 blue/red JSON에 박아둠 —
       // 이제부턴 경기 시점 점수를 나중에 score_events로 역산할 필요 없이, records 테이블만 보면 항상 정확한 매치 당시 점수를 알 수 있음.
       // (RPC가 실패한 극히 드문 경우에만 팀편성 당시 클라이언트 점수로 대체)
-      const withScore = (arr: { userId: string; name: string; line: Line }[], side: TeamPlayer[]) =>
+      const withScore = (arr: { userId: string; name: string; line: Line; champion: string | null }[], side: TeamPlayer[]) =>
         arr.map(p => ({
           ...p,
           score: scoreResults[p.userId]?.old_score ?? side.find(t => t.userId === p.userId)?.score ?? null,
@@ -865,6 +888,7 @@ export default function RoomsTab({
     }
 
     onRecord({ winner, blue: blueData, red: redData, skipInsert: true })
+    setPendingChampions({})
 
     // 방 초기화: 참가자는 유지하되 전부 준비 해제 (다음 판 위해 다시 준비해야 함)
     // 방금 진행한 팀편성은 last_result로 저장 — 다음 팀편성 때 완전히 같은 조합이 다시 나오지 않게 하기 위함
@@ -1506,31 +1530,79 @@ export default function RoomsTab({
                   <div className="empty">방장만 경기 결과를 기록할 수 있어요</div>
                 ) : isRecording ? (
                   <div className="empty">기록 중...</div>
-                ) : confirmingWinner ? (
-                  <div>
-                    <div style={{
-                      fontSize: 13, fontWeight: 700, marginBottom: 10,
-                      color: confirmingWinner === 'blue' ? 'var(--blue, #4a90e2)' : 'var(--red)',
-                    }}>
-                      {confirmingWinner === 'blue' ? '🔵 블루팀 승리' : '🔴 레드팀 승리'}가 맞나요?
+                ) : confirmingWinner ? (() => {
+                  const t1 = myRoom.result!.team1
+                  const t2 = myRoom.result!.team2
+                  const allPlayers = [...t1, ...t2]
+                  const allChampionsPicked = allPlayers.every(p => !!pendingChampions[p.userId])
+                  return (
+                    <div>
+                      <div style={{
+                        fontSize: 13, fontWeight: 700, marginBottom: 10,
+                        color: confirmingWinner === 'blue' ? 'var(--blue, #4a90e2)' : 'var(--red)',
+                      }}>
+                        {confirmingWinner === 'blue' ? '🔵 블루팀 승리' : '🔴 레드팀 승리'}가 맞나요?
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10 }}>
+                        한 번 기록하면 점수가 즉시 반영돼요. 다시 한번 확인해주세요.
+                      </div>
+
+                      {/* 피어리스+챔피언 전적 기록: 라인별 블루/레드 챔피언 등록 */}
+                      <div style={{ textAlign: 'left', marginBottom: 12 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 6 }}>
+                          라인별 챔피언을 등록해주세요{championList.length === 0 ? ' (챔피언 목록 불러오는 중...)' : ''}
+                        </div>
+                        {LINES.map(line => {
+                          const bp = t1.find(p => p.line === line)
+                          const rp = t2.find(p => p.line === line)
+                          if (!bp || !rp) return null
+                          return (
+                            <div key={line} style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
+                              <span className="badge b-line" style={{ width: 36, flexShrink: 0, textAlign: 'center', fontSize: 9, padding: '2px 0' }}>{line}</span>
+                              <select
+                                value={pendingChampions[bp.userId] ?? ''}
+                                onChange={e => setPendingChampions(prev => ({ ...prev, [bp.userId]: e.target.value }))}
+                                disabled={championList.length === 0}
+                                style={{ flex: 1, fontSize: 10, padding: '3px 4px' }}
+                              >
+                                <option value="" disabled>{bp.name} 챔피언 선택</option>
+                                {championList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                              </select>
+                              <select
+                                value={pendingChampions[rp.userId] ?? ''}
+                                onChange={e => setPendingChampions(prev => ({ ...prev, [rp.userId]: e.target.value }))}
+                                disabled={championList.length === 0}
+                                style={{ flex: 1, fontSize: 10, padding: '3px 4px' }}
+                              >
+                                <option value="" disabled>{rp.name} 챔피언 선택</option>
+                                {championList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                              </select>
+                            </div>
+                          )
+                        })}
+                        {!allChampionsPicked && (
+                          <div style={{ fontSize: 10, color: 'var(--gold3)', marginTop: 4 }}>
+                            ⚠ 10명 전원의 챔피언을 선택해야 기록할 수 있어요
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                        <button className="btn btn-sm" onClick={() => setConfirmingWinner(null)} style={{ flex: 1 }}>
+                          아니요, 다시 선택
+                        </button>
+                        <button
+                          className={`btn ${confirmingWinner === 'blue' ? 'btn-blue' : 'btn-red'}`}
+                          onClick={() => recordWin(confirmingWinner)}
+                          disabled={!allChampionsPicked}
+                          style={{ flex: 1, opacity: allChampionsPicked ? 1 : 0.5, cursor: allChampionsPicked ? 'pointer' : 'not-allowed' }}
+                        >
+                          맞아요, 전적 기록
+                        </button>
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 10 }}>
-                      한 번 기록하면 점수가 즉시 반영돼요. 다시 한번 확인해주세요.
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-                      <button className="btn btn-sm" onClick={() => setConfirmingWinner(null)} style={{ flex: 1 }}>
-                        아니요, 다시 선택
-                      </button>
-                      <button
-                        className={`btn ${confirmingWinner === 'blue' ? 'btn-blue' : 'btn-red'}`}
-                        onClick={() => recordWin(confirmingWinner)}
-                        style={{ flex: 1 }}
-                      >
-                        맞아요, 전적 기록
-                      </button>
-                    </div>
-                  </div>
-                ) : (
+                  )
+                })() : (
                   <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
                     <button className="btn btn-blue" onClick={() => setConfirmingWinner('blue')}>🔵 블루팀 승리</button>
                     <button className="btn btn-red" onClick={() => setConfirmingWinner('red')}>🔴 레드팀 승리</button>
