@@ -10,6 +10,10 @@ import {
 } from '@/lib/shared'
 import RoomChat from './RoomChat'
 
+// 방 채팅 기능 on/off 스위치 — 롤 내부 채팅이 있어서 당장은 불필요하다고 판단해 UI만 꺼둠.
+// 기능/코드는 그대로 남겨뒀으니, 나중에 다시 켜고 싶으면 이 값만 true로 바꾸면 됨.
+const CHAT_ENABLED = false
+
 type RoomMember = {
   user_id: string
   summoner_name: string
@@ -1704,7 +1708,7 @@ export default function RoomsTab({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <RoomChat roomId={myRoom.id} myName={myName} myUserId={myUserId ?? ''} />
+          {CHAT_ENABLED && <RoomChat roomId={myRoom.id} myName={myName} myUserId={myUserId ?? ''} />}
 
           <div className="room-chat" style={{ height: 'auto', position: 'static' }}>
             <div className="room-chat-header">라인별 인원 (M1+M2 합산, 상관없음 포함)</div>
