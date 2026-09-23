@@ -1255,6 +1255,15 @@ export default function RoomsTab({
                 })}
               </div>
 
+              {isHost && dbIsAdmin && myRoom.members.length === 10 && !myRoom.members.every(m => m.ready) && (
+                <button
+                  className="btn"
+                  onClick={fillTestMembers}
+                  style={{ width: '100%', marginBottom: 8, fontSize: 12 }}
+                >
+                  🧪 테스트 인원 전원 다시 준비완료
+                </button>
+              )}
               {isHost && dbIsAdmin && myRoom.members.length < 10 && (
                 <button
                   className="btn"
