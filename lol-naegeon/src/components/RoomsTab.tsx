@@ -1662,14 +1662,14 @@ export default function RoomsTab({
                           const bp = t1.find(p => p.line === line)
                           const rp = t2.find(p => p.line === line)
                           if (!bp || !rp) return null
-                          // 이번 판(10명) 안에서는 같은 챔피언 중복 선택 불가 + 이 방 피어리스 기록(그 라인에서 이미 쓴 챔피언)도 불가.
+                          // 이번 판(10명) 안에서는 같은 챔피언 중복 선택 불가 + 이 방에서 어느 라인이든 이미 쓴 챔피언(피어리스)도 불가.
                           // 본인이 이미 골라둔 챔피언은 그대로 유지할 수 있어야 하니 본인 선택은 제외하고 계산.
-                          const usedThisLine = new Set(myRoom.used_champions?.[line] ?? [])
+                          const usedAnywhere = new Set(Object.values(myRoom.used_champions ?? {}).flatMap(arr => arr ?? []))
                           const disallowedFor = (userId: string) => {
                             const pickedByOthers = Object.entries(pendingChampions)
                               .filter(([uid, champ]) => uid !== userId && !!champ)
                               .map(([, champ]) => champ)
-                            return new Set([...pickedByOthers, ...Array.from(usedThisLine)])
+                            return new Set([...pickedByOthers, ...Array.from(usedAnywhere)])
                           }
                           const bpChampions = championList.filter(c => !disallowedFor(bp.userId).has(c.id))
                           const rpChampions = championList.filter(c => !disallowedFor(rp.userId).has(c.id))
@@ -1694,7 +1694,7 @@ export default function RoomsTab({
                           )
                         })}
                         <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 4 }}>
-                          같은 판 내 챔피언 중복 선택, 이번 방에서 그 라인에 이미 쓴 챔피언은 목록에서 자동으로 제외돼요(피어리스)
+                          같은 판 내 챔피언 중복 선택, 이번 방에서 라인 상관없이 이미 쓴 챔피언은 목록에서 자동으로 제외돼요(피어리스)
                         </div>
                         {!allChampionsPicked && (
                           <div style={{ fontSize: 10, color: 'var(--gold3)', marginTop: 4 }}>
