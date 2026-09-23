@@ -739,7 +739,18 @@ export default function RoomsTab({
     const bestPool = okCandidates.filter(c => isRepeatFree(c) && isDiverse(c))
     const diversePool = bestPool.length > 0 ? bestPool : okCandidates.filter(isDiverse)
     const repeatFreePool = diversePool.length > 0 ? diversePool : okCandidates.filter(isRepeatFree)
-    const pickPool = repeatFreePool.length > 0 ? repeatFreePool : okCandidates
+    const basePickPool = repeatFreePool.length > 0 ? repeatFreePool : okCandidates
+    // 정밀 매칭 on: raw diff<=5 통과한 후보들(다양성/반복회피 이미 적용된 pool) 중에서,
+    // "어떤 걸 고를지"만 라인영향력+상대전적 가중치(computeWeightedDiff) 기준 상위 30%로 좁혀서 그 안에서 무작위 선택.
+    // off일 때와 안전 기준(diff<=5)은 완전히 동일 — 순수하게 "동점 후보들 중 우선순위"만 재정렬하는 역할.
+    let pickPool = basePickPool
+    if (useDetailedMatching && basePickPool.length > 1) {
+      const scored = basePickPool
+        .map(c => ({ c, wdiff: computeWeightedDiff(c.result.team1, c.result.team2) }))
+        .sort((a, b) => a.wdiff - b.wdiff)
+      const topN = Math.max(1, Math.ceil(scored.length * 0.3))
+      pickPool = scored.slice(0, topN).map(s => s.c)
+    }
     let chosen: BalanceResult | null =
       pickPool.length > 0 ? pickPool[Math.floor(Math.random() * pickPool.length)].result : null
 
@@ -782,7 +793,15 @@ export default function RoomsTab({
       const bestFairCombos = fairCombos.filter(c => isCleanAF(c) && isLineDiverse(c))
       const diverseFairCombos = bestFairCombos.length > 0 ? bestFairCombos : fairCombos.filter(isLineDiverse)
       const cleanFairCombos = diverseFairCombos.length > 0 ? diverseFairCombos : fairCombos.filter(isCleanAF)
-      const comboPool = cleanFairCombos.length > 0 ? cleanFairCombos : fairCombos
+      const baseComboPool = cleanFairCombos.length > 0 ? cleanFairCombos : fairCombos
+      let comboPool = baseComboPool
+      if (useDetailedMatching && baseComboPool.length > 1) {
+        const scoredCombos = baseComboPool
+          .map(c => ({ c, wdiff: computeWeightedDiff(c.team1, c.team2) }))
+          .sort((a, b) => a.wdiff - b.wdiff)
+        const topN = Math.max(1, Math.ceil(scoredCombos.length * 0.3))
+        comboPool = scoredCombos.slice(0, topN).map(s => s.c)
+      }
       chosen = comboPool.length > 0 ? comboPool[Math.floor(Math.random() * comboPool.length)] : null
     }
 
@@ -1299,6 +1318,21 @@ export default function RoomsTab({
                           '⚠ 롤 계정이 등록되어 있지 않아요. "내 정보"에서 롤 계정을 입력한 뒤 이 탭으로 돌아와 새로고침하면 준비완료를 누를 수 있어요.'
                         )}
                       </div>
+                    )}
+
+                    {isHost && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text3)', marginBottom: 8, cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={!!myRoom.detailed_matching}
+                          onChange={async e => {
+                            const checked = e.target.checked
+                            setRooms(prev => prev.map(r => r.id === myRoom.id ? { ...r, detailed_matching: checked } : r))
+                            await supabase.from('rooms').update({ detailed_matching: checked }).eq('id', myRoom.id)
+                          }}
+                        />
+                        정밀 매칭 (라인 영향력 + 상대전적 반영해서 팀 나누기 — 점수차 5점 이내 기준은 동일)
+                      </label>
                     )}
 
                     <div style={{ display: 'flex', gap: 8 }}>
