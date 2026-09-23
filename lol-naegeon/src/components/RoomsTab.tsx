@@ -31,7 +31,6 @@ type Room = {
   status: 'waiting' | 'playing'
   match_mode: 'line' | 'random'
   detailed_matching: boolean | null
-  best_matching_used: boolean | null
   used_champions: Partial<Record<Line, string[]>> | null
   result: BalanceResult | null
   pending_result: BalanceResult | null
@@ -564,16 +563,9 @@ export default function RoomsTab({
       return { userId: p.userId, name: p.name, tier, line, score }
     }
 
-    // ── 최고수준팀편성 (방당 1회만 사용 가능) ──────────────────────
-    // 밸런스(공정함)보다 "검증된 라인에서의 최고 총점"을 우선하는 특수 모드.
-    // 점수차 허용폭을 일반 모드(5점)보다 더 엄격한 2점 이내(diff <= MAX_DIFF)로 좁혀서 안전선을 유지하되,
-    // 그 안에서는 반복/다양성 회피 같은 소프트 제약을 무시하고 총점(s1+s2)이 가장 높은 조합을 고름.
-    // 또한 라인 배정 자체도 본인이 10판 이상 해본 "검증된 라인"으로만 제한해서, 못 해본 라인에서
-    // 어쩌다 높은 추정 점수가 나오는 걸로 고득점하는 걸 막음.
-    // 방당 1회만 허용 — 체크박스가 꺼지는 타이밍과 무관하게 여기서도 한 번 더 막음(이미 썼으면 무조건 off 취급)
-    const useDetailedMatching = !!myRoom.detailed_matching && !myRoom.best_matching_used
+    // ── 최고수준팀편성 ──────────────────────
+    const useDetailedMatching = !!myRoom.detailed_matching
     const MIN_PROVEN_GAMES = 10
-    // 최고수준팀편성일 때는 점수차 허용폭을 5점이 아니라 2점까지로 더 엄격하게 잡음
     const MAX_DIFF = useDetailedMatching ? 2 : 5
     const linePlayCountCache = new Map<string, number>()
     const linePlayCount = (userId: string, line: Line): number => {
@@ -935,8 +927,6 @@ export default function RoomsTab({
       autofill_protected_ids: newProtected,
       guaranteed_m1_ids: newGuaranteed,
       pending_autofill_delta: delta,
-      // 최고수준팀편성은 방당 1회만 — 이번에 사용했으면 다시 못 켜도록 체크박스도 같이 꺼둠
-      ...(useDetailedMatching ? { best_matching_used: true, detailed_matching: false } : {}),
     }).eq('id', myRoom.id)
 
     setBalancing(false)
@@ -1421,24 +1411,18 @@ export default function RoomsTab({
                     )}
 
                     {isHost && (
-                      myRoom.best_matching_used ? (
-                        <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>
-                          🏆 최고수준팀편성은 이 방에서 이미 사용했어요 (방당 1회 한정)
-                        </div>
-                      ) : (
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text3)', marginBottom: 8, cursor: 'pointer' }}>
-                          <input
-                            type="checkbox"
-                            checked={!!myRoom.detailed_matching}
-                            onChange={async e => {
-                              const checked = e.target.checked
-                              setRooms(prev => prev.map(r => r.id === myRoom.id ? { ...r, detailed_matching: checked } : r))
-                              await supabase.from('rooms').update({ detailed_matching: checked }).eq('id', myRoom.id)
-                            }}
-                          />
-                          🏆 최고수준팀편성 (공정함보다 총점 최우선, 10판 이상 검증된 라인만 배정, 같은 라인은 고티어 M1 우선, 점수차 2점 이내 — 방당 1회만 사용 가능)
-                        </label>
-                      )
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text3)', marginBottom: 8, cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={!!myRoom.detailed_matching}
+                          onChange={async e => {
+                            const checked = e.target.checked
+                            setRooms(prev => prev.map(r => r.id === myRoom.id ? { ...r, detailed_matching: checked } : r))
+                            await supabase.from('rooms').update({ detailed_matching: checked }).eq('id', myRoom.id)
+                          }}
+                        />
+                        🏆 최고수준팀편성
+                      </label>
                     )}
 
                     <div style={{ display: 'flex', gap: 8 }}>
