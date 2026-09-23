@@ -27,6 +27,7 @@ type Room = {
   status: 'waiting' | 'playing'
   match_mode: 'line' | 'random'
   detailed_matching: boolean | null
+  used_champions: Partial<Record<Line, string[]>> | null
   result: BalanceResult | null
   pending_result: BalanceResult | null
   last_result: BalanceResult | null
@@ -61,6 +62,54 @@ function estimateWrFromScoreDiff(diff: number, line?: Line): number {
   const extra = Math.min(0.35, 0.09 + (abs - 6) * 0.02) * weight
   const wr = 0.5 + Math.sign(diff) * extra
   return Math.min(0.9, Math.max(0.1, wr))
+}
+
+// 검색형 챔피언 선택 드롭다운 — 챔피언이 160개가 넘어서 일반 select 스크롤은 보기 힘들어서,
+// 타이핑해서 검색하고 결과를 최대 5개까지만 보여주는 방식으로 만듦
+function ChampionSelect({
+  champions, value, onChange, placeholderName, disabled,
+}: {
+  champions: { id: string; name: string }[]
+  value: string
+  onChange: (id: string) => void
+  placeholderName: string
+  disabled?: boolean
+}) {
+  const [query, setQuery] = useState('')
+  const [focused, setFocused] = useState(false)
+  const selected = champions.find(c => c.id === value)
+  const filtered = (query ? champions.filter(c => c.name.includes(query)) : champions).slice(0, 5)
+
+  return (
+    <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+      <input
+        value={focused ? query : (selected?.name ?? '')}
+        onFocus={() => { setFocused(true); setQuery('') }}
+        onBlur={() => setTimeout(() => setFocused(false), 150)}
+        onChange={e => setQuery(e.target.value)}
+        placeholder={`${placeholderName} 챔피언 검색`}
+        disabled={disabled}
+        style={{ width: '100%', fontSize: 10, padding: '3px 4px', boxSizing: 'border-box' }}
+      />
+      {focused && filtered.length > 0 && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20,
+          background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+          marginTop: 2, maxHeight: 5 * 24, overflowY: 'auto',
+        }}>
+          {filtered.map(c => (
+            <div
+              key={c.id}
+              onMouseDown={() => { onChange(c.id); setQuery(''); setFocused(false) }}
+              style={{ padding: '4px 8px', fontSize: 11, cursor: 'pointer' }}
+            >
+              {c.name}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function RoomsTab({
@@ -897,13 +946,25 @@ export default function RoomsTab({
     const updatedHistory = [newHistoryEntry, ...(myRoom.recent_team_history ?? [])].slice(0, 4)
     const roomShouldClose = updatedHistory.length >= 4
 
+    // 피어리스: 이번 판에 등록한 챔피언을 라인별로 누적(중복 제거) — 이 방(=이 세션)이 살아있는 동안만 유지되고,
+    // 방이 닫히면(4판 소진) 자연히 초기화됨
+    const updatedUsedChampions: Partial<Record<Line, string[]>> = { ...(myRoom.used_champions ?? {}) }
+    for (const p of [...blueData, ...redData]) {
+      if (!p.champion) continue
+      const existing = updatedUsedChampions[p.line] ?? []
+      if (!existing.includes(p.champion)) updatedUsedChampions[p.line] = [...existing, p.champion]
+    }
+
     if (roomShouldClose) {
       // 탈주하기(취소) 제외, 실제로 플레이된 경기가 4판이 되면 방을 자동으로 삭제 (채팅도 같이 삭제됨)
       await supabase.from('rooms').delete().eq('id', myRoom.id)
     } else {
       const resetMembers = myRoom.members.map(m => ({ ...m, ready: false }))
       // 경기가 실제로 기록됐으니 튕김 보호/보장은 이미 반영된 상태를 그대로 유지 (되돌릴 델타는 정리)
-      await supabase.from('rooms').update({ members: resetMembers, last_result: result, recent_team_history: updatedHistory, pending_autofill_delta: null }).eq('id', myRoom.id)
+      await supabase.from('rooms').update({
+        members: resetMembers, last_result: result, recent_team_history: updatedHistory,
+        pending_autofill_delta: null, used_champions: updatedUsedChampions,
+      }).eq('id', myRoom.id)
     }
 
     // 디스코드 전송
@@ -1064,6 +1125,26 @@ export default function RoomsTab({
 
           {!myRoom.result && countdown === null && (
             <>
+              {/* 피어리스: 이 방에서 이미 쓴 챔피언을 라인별로(팀 구분 없이) 표시 */}
+              {myRoom.used_champions && LINES.some(l => (myRoom.used_champions?.[l]?.length ?? 0) > 0) && (
+                <div style={{ padding: '10px 13px', borderRadius: 12, background: 'var(--bg3)', marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gold3)', marginBottom: 6 }}>
+                    🚫 이번 방에서 사용한 챔피언 (피어리스)
+                  </div>
+                  {LINES.map(line => {
+                    const usedIds = myRoom.used_champions?.[line] ?? []
+                    if (usedIds.length === 0) return null
+                    return (
+                      <div key={line} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 4 }}>
+                        <span className="badge b-line" style={{ flexShrink: 0, fontSize: 9 }}>{line}</span>
+                        <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.5 }}>
+                          {usedIds.map(id => championList.find(c => c.id === id)?.name ?? id).join(', ')}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 12 }}>
                 {myRoom.members.map(m => {
                   const isMe = m.user_id === myUserId
@@ -1559,24 +1640,20 @@ export default function RoomsTab({
                           return (
                             <div key={line} style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
                               <span className="badge b-line" style={{ width: 36, flexShrink: 0, textAlign: 'center', fontSize: 9, padding: '2px 0' }}>{line}</span>
-                              <select
+                              <ChampionSelect
+                                champions={championList}
                                 value={pendingChampions[bp.userId] ?? ''}
-                                onChange={e => setPendingChampions(prev => ({ ...prev, [bp.userId]: e.target.value }))}
+                                onChange={id => setPendingChampions(prev => ({ ...prev, [bp.userId]: id }))}
+                                placeholderName={bp.name}
                                 disabled={championList.length === 0}
-                                style={{ flex: 1, fontSize: 10, padding: '3px 4px' }}
-                              >
-                                <option value="" disabled>{bp.name} 챔피언 선택</option>
-                                {championList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                              </select>
-                              <select
+                              />
+                              <ChampionSelect
+                                champions={championList}
                                 value={pendingChampions[rp.userId] ?? ''}
-                                onChange={e => setPendingChampions(prev => ({ ...prev, [rp.userId]: e.target.value }))}
+                                onChange={id => setPendingChampions(prev => ({ ...prev, [rp.userId]: id }))}
+                                placeholderName={rp.name}
                                 disabled={championList.length === 0}
-                                style={{ flex: 1, fontSize: 10, padding: '3px 4px' }}
-                              >
-                                <option value="" disabled>{rp.name} 챔피언 선택</option>
-                                {championList.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                              </select>
+                              />
                             </div>
                           )
                         })}
