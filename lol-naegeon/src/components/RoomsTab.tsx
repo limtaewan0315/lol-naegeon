@@ -667,6 +667,72 @@ export default function RoomsTab({
     const remainingLines = sufficientLines
     const candidates: { diff: number; result: BalanceResult }[] = []
 
+    // 최고수준팀편성 전용: 라인 배정에 "우선순위"를 둠 — 같은 라인(특히 M1)을 원하는 사람들끼리는
+    // 검증된 라인(10판 이상) 중 티어(점수) 높은 사람이 먼저 그 라인을 가져가도록 미리 한 번만 계산해둠.
+    // (일반 모드처럼 매 반복마다 무작위로 배정하면 고티어가 밀려날 수 있어서, 이 모드에서는 결정론적으로 고정함)
+    const detailedFixedLine = new Map<string, Line>()
+    if (useDetailedMatching && remainingLines.length > 0) {
+      const capacity: Partial<Record<Line, number>> = {}
+      remainingLines.forEach(l => { capacity[l] = 2 })
+      const unassigned = new Set(remainingPlayers.map(p => p.userId))
+      type Req = { p: PlayerEntry; line: Line; score: number; isM1: boolean }
+      const candidateLinesFor = (p: PlayerEntry): Line[] => {
+        const allLines = getSummonerLines(p.userId)
+        return p.most1 === 'any'
+          ? allLines.filter(l => remainingLines.includes(l))
+          : [p.most1 as Line, ...(p.most2 && p.most2 !== 'any' ? [p.most2 as Line] : [])].filter(l => remainingLines.includes(l))
+      }
+      const buildRequests = (): Req[] => {
+        const reqs: Req[] = []
+        remainingPlayers.forEach(p => {
+          if (!unassigned.has(p.userId)) return
+          const candidateLines = candidateLinesFor(p)
+          const provenLines = candidateLines.filter(l => linePlayCount(p.userId, l) >= MIN_PROVEN_GAMES)
+          const useLines = provenLines.length > 0 ? provenLines : candidateLines
+          useLines.forEach(l => reqs.push({ p, line: l, score: resolveTierScore(p, l).score, isM1: p.most1 === l }))
+        })
+        return reqs
+      }
+      // 1단계: M1 요청만 점수 높은 순으로 우선 배정
+      for (let round = 0; unassigned.size > 0 && round < 10; round++) {
+        const m1Reqs = buildRequests().filter(r => r.isM1 && (capacity[r.line] ?? 0) > 0).sort((a, b) => b.score - a.score)
+        if (m1Reqs.length === 0) break
+        let progressed = false
+        for (const r of m1Reqs) {
+          if (!unassigned.has(r.p.userId) || (capacity[r.line] ?? 0) <= 0) continue
+          detailedFixedLine.set(r.p.userId, r.line)
+          capacity[r.line] = (capacity[r.line] ?? 0) - 1
+          unassigned.delete(r.p.userId)
+          progressed = true
+        }
+        if (!progressed) break
+      }
+      // 2단계: 남은 사람은 M2/그 외 검증된 후보 중 점수 높은 순으로, 자리가 남은 라인에 배정
+      for (let round = 0; unassigned.size > 0 && round < 10; round++) {
+        const reqs = buildRequests().filter(r => (capacity[r.line] ?? 0) > 0).sort((a, b) => b.score - a.score)
+        if (reqs.length === 0) break
+        let progressed = false
+        for (const r of reqs) {
+          if (!unassigned.has(r.p.userId) || (capacity[r.line] ?? 0) <= 0) continue
+          detailedFixedLine.set(r.p.userId, r.line)
+          capacity[r.line] = (capacity[r.line] ?? 0) - 1
+          unassigned.delete(r.p.userId)
+          progressed = true
+        }
+        if (!progressed) break
+      }
+      // 3단계: 그래도 남으면(후보 라인이 전부 꽉 찼거나 후보 자체가 없는 예외 상황) 남은 라인에 강제 배정
+      Array.from(unassigned).forEach(uid => {
+        const p = remainingPlayers.find(pl => pl.userId === uid)!
+        const openLine = remainingLines.find(l => (capacity[l] ?? 0) > 0)
+        if (openLine) {
+          detailedFixedLine.set(uid, openLine)
+          capacity[openLine] = (capacity[openLine] ?? 0) - 1
+          unassigned.delete(uid)
+        }
+      })
+    }
+
     if (remainingLines.length > 0 && remainingPlayers.length === remainingLines.length * 2) {
       for (let i = 0; i < 3000; i++) {
         const assigned = remainingPlayers.map(p => {
@@ -680,26 +746,10 @@ export default function RoomsTab({
           const allLines = getSummonerLines(p.userId)
           let line: Line
           if (useDetailedMatching) {
-            // 최고수준팀편성: 본인이 MIN_PROVEN_GAMES판 이상 해본 "검증된 라인"으로만 배정.
-            // 후보가 여럿이면 그중 점수가 가장 높은 라인으로 (못 해본 라인에서 어쩌다 높은 추정 점수가 나오는 걸로
-            // 고득점하는 걸 막기 위해, 애초에 검증 안 된 라인은 후보에서 제외).
-            const candidateLines: Line[] = p.most1 === 'any'
-              ? allLines.filter(l => remainingLines.includes(l))
-              : [p.most1 as Line, ...(p.most2 && p.most2 !== 'any' ? [p.most2 as Line] : [])].filter(l => remainingLines.includes(l))
-            const provenLines = candidateLines.filter(l => linePlayCount(p.userId, l) >= MIN_PROVEN_GAMES)
-            if (provenLines.length > 0) {
-              line = provenLines.reduce((best, l) =>
-                resolveTierScore(p, l).score > resolveTierScore(p, best).score ? l : best, provenLines[0])
-            } else if (p.most1 === 'any') {
-              const opts = allLines.filter(l => remainingLines.includes(l))
-              const pool = opts.length > 0 ? opts : remainingLines
-              line = pool[Math.floor(Math.random() * pool.length)]
-            } else if (!p.most2 || p.most2 === 'any') {
-              line = p.most1 as Line
-            } else {
-              const isM2 = Math.random() >= 0.7
-              line = isM2 ? p.most2 as Line : p.most1 as Line
-            }
+            // 최고수준팀편성: 위에서 미리 계산해둔 우선순위 기반(검증된 라인 + 고티어 M1 우선) 배정을 그대로 사용
+            line = detailedFixedLine.get(p.userId) ?? (
+              remainingLines.includes(p.most1 as Line) ? p.most1 as Line : remainingLines[0]
+            )
           } else if (p.most1 === 'any') {
             const opts = allLines.filter(l => remainingLines.includes(l))
             const pool = opts.length > 0 ? opts : remainingLines
@@ -1386,7 +1436,7 @@ export default function RoomsTab({
                               await supabase.from('rooms').update({ detailed_matching: checked }).eq('id', myRoom.id)
                             }}
                           />
-                          🏆 최고수준팀편성 (공정함보다 총점 최우선, 10판 이상 검증된 라인만 배정, 점수차 2점 이내 — 방당 1회만 사용 가능)
+                          🏆 최고수준팀편성 (공정함보다 총점 최우선, 10판 이상 검증된 라인만 배정, 같은 라인은 고티어 M1 우선, 점수차 2점 이내 — 방당 1회만 사용 가능)
                         </label>
                       )
                     )}
