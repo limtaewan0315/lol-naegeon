@@ -310,6 +310,9 @@ export default function RoomsTab({
   // 전부 준비완료 상태로 만들어서, 혼자서도 매칭 테스트를 해볼 수 있게 함.
   // 무작위로 뽑으면 라인이 한쪽으로 쏠려서 밸런싱이 실패할 수 있으므로,
   // "아직 2명이 안 채워진 라인"부터 우선적으로 채우는 방식으로 채움.
+  // 실전과 비슷하게 테스트되도록, 같은 라인 필요 인원 중에서는 판수(경험치) 많은 사람을 우선 선택함
+  // — 판수가 많을수록 자연스럽게 다른 사람들과의 상대전적도 쌓여있을 확률이 높아서, "상대전적 없는 사람들끼리만
+  // 붙는" 비현실적인 테스트 세팅을 피할 수 있음.
   const fillTestMembers = async () => {
     if (!myRoom || !isHost || !dbIsAdmin) return
     const existingIds = new Set(myRoom.members.map(m => m.user_id))
@@ -322,6 +325,28 @@ export default function RoomsTab({
     myRoom.members.forEach(m => {
       if (m.most1 !== 'any') lineCount[m.most1 as Line] = (lineCount[m.most1 as Line] ?? 0) + 1
     })
+
+    // 라인별/전체 판수 집계 — 전적 데이터 기준으로 "얼마나 활동적인 유저인지" 판단
+    const totalGamesCache = new Map<string, number>()
+    const totalGames = (uid: string): number => {
+      const cached = totalGamesCache.get(uid)
+      if (cached !== undefined) return cached
+      const n = records.filter(r => r.blue.some(p => p.userId === uid) || r.red.some(p => p.userId === uid)).length
+      totalGamesCache.set(uid, n)
+      return n
+    }
+    const linePlayCache = new Map<string, number>()
+    const linePlayCount = (uid: string, line: Line): number => {
+      const key = `${uid}|${line}`
+      const cached = linePlayCache.get(key)
+      if (cached !== undefined) return cached
+      const n = records.filter(r =>
+        r.blue.some(p => p.userId === uid && p.line === line) ||
+        r.red.some(p => p.userId === uid && p.line === line)
+      ).length
+      linePlayCache.set(key, n)
+      return n
+    }
 
     // 후보 풀: 아직 방에 없는 + 비활성화되지 않은 + 롤 계정이 등록된 실제 계정만
     // (계정ID 기준 — 동명이인도 각자 정확히 후보가 됨. 롤 계정 미등록자는 ready:true로 강제 채워도
@@ -351,24 +376,38 @@ export default function RoomsTab({
         continue
       }
 
-      // 등록 라인이 적은(=다른 라인으로 대체하기 어려운) 사람을 우선 선택해서, 라인 많은 사람은 나중을 위해 아낌
-      candidates.sort((a, b) => a.lines.length - b.lines.length)
+      // 우선순위: ① 그 라인 판수 많은 사람 → ② 전체 판수(활동량) 많은 사람 → ③ 동률이면 등록 라인 적은(대체 어려운) 사람
+      candidates.sort((a, b) => {
+        const lineDiff = linePlayCount(b.userId, target) - linePlayCount(a.userId, target)
+        if (lineDiff !== 0) return lineDiff
+        const totalDiff = totalGames(b.userId) - totalGames(a.userId)
+        if (totalDiff !== 0) return totalDiff
+        return a.lines.length - b.lines.length
+      })
       const chosen = candidates[0]
 
+      // M2도 그냥 아무 다른 라인이 아니라, 부족한 라인 중(있으면) 본인이 가장 많이 해본 라인으로
       const otherLines = chosen.lines.filter(l => l !== target)
-      const most2 = otherLines.find(l => lineCount[l] < 2) ?? otherLines[0] ?? null
+      const neededOthers = otherLines.filter(l => lineCount[l] < 2)
+      const pickFrom = neededOthers.length > 0 ? neededOthers : otherLines
+      const most2 = pickFrom.length > 0
+        ? pickFrom.reduce((best, l) => linePlayCount(chosen.userId, l) > linePlayCount(chosen.userId, best) ? l : best, pickFrom[0])
+        : null
 
       newFilled.push({ user_id: chosen.userId, summoner_name: chosen.name, most1: target, most2, ready: true })
       lineCount[target]++
       pool = pool.filter(c => c.userId !== chosen.userId)
     }
 
-    // 그래도 인원이 부족하면(등록된 소환사 자체가 적은 경우) 라인 무관하게 남은 후보로 채움
+    // 그래도 인원이 부족하면(등록된 소환사 자체가 적은 경우) 라인 무관하게 남은 후보로 채움 — 이때도 판수 많은 사람 우선
     if (newFilled.length < need) {
       const filledIds = new Set(newFilled.map(f => f.user_id))
-      const leftover = pool.filter(c => !filledIds.has(c.userId)).slice(0, need - newFilled.length)
+      const leftover = pool.filter(c => !filledIds.has(c.userId))
+        .sort((a, b) => totalGames(b.userId) - totalGames(a.userId))
+        .slice(0, need - newFilled.length)
       leftover.forEach(c => {
-        newFilled.push({ user_id: c.userId, summoner_name: c.name, most1: (c.lines[0] ?? '탑') as Line, most2: c.lines[1] ?? null, ready: true })
+        const sortedLines = [...c.lines].sort((a, b) => linePlayCount(c.userId, b) - linePlayCount(c.userId, a))
+        newFilled.push({ user_id: c.userId, summoner_name: c.name, most1: (sortedLines[0] ?? '탑') as Line, most2: sortedLines[1] ?? null, ready: true })
       })
     }
 
