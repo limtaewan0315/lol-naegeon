@@ -370,7 +370,13 @@ export default function RoomsTab({
     if (!myRoom || !isHost || !dbIsAdmin) return
     const existingIds = new Set(myRoom.members.map(m => m.user_id))
     const need = 10 - myRoom.members.length
-    if (need <= 0) return
+    if (need <= 0) {
+      // 이미 10명 채워진 상태(예: 직전 테스트판 기록 후 전원 준비 해제됨)에서 다시 누르면,
+      // 새로 채울 필요는 없으니 지금 있는 10명을 전부 다시 준비완료로 돌려서 같은 방에서 반복 테스트가 되게 함
+      const reReadied = myRoom.members.map(m => ({ ...m, ready: true }))
+      await supabase.from('rooms').update({ members: reReadied, updated_at: new Date().toISOString() }).eq('id', myRoom.id)
+      return
+    }
 
     const targetLines: Line[] = ['탑', '정글', '미드', '원딜', '서포터']
     // 이미 방에 있는 사람들의 M1 기준으로 현재 라인별 인원 카운트 (M1='상관없음'인 사람은 유동적이라 카운트에서 제외)
@@ -1647,18 +1653,29 @@ export default function RoomsTab({
                           const bp = t1.find(p => p.line === line)
                           const rp = t2.find(p => p.line === line)
                           if (!bp || !rp) return null
+                          // 이번 판(10명) 안에서는 같은 챔피언 중복 선택 불가 + 이 방 피어리스 기록(그 라인에서 이미 쓴 챔피언)도 불가.
+                          // 본인이 이미 골라둔 챔피언은 그대로 유지할 수 있어야 하니 본인 선택은 제외하고 계산.
+                          const usedThisLine = new Set(myRoom.used_champions?.[line] ?? [])
+                          const disallowedFor = (userId: string) => {
+                            const pickedByOthers = Object.entries(pendingChampions)
+                              .filter(([uid, champ]) => uid !== userId && !!champ)
+                              .map(([, champ]) => champ)
+                            return new Set([...pickedByOthers, ...usedThisLine])
+                          }
+                          const bpChampions = championList.filter(c => !disallowedFor(bp.userId).has(c.id))
+                          const rpChampions = championList.filter(c => !disallowedFor(rp.userId).has(c.id))
                           return (
                             <div key={line} style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 5 }}>
                               <span className="badge b-line" style={{ width: 36, flexShrink: 0, textAlign: 'center', fontSize: 9, padding: '2px 0' }}>{line}</span>
                               <ChampionSelect
-                                champions={championList}
+                                champions={bpChampions}
                                 value={pendingChampions[bp.userId] ?? ''}
                                 onChange={id => setPendingChampions(prev => ({ ...prev, [bp.userId]: id }))}
                                 placeholderName={bp.name}
                                 disabled={championList.length === 0}
                               />
                               <ChampionSelect
-                                champions={championList}
+                                champions={rpChampions}
                                 value={pendingChampions[rp.userId] ?? ''}
                                 onChange={id => setPendingChampions(prev => ({ ...prev, [rp.userId]: id }))}
                                 placeholderName={rp.name}
@@ -1667,6 +1684,9 @@ export default function RoomsTab({
                             </div>
                           )
                         })}
+                        <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 4 }}>
+                          같은 판 내 챔피언 중복 선택, 이번 방에서 그 라인에 이미 쓴 챔피언은 목록에서 자동으로 제외돼요(피어리스)
+                        </div>
                         {!allChampionsPicked && (
                           <div style={{ fontSize: 10, color: 'var(--gold3)', marginTop: 4 }}>
                             ⚠ 10명 전원의 챔피언을 선택해야 기록할 수 있어요
