@@ -1463,7 +1463,8 @@ export default function RoomsTab({
                 const red1 = sortByLine(result.team2)
                 // 라인별 예상 승률 = 티어(점수)차이 기반 추정치(라인 영향력 가중치 반영) + 상대전적(표본 10판 이상일 때만) 혼합.
                 // 상대전적이 있다고 무조건 그것만 쓰면(예전 방식) 1~2판짜리 전적도 0%/100%로 과신하게 되는 문제가 있어서,
-                // 표본이 쌓일수록 상대전적 비중을 늘리는 방식(최대 60%)으로 섞음 — 정밀 매칭(runBalance)의 h2hAdjustment와 같은 철학.
+                // 표본이 쌓일수록 상대전적 비중을 늘리는 방식(최대 80%)으로 섞음 — 정밀 매칭(runBalance)의 h2hAdjustment와 같은 철학.
+                // (기존엔 최대 60%였는데 체감상 상대전적 반영이 약하다는 피드백으로 상향)
                 const lineWrs = LINES.map(line => {
                   const bp = blue1.find(p => p.line === line)
                   const rp = red1.find(p => p.line === line)
@@ -1483,7 +1484,7 @@ export default function RoomsTab({
                       return (bpInBlue && r.winner === 'blue') || (!bpInBlue && r.winner === 'red')
                     }).length
                     const h2hWr = bpWin / total
-                    const h2hWeight = Math.min(0.6, total / 30)
+                    const h2hWeight = Math.min(0.8, total / 25)
                     const wr = h2hWeight * h2hWr + (1 - h2hWeight) * scoreWr
                     return { line, wr, total, blended: true }
                   } else {
@@ -1491,8 +1492,13 @@ export default function RoomsTab({
                   }
                 }).filter(Boolean) as { line: string; wr: number; total: number; blended: boolean }[]
 
-                const totalWeight = lineWrs.reduce((s, l) => s + (3 + l.total), 0)
-                const blueWr = lineWrs.reduce((s, l) => s + l.wr * (3 + l.total), 0) / totalWeight
+                // 5라인 합산할 때, "전적 없어서 항상 50%인 라인"이 가중치 3씩 깔고 들어가면
+                // 한 라인이 실제로 63:37처럼 크게 갈려도 나머지 4라인(=50%, 무정보)에 묻혀서 평균이 거의 안 움직임.
+                // 전적 없는 라인은 가중치를 확 낮추고(1), 상대전적 있는 라인은 표본 신뢰도만큼 가중치를 높여서(5+표본수)
+                // 실제 데이터가 있는 라인의 신호가 전체 예상 승률에 제대로 반영되도록 함.
+                const lineWeight = (l: { total: number; blended: boolean }) => l.blended ? 5 + l.total : 1
+                const totalWeight = lineWrs.reduce((s, l) => s + lineWeight(l), 0)
+                const blueWr = lineWrs.reduce((s, l) => s + l.wr * lineWeight(l), 0) / totalWeight
                 const blueWrPct = Math.round(blueWr * 100)
                 const redWrPct = 100 - blueWrPct
                 const hasLowSample = lineWrs.some(l => !l.blended)
