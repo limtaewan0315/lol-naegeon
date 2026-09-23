@@ -789,7 +789,10 @@ export default function RoomsTab({
         if (t1MaxPlayer >= s1 * 2 / 5 || t2MaxPlayer >= s2 * 2 / 5) continue
 
         const candidateResult: BalanceResult = { team1: t1, team2: t2, s1, s2 }
-        if (lastSig && resultSignature(candidateResult) === lastSig) continue
+        // 최고수준팀편성은 라인 배정 자체가 고정이라 나올 수 있는 조합의 가짓수가 원래도 적은데,
+        // "직전 판과 똑같은 조합이면 제외" 규칙까지 걸리면 하필 그 유일한 조합이 걸려서 매칭이 통째로 실패할 수 있음
+        // → 반복회피 규칙은 이 모드에서 애초에 무시하기로 했으니 여기서도 적용 안 함
+        if (!useDetailedMatching && lastSig && resultSignature(candidateResult) === lastSig) continue
 
         let maxLineDiff = 0
         for (const l of LINES) {
