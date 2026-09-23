@@ -562,6 +562,14 @@ export default function RoomsTab({
       const { tier, score } = resolveTierScore(p, line)
       return { userId: p.userId, name: p.name, tier, line, score }
     }
+    // 이 사람이 실제로 선택한(M1/M2/상관없음) 라인 중, 주어진 라인 목록에 속하는 것만 — "선택 안 한 라인"이
+    // 절대 걸리지 않도록 강제배정 로직 전부가 이 후보군 안에서만 고르게 함
+    const candidateLinesFor = (p: PlayerEntry, lines: Line[]): Line[] => {
+      const allLines = getSummonerLines(p.userId)
+      return p.most1 === 'any'
+        ? allLines.filter(l => lines.includes(l))
+        : [p.most1 as Line, ...(p.most2 && p.most2 !== 'any' ? [p.most2 as Line] : [])].filter(l => lines.includes(l))
+    }
 
     // ── 최고수준팀편성 ──────────────────────
     const useDetailedMatching = !!myRoom.detailed_matching
@@ -691,17 +699,11 @@ export default function RoomsTab({
       remainingLines.forEach(l => { capacity[l] = 2 })
       const unassigned = new Set(remainingPlayers.map(p => p.userId))
       type Req = { p: PlayerEntry; line: Line; score: number; overall: number; isM1: boolean }
-      const candidateLinesFor = (p: PlayerEntry): Line[] => {
-        const allLines = getSummonerLines(p.userId)
-        return p.most1 === 'any'
-          ? allLines.filter(l => remainingLines.includes(l))
-          : [p.most1 as Line, ...(p.most2 && p.most2 !== 'any' ? [p.most2 as Line] : [])].filter(l => remainingLines.includes(l))
-      }
       const buildRequests = (): Req[] => {
         const reqs: Req[] = []
         remainingPlayers.forEach(p => {
           if (!unassigned.has(p.userId)) return
-          const candidateLines = candidateLinesFor(p)
+          const candidateLines = candidateLinesFor(p, remainingLines)
           const provenLines = candidateLines.filter(l => linePlayCount(p.userId, l) >= MIN_PROVEN_GAMES)
           const useLines = provenLines.length > 0 ? provenLines : candidateLines
           useLines.forEach(l => reqs.push({ p, line: l, score: resolveTierScore(p, l).score, overall: overallScore(p.userId), isM1: p.most1 === l }))
@@ -877,7 +879,39 @@ export default function RoomsTab({
     // 위에서도 못 찾았으면(남은 라인들도 밸런스가 전혀 안 맞았던 경우), 남은 라인까지 전부 강제 배정으로 완성한 뒤
     // 팀을 나누는 32가지 경우의 수 중 최선을 찾음 (그래도 5점 넘으면 실패 처리)
     if (!chosen) {
-      remainingLines.forEach(priorityFillLine)
+      // "충분한 라인"에서는 그 사람이 실제로 선택한(M1/M2/상관없음) 라인이 아니면 절대 강제로 걸리면 안 됨.
+      // 예전엔 라인을 순서대로 하나씩 채우다 보니, 먼저 처리된 라인이 다른 라인도 원했던 사람을 먼저 가져가버려서
+      // 뒤에 처리되는 라인엔 아무도 선택 안 한 사람이 강제로 걸리는 이상현상이 있었음.
+      // → 순서에 의존하지 않는 이분 매칭(augmenting path)으로 "각자 선택한 라인 안에서만" 자리를 확정함.
+      const slotOwner = new Map<string, string>() // slotId -> userId
+      const slotLineOf = (slotId: string): Line => slotId.split('#')[0] as Line
+      const candidatesByPlayer = new Map<string, Line[]>(
+        remainingPlayers.map(p => [p.userId, candidateLinesFor(p, remainingLines)])
+      )
+      const tryPlace = (userId: string, visited: Set<string>): boolean => {
+        for (const line of candidatesByPlayer.get(userId) ?? []) {
+          for (const slotId of [`${line}#0`, `${line}#1`]) {
+            if (visited.has(slotId)) continue
+            visited.add(slotId)
+            const occupant = slotOwner.get(slotId)
+            if (!occupant || tryPlace(occupant, visited)) {
+              slotOwner.set(slotId, userId)
+              return true
+            }
+          }
+        }
+        return false
+      }
+      const matchOk = remainingPlayers.every(p => tryPlace(p.userId, new Set()))
+      if (!matchOk) {
+        setBalanceError('현재 M1/M2 설정으로는 모든 라인을 채울 수 없어요. 등록 라인을 조정하거나 인원 구성을 바꿔서 다시 시도해주세요.')
+        setBalancing(false)
+        return
+      }
+      slotOwner.forEach((userId, slotId) => {
+        const p = remainingPlayers.find(pl => pl.userId === userId)!
+        tryAssign(p, slotLineOf(slotId))
+      })
 
       const pairs = LINES.map(line => slots[line].map(p => buildPlayer(p, line)))
       if (pairs.some(pair => pair.length < 2)) {
