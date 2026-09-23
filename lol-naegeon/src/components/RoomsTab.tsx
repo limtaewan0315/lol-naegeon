@@ -45,6 +45,24 @@ function resultSignature(r: BalanceResult): string {
   return sigs.join('|')
 }
 
+// 라인 영향력(캐리력) 가중치 — 2026-09 시즌1 데이터 분석 결과(미드>원딜>탑>정글 >> 서포터)를 약하게 반영.
+// 정밀 매칭(runBalance)과 예상 승률 카드가 같은 값을 공유하도록 모듈 레벨로 뺌.
+const LINE_CARRY_WEIGHT: Record<Line, number> = { 미드: 1.0, 원딜: 1.0, 탑: 1.0, 정글: 1.0, 서포터: 0.7 }
+// 상대전적을 신뢰할 수 있다고 보는 최소 표본 수
+const MIN_H2H_SAMPLE = 10
+
+// 점수(티어)차이 → 예상 승률. 시즌1 데이터 분석 결과 diff 0~5점은 실제 승률에 거의 영향이 없었고(47~48%대,
+// 50%와 통계적으로 구분 안 됨), diff 6점부터 실제로 승률이 갈리기 시작(diff 6+ 구간 58.8%)하는 패턴을 반영.
+// line을 넘기면 그 라인의 캐리력 가중치만큼 "50%에서 벗어나는 정도"를 스케일링(서포터는 약하게, 나머지는 그대로).
+function estimateWrFromScoreDiff(diff: number, line?: Line): number {
+  const abs = Math.abs(diff)
+  if (abs <= 5) return 0.5
+  const weight = line ? LINE_CARRY_WEIGHT[line] : 1
+  const extra = Math.min(0.35, 0.09 + (abs - 6) * 0.02) * weight
+  const wr = 0.5 + Math.sign(diff) * extra
+  return Math.min(0.9, Math.max(0.1, wr))
+}
+
 export default function RoomsTab({
   summoners,
   summonerScores,
@@ -411,9 +429,8 @@ export default function RoomsTab({
     // 방장이 켠 경우에만 적용. 5점 이내 안전 상한(diff <= 5)은 그대로 실제 점수 기준으로 유지하고,
     // 그 상한을 통과한 후보들 중에서 "어떤 걸 고를지" 우선순위만 이 가중치로 재정렬함.
     const useDetailedMatching = !!myRoom.detailed_matching
-    // 라인 영향력(캐리력) 가중치 — 2026-09 시즌1 데이터 분석 결과(미드>원딜>탑>정글 >> 서포터)를
-    // 약하게 반영. 서포터만 살짝 낮추고 나머지 4라인은 거의 동일하게 둠.
-    const LINE_WEIGHT: Record<Line, number> = { 미드: 1.0, 원딜: 1.0, 탑: 1.0, 정글: 1.0, 서포터: 0.7 }
+    // 라인 영향력(캐리력) 가중치 — 예상 승률 카드와 동일한 모듈 레벨 상수를 공유
+    const LINE_WEIGHT = LINE_CARRY_WEIGHT
     // 두 선수가 같은 라인에서 맞붙은 전적(상대전적) 조회 — 표본이 10판 미만이면 신뢰할 수 없다고 보고 무시
     const lineHeadToHeadCache = new Map<string, { total: number; aWinRate: number }>()
     const getLineHeadToHead = (aUserId: string, bUserId: string, line: Line) => {
@@ -435,7 +452,7 @@ export default function RoomsTab({
       lineHeadToHeadCache.set(cacheKey, result)
       return result
     }
-    const MIN_H2H_GAMES = 10
+    const MIN_H2H_GAMES = MIN_H2H_SAMPLE
     // 상대전적 보정 폭 — 표본 10판 이상인 매치업에서만, 승률이 50%에서 벗어난 만큼만 소폭 가감
     // (예: 실제 70% 승률이면 +4점 정도. 점수 시스템 자체의 스케일에 맞춰 과하지 않게 잡음)
     const h2hAdjustment = (aUserId: string, bUserId: string, line: Line): number => {
@@ -1300,22 +1317,14 @@ export default function RoomsTab({
                 const result = myRoom.result!
                 const blue1 = sortByLine(result.team1)
                 const red1 = sortByLine(result.team2)
-                // 라인별 맞대결 전적이 없을 때의 승률 추정 — 별도 간이 점수(TIER_SCORE_MAP) 대신
-                // 실제 밸런싱에 쓰인 점수(score)를 그대로 사용. 시즌1 데이터 분석 결과 diff 0~5점은
-                // 실제 승률에 거의 영향이 없었고(diff 0-5 구간 47~48%대, 50%와 통계적으로 구분 안 됨),
-                // diff 6점부터 실제로 승률이 갈리기 시작(diff 6+ 구간 58.8%)하는 패턴이 검증됐으므로 이를 반영.
-                const estimateWrFromScoreDiff = (diff2: number): number => {
-                  const abs = Math.abs(diff2)
-                  if (abs <= 5) return 0.5
-                  const extra = Math.min(0.35, 0.09 + (abs - 6) * 0.02)
-                  const wr = 0.5 + Math.sign(diff2) * extra
-                  return Math.min(0.9, Math.max(0.1, wr))
-                }
-
+                // 라인별 예상 승률 = 티어(점수)차이 기반 추정치(라인 영향력 가중치 반영) + 상대전적(표본 10판 이상일 때만) 혼합.
+                // 상대전적이 있다고 무조건 그것만 쓰면(예전 방식) 1~2판짜리 전적도 0%/100%로 과신하게 되는 문제가 있어서,
+                // 표본이 쌓일수록 상대전적 비중을 늘리는 방식(최대 60%)으로 섞음 — 정밀 매칭(runBalance)의 h2hAdjustment와 같은 철학.
                 const lineWrs = LINES.map(line => {
                   const bp = blue1.find(p => p.line === line)
                   const rp = red1.find(p => p.line === line)
                   if (!bp || !rp) return null
+                  const scoreWr = estimateWrFromScoreDiff(bp.score - rp.score, line)
                   const matchRecs = records.filter(r => {
                     const bpInBlue = r.blue.some(p => p.userId === bp.userId && p.line === line)
                     const bpInRed = r.red.some(p => p.userId === bp.userId && p.line === line)
@@ -1324,23 +1333,25 @@ export default function RoomsTab({
                     return (bpInBlue && rpInRed) || (bpInRed && rpInBlue)
                   })
                   const total = matchRecs.length
-                  if (total > 0) {
+                  if (total >= MIN_H2H_SAMPLE) {
                     const bpWin = matchRecs.filter(r => {
                       const bpInBlue = r.blue.some(p => p.userId === bp.userId && p.line === line)
                       return (bpInBlue && r.winner === 'blue') || (!bpInBlue && r.winner === 'red')
                     }).length
-                    return { line, wr: bpWin / total, total, estimated: false }
+                    const h2hWr = bpWin / total
+                    const h2hWeight = Math.min(0.6, total / 30)
+                    const wr = h2hWeight * h2hWr + (1 - h2hWeight) * scoreWr
+                    return { line, wr, total, blended: true }
                   } else {
-                    const wr = estimateWrFromScoreDiff(bp.score - rp.score)
-                    return { line, wr, total: 0, estimated: true }
+                    return { line, wr: scoreWr, total, blended: false }
                   }
-                }).filter(Boolean) as { line: string; wr: number; total: number; estimated: boolean }[]
+                }).filter(Boolean) as { line: string; wr: number; total: number; blended: boolean }[]
 
-                const totalWeight = lineWrs.reduce((s, l) => s + (l.total > 0 ? l.total : 3), 0)
-                const blueWr = lineWrs.reduce((s, l) => s + l.wr * (l.total > 0 ? l.total : 3), 0) / totalWeight
+                const totalWeight = lineWrs.reduce((s, l) => s + (3 + l.total), 0)
+                const blueWr = lineWrs.reduce((s, l) => s + l.wr * (3 + l.total), 0) / totalWeight
                 const blueWrPct = Math.round(blueWr * 100)
                 const redWrPct = 100 - blueWrPct
-                const hasEstimated = lineWrs.some(l => l.estimated)
+                const hasLowSample = lineWrs.some(l => !l.blended)
 
                 return (
                   <div className="card">
@@ -1360,9 +1371,9 @@ export default function RoomsTab({
                       <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: 'rgba(200,155,60,0.4)' }} />
                       <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 5, height: 5, background: 'var(--gold)', borderRadius: '50%' }} />
                     </div>
-                    {hasEstimated && (
+                    {hasLowSample && (
                       <div style={{ fontSize: 10, color: 'var(--gold3)', background: 'rgba(120,90,40,0.08)', border: '1px solid rgba(120,90,40,0.2)', borderRadius: 'var(--radius)', padding: '5px 9px', marginTop: 7 }}>
-                        ⚠ 전적이 없는 라인은 티어 점수로 추정되어 정확도가 낮을 수 있어요
+                        ⚠ 상대전적이 {MIN_H2H_SAMPLE}판 미만인 라인은 티어 점수(라인 영향력 반영)로만 추정되어 정확도가 낮을 수 있어요
                       </div>
                     )}
                   </div>
