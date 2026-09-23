@@ -1660,7 +1660,7 @@ export default function RoomsTab({
                             const pickedByOthers = Object.entries(pendingChampions)
                               .filter(([uid, champ]) => uid !== userId && !!champ)
                               .map(([, champ]) => champ)
-                            return new Set([...pickedByOthers, ...usedThisLine])
+                            return new Set([...pickedByOthers, ...Array.from(usedThisLine)])
                           }
                           const bpChampions = championList.filter(c => !disallowedFor(bp.userId).has(c.id))
                           const rpChampions = championList.filter(c => !disallowedFor(rp.userId).has(c.id))
