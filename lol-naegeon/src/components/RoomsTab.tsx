@@ -1648,6 +1648,27 @@ export default function RoomsTab({
                 ))}
               </div>
 
+              {/* 피어리스: 이 방에서 이미 쓴 챔피언을 라인별로(팀 구분 없이) 표시 — 팀편성 결과 화면에서도 보이도록 */}
+              {myRoom.used_champions && LINES.some(l => (myRoom.used_champions?.[l]?.length ?? 0) > 0) && (
+                <div style={{ padding: '10px 13px', borderRadius: 12, background: 'var(--bg3)', marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gold3)', marginBottom: 6 }}>
+                    🚫 이번 방에서 사용한 챔피언 (피어리스)
+                  </div>
+                  {LINES.map(line => {
+                    const usedIds = myRoom.used_champions?.[line] ?? []
+                    if (usedIds.length === 0) return null
+                    return (
+                      <div key={line} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, marginBottom: 4 }}>
+                        <span className="badge b-line" style={{ flexShrink: 0, fontSize: 9 }}>{line}</span>
+                        <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.5 }}>
+                          {usedIds.map(id => championList.find(c => c.id === id)?.name ?? id).join(', ')}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
               {/* 해당 라인 전적이 적은(10판 미만) 배치 인원이 있으면 경고 문구 표시 —
                   이런 선수의 점수는 실전적 대신 추정치(resolveTierScore 등)에 기반해 밸런싱됐을 가능성이 높아
                   팀 언밸런싱이 발생할 수 있음 */}
