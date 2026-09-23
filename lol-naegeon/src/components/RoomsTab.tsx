@@ -26,6 +26,7 @@ type Room = {
   members: RoomMember[]
   status: 'waiting' | 'playing'
   match_mode: 'line' | 'random'
+  detailed_matching: boolean | null
   result: BalanceResult | null
   pending_result: BalanceResult | null
   last_result: BalanceResult | null
@@ -304,9 +305,11 @@ export default function RoomsTab({
       if (m.most1 !== 'any') lineCount[m.most1 as Line] = (lineCount[m.most1 as Line] ?? 0) + 1
     })
 
-    // 후보 풀: 아직 방에 없는 + 비활성화되지 않은 실제 계정만 (계정ID 기준 — 동명이인도 각자 정확히 후보가 됨)
+    // 후보 풀: 아직 방에 없는 + 비활성화되지 않은 + 롤 계정이 등록된 실제 계정만
+    // (계정ID 기준 — 동명이인도 각자 정확히 후보가 됨. 롤 계정 미등록자는 ready:true로 강제 채워도
+    //  실제 게임이 불가능한 상태라 애초에 후보에서 제외해야 함)
     let pool = Object.entries(nameByUserId)
-      .filter(([uid, name]) => !existingIds.has(uid) && !inactiveNames.has(uid))
+      .filter(([uid, name]) => !existingIds.has(uid) && !inactiveNames.has(uid) && !!riotIdMap[uid])
       .map(([uid, name]) => ({ userId: uid, name, lines: getSummonerLines(uid) }))
       .filter(c => c.lines.length > 0)
 
@@ -370,6 +373,13 @@ export default function RoomsTab({
     const players: PlayerEntry[] = myRoom.members.map(m => ({ userId: m.user_id, name: m.summoner_name, most1: m.most1, most2: m.most2 }))
     if (players.length !== 10) { setBalanceError(`정확히 10명이 필요해요. (현재 ${players.length}명)`); return }
     if (!myRoom.members.every(m => m.ready)) { setBalanceError('모든 참가자가 준비완료 상태여야 해요.'); return }
+    // ready 상태가 어떤 경로로 true가 됐든(테스트 인원 채우기 등), 롤 계정 미등록자가 섞여 있으면
+    // 여기서 다시 한번 막음 — "준비완료" 버튼 우회로 인한 미등록자 참여를 근본적으로 차단
+    const noRiotMembers = myRoom.members.filter(m => !riotIdMap[m.user_id])
+    if (noRiotMembers.length > 0) {
+      setBalanceError(`롤 계정이 등록되지 않은 참가자가 있어요: ${noRiotMembers.map(m => m.summoner_name).join(', ')}`)
+      return
+    }
 
     setBalancing(true)
 
@@ -395,6 +405,56 @@ export default function RoomsTab({
     const buildPlayer = (p: PlayerEntry, line: Line): TeamPlayer => {
       const { tier, score } = resolveTierScore(p, line)
       return { userId: p.userId, name: p.name, tier, line, score }
+    }
+
+    // ── 정밀 매칭 (라인 영향력 + 상대전적 반영) ──────────────────────
+    // 방장이 켠 경우에만 적용. 5점 이내 안전 상한(diff <= 5)은 그대로 실제 점수 기준으로 유지하고,
+    // 그 상한을 통과한 후보들 중에서 "어떤 걸 고를지" 우선순위만 이 가중치로 재정렬함.
+    const useDetailedMatching = !!myRoom.detailed_matching
+    // 라인 영향력(캐리력) 가중치 — 2026-09 시즌1 데이터 분석 결과(미드>원딜>탑>정글 >> 서포터)를
+    // 약하게 반영. 서포터만 살짝 낮추고 나머지 4라인은 거의 동일하게 둠.
+    const LINE_WEIGHT: Record<Line, number> = { 미드: 1.0, 원딜: 1.0, 탑: 1.0, 정글: 1.0, 서포터: 0.7 }
+    // 두 선수가 같은 라인에서 맞붙은 전적(상대전적) 조회 — 표본이 10판 미만이면 신뢰할 수 없다고 보고 무시
+    const lineHeadToHeadCache = new Map<string, { total: number; aWinRate: number }>()
+    const getLineHeadToHead = (aUserId: string, bUserId: string, line: Line) => {
+      const cacheKey = [aUserId, bUserId, line].join('|')
+      const cached = lineHeadToHeadCache.get(cacheKey)
+      if (cached) return cached
+      let total = 0, aWin = 0
+      for (const r of records) {
+        const aInBlue = r.blue.some(p => p.userId === aUserId && p.line === line)
+        const aInRed = r.red.some(p => p.userId === aUserId && p.line === line)
+        const bInBlue = r.blue.some(p => p.userId === bUserId && p.line === line)
+        const bInRed = r.red.some(p => p.userId === bUserId && p.line === line)
+        if ((aInBlue && bInRed) || (aInRed && bInBlue)) {
+          total++
+          if ((aInBlue && r.winner === 'blue') || (aInRed && r.winner === 'red')) aWin++
+        }
+      }
+      const result = { total, aWinRate: total > 0 ? aWin / total : 0.5 }
+      lineHeadToHeadCache.set(cacheKey, result)
+      return result
+    }
+    const MIN_H2H_GAMES = 10
+    // 상대전적 보정 폭 — 표본 10판 이상인 매치업에서만, 승률이 50%에서 벗어난 만큼만 소폭 가감
+    // (예: 실제 70% 승률이면 +4점 정도. 점수 시스템 자체의 스케일에 맞춰 과하지 않게 잡음)
+    const h2hAdjustment = (aUserId: string, bUserId: string, line: Line): number => {
+      const { total, aWinRate } = getLineHeadToHead(aUserId, bUserId, line)
+      if (total < MIN_H2H_GAMES) return 0
+      return (aWinRate - 0.5) * 20
+    }
+    // team1/team2의 "정밀 매칭용" 가중 점수차 — 라인 가중치 + 상대전적 보정을 반영한 팀간 격차
+    // (부호를 살려서 합산 → 절대값. 단순 총점차와 달리 "실질적으로 어느 팀이 유리한가"를 더 세밀하게 반영)
+    const computeWeightedDiff = (t1: TeamPlayer[], t2: TeamPlayer[]): number => {
+      let sum = 0
+      for (const l of LINES) {
+        const p1 = t1.find(p => p.line === l)
+        const p2 = t2.find(p => p.line === l)
+        if (!p1 || !p2) continue
+        const effectiveDiff = (p1.score - p2.score) + h2hAdjustment(p1.userId, p2.userId, l)
+        sum += LINE_WEIGHT[l] * effectiveDiff
+      }
+      return Math.abs(sum)
     }
 
     const protectedIds = new Set<string>(myRoom.autofill_protected_ids ?? [])
@@ -528,14 +588,17 @@ export default function RoomsTab({
       }
     }
 
-    candidates.sort((a, b) => a.diff - b.diff)
     const isRepeatFree = (c: { result: BalanceResult }) => !violatesRepeat(c.result.team1) && !violatesRepeat(c.result.team2)
 
-    // 5점을 넘는 조합은 어떤 경우에도 쓰지 않음
+    // 5점을 넘는 조합은 어떤 경우에도 쓰지 않음.
+    // diff가 가장 낮은 조합 "딱 1개"만 쓰면 같은 멤버로 여러 판 돌릴 때 매번 거의 같은 팀 구성이 나오는 경향이 있어서,
+    // diff<=5(안전 기준)를 만족하는 후보들 중에서는 밸런스 차이가 없다고 보고 무작위로 하나를 뽑음
+    // (반복 회피 조합이 있으면 그 안에서, 없으면 전체 diff<=5 후보 안에서 무작위 선택)
+    const okCandidates = candidates.filter(c => c.diff <= 5)
+    const repeatFreeCandidates = okCandidates.filter(isRepeatFree)
+    const pickPool = repeatFreeCandidates.length > 0 ? repeatFreeCandidates : okCandidates
     let chosen: BalanceResult | null =
-      candidates.find(c => c.diff <= 5 && isRepeatFree(c))?.result ??
-      candidates.find(c => c.diff <= 5)?.result ??
-      null
+      pickPool.length > 0 ? pickPool[Math.floor(Math.random() * pickPool.length)].result : null
 
     // 위에서도 못 찾았으면(남은 라인들도 밸런스가 전혀 안 맞았던 경우), 남은 라인까지 전부 강제 배정으로 완성한 뒤
     // 팀을 나누는 32가지 경우의 수 중 최선을 찾음 (그래도 5점 넘으면 실패 처리)
@@ -561,8 +624,6 @@ export default function RoomsTab({
         const s2 = team2.reduce((s, p) => s + p.score, 0)
         allCombos.push({ team1, team2, s1, s2 })
       }
-      allCombos.sort((a, b) => Math.abs(a.s1 - a.s2) - Math.abs(b.s1 - b.s2))
-
       const isCleanAF = (c: BalanceResult) =>
         (!lastSig || resultSignature(c) !== lastSig) && !violatesRepeat(c.team1) && !violatesRepeat(c.team2)
       // 한 명의 점수가 팀 총점의 5분의 2(40%) 이상을 차지하면 그 조합은 제외
@@ -572,10 +633,12 @@ export default function RoomsTab({
         return t1Max < c.s1 * 2 / 5 && t2Max < c.s2 * 2 / 5
       }
 
-      chosen =
-        allCombos.find(c => Math.abs(c.s1 - c.s2) <= 5 && isCleanAF(c) && isFairAF(c)) ??
-        allCombos.find(c => Math.abs(c.s1 - c.s2) <= 5 && isFairAF(c)) ??
-        null
+      // 여기도 마찬가지로 diff<=5를 만족하는 후보 중 "가장 낮은 diff 1개"가 아니라 무작위로 선택해서
+      // 매번 같은 팀 모양이 나오는 걸 줄임
+      const fairCombos = allCombos.filter(c => Math.abs(c.s1 - c.s2) <= 5 && isFairAF(c))
+      const cleanFairCombos = fairCombos.filter(isCleanAF)
+      const comboPool = cleanFairCombos.length > 0 ? cleanFairCombos : fairCombos
+      chosen = comboPool.length > 0 ? comboPool[Math.floor(Math.random() * comboPool.length)] : null
     }
 
     if (!chosen) {
