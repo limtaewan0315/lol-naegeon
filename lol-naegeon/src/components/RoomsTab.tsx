@@ -31,6 +31,7 @@ type Room = {
   status: 'waiting' | 'playing'
   match_mode: 'line' | 'random'
   detailed_matching: boolean | null
+  best_matching_used: boolean | null
   used_champions: Partial<Record<Line, string[]>> | null
   result: BalanceResult | null
   pending_result: BalanceResult | null
@@ -51,7 +52,7 @@ function resultSignature(r: BalanceResult): string {
 }
 
 // 라인 영향력(캐리력) 가중치 — 2026-09 시즌1 데이터 분석 결과(미드>원딜>탑>정글 >> 서포터)를 약하게 반영.
-// 정밀 매칭(runBalance)과 예상 승률 카드가 같은 값을 공유하도록 모듈 레벨로 뺌.
+// 최고수준팀편성(runBalance)과 예상 승률 카드가 같은 값을 공유하도록 모듈 레벨로 뺌.
 const LINE_CARRY_WEIGHT: Record<Line, number> = { 미드: 1.0, 원딜: 1.0, 탑: 1.0, 정글: 1.0, 서포터: 0.7 }
 // 상대전적을 신뢰할 수 있다고 보는 최소 표본 수
 const MIN_H2H_SAMPLE = 10
@@ -66,6 +67,46 @@ function estimateWrFromScoreDiff(diff: number, line?: Line): number {
   const extra = Math.min(0.35, 0.09 + (abs - 6) * 0.02) * weight
   const wr = 0.5 + Math.sign(diff) * extra
   return Math.min(0.9, Math.max(0.1, wr))
+}
+
+// team1(블루) 승률 예측 — "예상 승률" 카드에 쓰는 것과 완전히 동일한 로직(라인별 티어차이+라인영향력 +
+// 상대전적 10판 이상 블렌딩 → 라인별 신뢰도 가중평균)을 최고수준팀편성(runBalance)에서도 그대로 재사용.
+// 두 곳이 서로 다른 기준으로 계산하면 화면에 보이는 예상 승률과 실제 선택 기준이 어긋날 수 있으므로
+// 하나의 함수로 통일함(최고수준팀편성 자체는 승률이 아니라 총점 기준으로 고르지만, 점수 산정 로직은 공유).
+function predictTeamWinRate(team1: TeamPlayer[], team2: TeamPlayer[], records: GameRecord[]): {
+  blueWr: number
+  lineWrs: { line: Line; wr: number; total: number; blended: boolean }[]
+} {
+  const lineWrs = LINES.map(line => {
+    const bp = team1.find(p => p.line === line)
+    const rp = team2.find(p => p.line === line)
+    if (!bp || !rp) return null
+    const scoreWr = estimateWrFromScoreDiff(bp.score - rp.score, line)
+    const matchRecs = records.filter(r => {
+      const bpInBlue = r.blue.some(p => p.userId === bp.userId && p.line === line)
+      const bpInRed = r.red.some(p => p.userId === bp.userId && p.line === line)
+      const rpInBlue = r.blue.some(p => p.userId === rp.userId && p.line === line)
+      const rpInRed = r.red.some(p => p.userId === rp.userId && p.line === line)
+      return (bpInBlue && rpInRed) || (bpInRed && rpInBlue)
+    })
+    const total = matchRecs.length
+    if (total >= MIN_H2H_SAMPLE) {
+      const bpWin = matchRecs.filter(r => {
+        const bpInBlue = r.blue.some(p => p.userId === bp.userId && p.line === line)
+        return (bpInBlue && r.winner === 'blue') || (!bpInBlue && r.winner === 'red')
+      }).length
+      const h2hWr = bpWin / total
+      const h2hWeight = Math.min(0.8, total / 25)
+      const wr = h2hWeight * h2hWr + (1 - h2hWeight) * scoreWr
+      return { line, wr, total, blended: true }
+    }
+    return { line, wr: scoreWr, total, blended: false }
+  }).filter(Boolean) as { line: Line; wr: number; total: number; blended: boolean }[]
+
+  const lineWeight = (l: { total: number; blended: boolean }) => l.blended ? 5 + l.total : 1
+  const totalWeight = lineWrs.reduce((s, l) => s + lineWeight(l), 0)
+  const blueWr = totalWeight > 0 ? lineWrs.reduce((s, l) => s + l.wr * lineWeight(l), 0) / totalWeight : 0.5
+  return { blueWr, lineWrs }
 }
 
 // 검색형 챔피언 선택 드롭다운 — 챔피언이 160개가 넘어서 일반 select 스크롤은 보기 힘들어서,
@@ -523,53 +564,28 @@ export default function RoomsTab({
       return { userId: p.userId, name: p.name, tier, line, score }
     }
 
-    // ── 정밀 매칭 (라인 영향력 + 상대전적 반영) ──────────────────────
-    // 방장이 켠 경우에만 적용. 5점 이내 안전 상한(diff <= 5)은 그대로 실제 점수 기준으로 유지하고,
-    // 그 상한을 통과한 후보들 중에서 "어떤 걸 고를지" 우선순위만 이 가중치로 재정렬함.
-    const useDetailedMatching = !!myRoom.detailed_matching
-    // 라인 영향력(캐리력) 가중치 — 예상 승률 카드와 동일한 모듈 레벨 상수를 공유
-    const LINE_WEIGHT = LINE_CARRY_WEIGHT
-    // 두 선수가 같은 라인에서 맞붙은 전적(상대전적) 조회 — 표본이 10판 미만이면 신뢰할 수 없다고 보고 무시
-    const lineHeadToHeadCache = new Map<string, { total: number; aWinRate: number }>()
-    const getLineHeadToHead = (aUserId: string, bUserId: string, line: Line) => {
-      const cacheKey = [aUserId, bUserId, line].join('|')
-      const cached = lineHeadToHeadCache.get(cacheKey)
-      if (cached) return cached
-      let total = 0, aWin = 0
-      for (const r of records) {
-        const aInBlue = r.blue.some(p => p.userId === aUserId && p.line === line)
-        const aInRed = r.red.some(p => p.userId === aUserId && p.line === line)
-        const bInBlue = r.blue.some(p => p.userId === bUserId && p.line === line)
-        const bInRed = r.red.some(p => p.userId === bUserId && p.line === line)
-        if ((aInBlue && bInRed) || (aInRed && bInBlue)) {
-          total++
-          if ((aInBlue && r.winner === 'blue') || (aInRed && r.winner === 'red')) aWin++
-        }
-      }
-      const result = { total, aWinRate: total > 0 ? aWin / total : 0.5 }
-      lineHeadToHeadCache.set(cacheKey, result)
-      return result
-    }
-    const MIN_H2H_GAMES = MIN_H2H_SAMPLE
-    // 상대전적 보정 폭 — 표본 10판 이상인 매치업에서만, 승률이 50%에서 벗어난 만큼만 소폭 가감
-    // (예: 실제 70% 승률이면 +4점 정도. 점수 시스템 자체의 스케일에 맞춰 과하지 않게 잡음)
-    const h2hAdjustment = (aUserId: string, bUserId: string, line: Line): number => {
-      const { total, aWinRate } = getLineHeadToHead(aUserId, bUserId, line)
-      if (total < MIN_H2H_GAMES) return 0
-      return (aWinRate - 0.5) * 20
-    }
-    // team1/team2의 "정밀 매칭용" 가중 점수차 — 라인 가중치 + 상대전적 보정을 반영한 팀간 격차
-    // (부호를 살려서 합산 → 절대값. 단순 총점차와 달리 "실질적으로 어느 팀이 유리한가"를 더 세밀하게 반영)
-    const computeWeightedDiff = (t1: TeamPlayer[], t2: TeamPlayer[]): number => {
-      let sum = 0
-      for (const l of LINES) {
-        const p1 = t1.find(p => p.line === l)
-        const p2 = t2.find(p => p.line === l)
-        if (!p1 || !p2) continue
-        const effectiveDiff = (p1.score - p2.score) + h2hAdjustment(p1.userId, p2.userId, l)
-        sum += LINE_WEIGHT[l] * effectiveDiff
-      }
-      return Math.abs(sum)
+    // ── 최고수준팀편성 (방당 1회만 사용 가능) ──────────────────────
+    // 밸런스(공정함)보다 "검증된 라인에서의 최고 총점"을 우선하는 특수 모드.
+    // 점수차 허용폭을 일반 모드(5점)보다 더 엄격한 2점 이내(diff <= MAX_DIFF)로 좁혀서 안전선을 유지하되,
+    // 그 안에서는 반복/다양성 회피 같은 소프트 제약을 무시하고 총점(s1+s2)이 가장 높은 조합을 고름.
+    // 또한 라인 배정 자체도 본인이 10판 이상 해본 "검증된 라인"으로만 제한해서, 못 해본 라인에서
+    // 어쩌다 높은 추정 점수가 나오는 걸로 고득점하는 걸 막음.
+    // 방당 1회만 허용 — 체크박스가 꺼지는 타이밍과 무관하게 여기서도 한 번 더 막음(이미 썼으면 무조건 off 취급)
+    const useDetailedMatching = !!myRoom.detailed_matching && !myRoom.best_matching_used
+    const MIN_PROVEN_GAMES = 10
+    // 최고수준팀편성일 때는 점수차 허용폭을 5점이 아니라 2점까지로 더 엄격하게 잡음
+    const MAX_DIFF = useDetailedMatching ? 2 : 5
+    const linePlayCountCache = new Map<string, number>()
+    const linePlayCount = (userId: string, line: Line): number => {
+      const key = `${userId}|${line}`
+      const cached = linePlayCountCache.get(key)
+      if (cached !== undefined) return cached
+      const n = records.filter(r =>
+        r.blue.some(p => p.userId === userId && p.line === line) ||
+        r.red.some(p => p.userId === userId && p.line === line)
+      ).length
+      linePlayCountCache.set(key, n)
+      return n
     }
 
     const protectedIds = new Set<string>(myRoom.autofill_protected_ids ?? [])
@@ -663,7 +679,28 @@ export default function RoomsTab({
           }
           const allLines = getSummonerLines(p.userId)
           let line: Line
-          if (p.most1 === 'any') {
+          if (useDetailedMatching) {
+            // 최고수준팀편성: 본인이 MIN_PROVEN_GAMES판 이상 해본 "검증된 라인"으로만 배정.
+            // 후보가 여럿이면 그중 점수가 가장 높은 라인으로 (못 해본 라인에서 어쩌다 높은 추정 점수가 나오는 걸로
+            // 고득점하는 걸 막기 위해, 애초에 검증 안 된 라인은 후보에서 제외).
+            const candidateLines: Line[] = p.most1 === 'any'
+              ? allLines.filter(l => remainingLines.includes(l))
+              : [p.most1 as Line, ...(p.most2 && p.most2 !== 'any' ? [p.most2 as Line] : [])].filter(l => remainingLines.includes(l))
+            const provenLines = candidateLines.filter(l => linePlayCount(p.userId, l) >= MIN_PROVEN_GAMES)
+            if (provenLines.length > 0) {
+              line = provenLines.reduce((best, l) =>
+                resolveTierScore(p, l).score > resolveTierScore(p, best).score ? l : best, provenLines[0])
+            } else if (p.most1 === 'any') {
+              const opts = allLines.filter(l => remainingLines.includes(l))
+              const pool = opts.length > 0 ? opts : remainingLines
+              line = pool[Math.floor(Math.random() * pool.length)]
+            } else if (!p.most2 || p.most2 === 'any') {
+              line = p.most1 as Line
+            } else {
+              const isM2 = Math.random() >= 0.7
+              line = isM2 ? p.most2 as Line : p.most1 as Line
+            }
+          } else if (p.most1 === 'any') {
             const opts = allLines.filter(l => remainingLines.includes(l))
             const pool = opts.length > 0 ? opts : remainingLines
             line = pool[Math.floor(Math.random() * pool.length)]
@@ -735,21 +772,26 @@ export default function RoomsTab({
     // diff<=5(안전 기준)를 만족하는 후보들 중에서는 밸런스 차이가 없다고 보고 무작위로 하나를 뽑음.
     // 우선순위: (반복회피 + 직전판 라인매치업 3라인 이하) > (라인매치업 3라인 이하) > (반복회피만) > 아무거나
     // — 라인 다양성 조건을 못 맞추면 단계적으로 완화해서, 그래도 5점 이내 조합이 있으면 반드시 하나는 뽑음
-    const okCandidates = candidates.filter(c => c.diff <= 5)
-    const bestPool = okCandidates.filter(c => isRepeatFree(c) && isDiverse(c))
-    const diversePool = bestPool.length > 0 ? bestPool : okCandidates.filter(isDiverse)
-    const repeatFreePool = diversePool.length > 0 ? diversePool : okCandidates.filter(isRepeatFree)
-    const basePickPool = repeatFreePool.length > 0 ? repeatFreePool : okCandidates
-    // 정밀 매칭 on: raw diff<=5 통과한 후보들(다양성/반복회피 이미 적용된 pool) 중에서,
-    // "어떤 걸 고를지"만 라인영향력+상대전적 가중치(computeWeightedDiff) 기준 상위 30%로 좁혀서 그 안에서 무작위 선택.
-    // off일 때와 안전 기준(diff<=5)은 완전히 동일 — 순수하게 "동점 후보들 중 우선순위"만 재정렬하는 역할.
+    const okCandidates = candidates.filter(c => c.diff <= MAX_DIFF)
+    let basePickPool: typeof okCandidates
+    if (useDetailedMatching) {
+      // 최고수준팀편성: 반복회피/라인 다양성 같은 소프트 제약은 전부 무시하고 diff<=5 후보 전체를 대상으로 함
+      basePickPool = okCandidates
+    } else {
+      const bestPool = okCandidates.filter(c => isRepeatFree(c) && isDiverse(c))
+      const diversePool = bestPool.length > 0 ? bestPool : okCandidates.filter(isDiverse)
+      const repeatFreePool = diversePool.length > 0 ? diversePool : okCandidates.filter(isRepeatFree)
+      basePickPool = repeatFreePool.length > 0 ? repeatFreePool : okCandidates
+    }
+    // 최고수준팀편성 on: diff<=5 후보들 중에서 총점(s1+s2)이 가장 높은 조합을 최우선으로 고름.
+    // 완전히 매번 똑같은 조합만 나오진 않게, 최고 총점 기준 아주 좁은 오차범위(±1점) 안에 든 조합들 중에서만 무작위 선택.
     let pickPool = basePickPool
     if (useDetailedMatching && basePickPool.length > 1) {
       const scored = basePickPool
-        .map(c => ({ c, wdiff: computeWeightedDiff(c.result.team1, c.result.team2) }))
-        .sort((a, b) => a.wdiff - b.wdiff)
-      const topN = Math.max(1, Math.ceil(scored.length * 0.3))
-      pickPool = scored.slice(0, topN).map(s => s.c)
+        .map(c => ({ c, total: c.result.s1 + c.result.s2 }))
+        .sort((a, b) => b.total - a.total)
+      const bestTotal = scored[0].total
+      pickPool = scored.filter(s => s.total >= bestTotal - 1).map(s => s.c)
     }
     let chosen: BalanceResult | null =
       pickPool.length > 0 ? pickPool[Math.floor(Math.random() * pickPool.length)].result : null
@@ -789,24 +831,30 @@ export default function RoomsTab({
 
       // 여기도 마찬가지로 diff<=5를 만족하는 후보 중 "가장 낮은 diff 1개"가 아니라 무작위로 선택해서
       // 매번 같은 팀 모양이 나오는 걸 줄임. 우선순위는 메인 탐색과 동일하게 단계적으로 완화
-      const fairCombos = allCombos.filter(c => Math.abs(c.s1 - c.s2) <= 5 && isFairAF(c))
-      const bestFairCombos = fairCombos.filter(c => isCleanAF(c) && isLineDiverse(c))
-      const diverseFairCombos = bestFairCombos.length > 0 ? bestFairCombos : fairCombos.filter(isLineDiverse)
-      const cleanFairCombos = diverseFairCombos.length > 0 ? diverseFairCombos : fairCombos.filter(isCleanAF)
-      const baseComboPool = cleanFairCombos.length > 0 ? cleanFairCombos : fairCombos
+      const fairCombos = allCombos.filter(c => Math.abs(c.s1 - c.s2) <= MAX_DIFF && isFairAF(c))
+      let baseComboPool: BalanceResult[]
+      if (useDetailedMatching) {
+        // 최고수준팀편성: 반복회피/라인 다양성 무시하고 diff<=5 조합 전체를 대상으로 함
+        baseComboPool = fairCombos
+      } else {
+        const bestFairCombos = fairCombos.filter(c => isCleanAF(c) && isLineDiverse(c))
+        const diverseFairCombos = bestFairCombos.length > 0 ? bestFairCombos : fairCombos.filter(isLineDiverse)
+        const cleanFairCombos = diverseFairCombos.length > 0 ? diverseFairCombos : fairCombos.filter(isCleanAF)
+        baseComboPool = cleanFairCombos.length > 0 ? cleanFairCombos : fairCombos
+      }
       let comboPool = baseComboPool
       if (useDetailedMatching && baseComboPool.length > 1) {
         const scoredCombos = baseComboPool
-          .map(c => ({ c, wdiff: computeWeightedDiff(c.team1, c.team2) }))
-          .sort((a, b) => a.wdiff - b.wdiff)
-        const topN = Math.max(1, Math.ceil(scoredCombos.length * 0.3))
-        comboPool = scoredCombos.slice(0, topN).map(s => s.c)
+          .map(c => ({ c, total: c.s1 + c.s2 }))
+          .sort((a, b) => b.total - a.total)
+        const bestTotal = scoredCombos[0].total
+        comboPool = scoredCombos.filter(s => s.total >= bestTotal - 1).map(s => s.c)
       }
       chosen = comboPool.length > 0 ? comboPool[Math.floor(Math.random() * comboPool.length)] : null
     }
 
     if (!chosen) {
-      setBalanceError('점수차 5점 이내로 맞는 조합을 찾지 못했어요. M1/M2 설정을 조정하거나 인원 구성을 바꿔서 다시 시도해주세요.')
+      setBalanceError(`점수차 ${MAX_DIFF}점 이내로 맞는 조합을 찾지 못했어요. M1/M2 설정을 조정하거나 인원 구성을 바꿔서 다시 시도해주세요.`)
       setBalancing(false)
       return
     }
@@ -837,6 +885,8 @@ export default function RoomsTab({
       autofill_protected_ids: newProtected,
       guaranteed_m1_ids: newGuaranteed,
       pending_autofill_delta: delta,
+      // 최고수준팀편성은 방당 1회만 — 이번에 사용했으면 다시 못 켜도록 체크박스도 같이 꺼둠
+      ...(useDetailedMatching ? { best_matching_used: true, detailed_matching: false } : {}),
     }).eq('id', myRoom.id)
 
     setBalancing(false)
@@ -1321,18 +1371,24 @@ export default function RoomsTab({
                     )}
 
                     {isHost && (
-                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text3)', marginBottom: 8, cursor: 'pointer' }}>
-                        <input
-                          type="checkbox"
-                          checked={!!myRoom.detailed_matching}
-                          onChange={async e => {
-                            const checked = e.target.checked
-                            setRooms(prev => prev.map(r => r.id === myRoom.id ? { ...r, detailed_matching: checked } : r))
-                            await supabase.from('rooms').update({ detailed_matching: checked }).eq('id', myRoom.id)
-                          }}
-                        />
-                        정밀 매칭 (라인 영향력 + 상대전적 반영해서 팀 나누기 — 점수차 5점 이내 기준은 동일)
-                      </label>
+                      myRoom.best_matching_used ? (
+                        <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 8 }}>
+                          🏆 최고수준팀편성은 이 방에서 이미 사용했어요 (방당 1회 한정)
+                        </div>
+                      ) : (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text3)', marginBottom: 8, cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={!!myRoom.detailed_matching}
+                            onChange={async e => {
+                              const checked = e.target.checked
+                              setRooms(prev => prev.map(r => r.id === myRoom.id ? { ...r, detailed_matching: checked } : r))
+                              await supabase.from('rooms').update({ detailed_matching: checked }).eq('id', myRoom.id)
+                            }}
+                          />
+                          🏆 최고수준팀편성 (공정함보다 총점 최우선, 10판 이상 검증된 라인만 배정, 점수차 2점 이내 — 방당 1회만 사용 가능)
+                        </label>
+                      )
                     )}
 
                     <div style={{ display: 'flex', gap: 8 }}>
@@ -1512,46 +1568,9 @@ export default function RoomsTab({
               {/* 예상 승률 */}
               {(() => {
                 const result = myRoom.result!
-                const blue1 = sortByLine(result.team1)
-                const red1 = sortByLine(result.team2)
-                // 라인별 예상 승률 = 티어(점수)차이 기반 추정치(라인 영향력 가중치 반영) + 상대전적(표본 10판 이상일 때만) 혼합.
-                // 상대전적이 있다고 무조건 그것만 쓰면(예전 방식) 1~2판짜리 전적도 0%/100%로 과신하게 되는 문제가 있어서,
-                // 표본이 쌓일수록 상대전적 비중을 늘리는 방식(최대 80%)으로 섞음 — 정밀 매칭(runBalance)의 h2hAdjustment와 같은 철학.
-                // (기존엔 최대 60%였는데 체감상 상대전적 반영이 약하다는 피드백으로 상향)
-                const lineWrs = LINES.map(line => {
-                  const bp = blue1.find(p => p.line === line)
-                  const rp = red1.find(p => p.line === line)
-                  if (!bp || !rp) return null
-                  const scoreWr = estimateWrFromScoreDiff(bp.score - rp.score, line)
-                  const matchRecs = records.filter(r => {
-                    const bpInBlue = r.blue.some(p => p.userId === bp.userId && p.line === line)
-                    const bpInRed = r.red.some(p => p.userId === bp.userId && p.line === line)
-                    const rpInBlue = r.blue.some(p => p.userId === rp.userId && p.line === line)
-                    const rpInRed = r.red.some(p => p.userId === rp.userId && p.line === line)
-                    return (bpInBlue && rpInRed) || (bpInRed && rpInBlue)
-                  })
-                  const total = matchRecs.length
-                  if (total >= MIN_H2H_SAMPLE) {
-                    const bpWin = matchRecs.filter(r => {
-                      const bpInBlue = r.blue.some(p => p.userId === bp.userId && p.line === line)
-                      return (bpInBlue && r.winner === 'blue') || (!bpInBlue && r.winner === 'red')
-                    }).length
-                    const h2hWr = bpWin / total
-                    const h2hWeight = Math.min(0.8, total / 25)
-                    const wr = h2hWeight * h2hWr + (1 - h2hWeight) * scoreWr
-                    return { line, wr, total, blended: true }
-                  } else {
-                    return { line, wr: scoreWr, total, blended: false }
-                  }
-                }).filter(Boolean) as { line: string; wr: number; total: number; blended: boolean }[]
-
-                // 5라인 합산할 때, "전적 없어서 항상 50%인 라인"이 가중치 3씩 깔고 들어가면
-                // 한 라인이 실제로 63:37처럼 크게 갈려도 나머지 4라인(=50%, 무정보)에 묻혀서 평균이 거의 안 움직임.
-                // 전적 없는 라인은 가중치를 확 낮추고(1), 상대전적 있는 라인은 표본 신뢰도만큼 가중치를 높여서(5+표본수)
-                // 실제 데이터가 있는 라인의 신호가 전체 예상 승률에 제대로 반영되도록 함.
-                const lineWeight = (l: { total: number; blended: boolean }) => l.blended ? 5 + l.total : 1
-                const totalWeight = lineWrs.reduce((s, l) => s + lineWeight(l), 0)
-                const blueWr = lineWrs.reduce((s, l) => s + l.wr * lineWeight(l), 0) / totalWeight
+                // runBalance가 팀을 고를 때 점수를 계산하는 것과 완전히 동일한 함수로 계산 — 기준이 다르면
+                // 화면에 보이는 예상 승률과 실제 팀편성 기준이 어긋날 수 있기 때문에 하나로 통일함.
+                const { blueWr, lineWrs } = predictTeamWinRate(result.team1, result.team2, records)
                 const blueWrPct = Math.round(blueWr * 100)
                 const redWrPct = 100 - blueWrPct
                 const hasLowSample = lineWrs.some(l => !l.blended)
