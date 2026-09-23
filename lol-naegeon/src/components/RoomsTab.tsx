@@ -579,6 +579,18 @@ export default function RoomsTab({
       linePlayCountCache.set(key, n)
       return n
     }
+    // 최고수준팀편성: 라인별 점수뿐 아니라 "이 사람 자체가 전체적으로 고티어인지"도 우선순위에 반영 —
+    // 본인이 등록한 라인들 중 가장 높은 점수(피크 티어)를 그 사람의 전체 수준으로 봄.
+    const overallScoreCache = new Map<string, number>()
+    const overallScore = (userId: string): number => {
+      const cached = overallScoreCache.get(userId)
+      if (cached !== undefined) return cached
+      const lines = getSummonerLines(userId)
+      const scores = lines.map(l => summonerScores[userId]?.[l]).filter((s): s is number => typeof s === 'number')
+      const s = scores.length > 0 ? Math.max(...scores) : 0
+      overallScoreCache.set(userId, s)
+      return s
+    }
 
     const protectedIds = new Set<string>(myRoom.autofill_protected_ids ?? [])
     const guaranteedIds = new Set<string>(myRoom.guaranteed_m1_ids ?? [])
@@ -640,16 +652,27 @@ export default function RoomsTab({
     // 부족한 라인만 먼저 우선순위대로 강제 확정 (M1 → M2 → 상관없음 → 진짜 튕김)
     const priorityFillLine = (line: Line) => {
       // 부족한 라인은 정의상 M1+M2+상관없음을 합쳐도 2명 미만이라, 굳이 순서를 나눌 필요 없이
-      // 그 라인을 원했던 사람(M1/M2/상관없음)이 있으면 그대로 쓰고, 나머지는 강제 배정
-      shuffle(players.filter(p => !assignedIds.has(p.userId) && (p.most1 === line || p.most2 === line || p.most1 === 'any')))
-        .forEach(p => tryAssign(p, line))
+      // 그 라인을 원했던 사람(M1/M2/상관없음)이 있으면 그대로 쓰고, 나머지는 강제 배정.
+      // 최고수준팀편성일 때는 여기서도 무작위(shuffle) 대신 점수 높은 사람을 우선해서, 같은 멤버로 여러 번
+      // 눌러도 부족한 라인에 매번 다른 티어의 사람이 랜덤하게 끼어들어 총점이 들쭉날쭉해지는 걸 막음.
+      // 최고수준팀편성 우선순위: 전체적으로 고티어인 사람(overallScore)을 먼저 보고, 같은 수준이면 그 라인 점수로 판가름
+      const detailedPriority = (a: PlayerEntry, b: PlayerEntry) =>
+        (overallScore(b.userId) - overallScore(a.userId)) || (resolveTierScore(b, line).score - resolveTierScore(a, line).score)
+      const wantsLine = players.filter(p => !assignedIds.has(p.userId) && (p.most1 === line || p.most2 === line || p.most1 === 'any'))
+      ;(useDetailedMatching
+        ? [...wantsLine].sort(detailedPriority)
+        : shuffle(wantsLine)
+      ).forEach(p => tryAssign(p, line))
       while (slots[line].length < 2) {
         const remaining = players.filter(p => !assignedIds.has(p.userId))
         if (remaining.length === 0) break
         // 보호 대상(직전 판에 튕겼던 사람)은 무조건 피함 — 후보가 없으면 이 자리는 그냥 비워둠(강제로 보호 깨지 않음)
         const eligible = remaining.filter(p => !protectedIds.has(p.userId))
         if (eligible.length === 0) break
-        tryAssign(shuffle(eligible)[0], line)
+        const pick = useDetailedMatching
+          ? [...eligible].sort(detailedPriority)[0]
+          : shuffle(eligible)[0]
+        tryAssign(pick, line)
       }
     }
     insufficientLines.forEach(priorityFillLine)
@@ -667,7 +690,7 @@ export default function RoomsTab({
       const capacity: Partial<Record<Line, number>> = {}
       remainingLines.forEach(l => { capacity[l] = 2 })
       const unassigned = new Set(remainingPlayers.map(p => p.userId))
-      type Req = { p: PlayerEntry; line: Line; score: number; isM1: boolean }
+      type Req = { p: PlayerEntry; line: Line; score: number; overall: number; isM1: boolean }
       const candidateLinesFor = (p: PlayerEntry): Line[] => {
         const allLines = getSummonerLines(p.userId)
         return p.most1 === 'any'
@@ -681,13 +704,15 @@ export default function RoomsTab({
           const candidateLines = candidateLinesFor(p)
           const provenLines = candidateLines.filter(l => linePlayCount(p.userId, l) >= MIN_PROVEN_GAMES)
           const useLines = provenLines.length > 0 ? provenLines : candidateLines
-          useLines.forEach(l => reqs.push({ p, line: l, score: resolveTierScore(p, l).score, isM1: p.most1 === l }))
+          useLines.forEach(l => reqs.push({ p, line: l, score: resolveTierScore(p, l).score, overall: overallScore(p.userId), isM1: p.most1 === l }))
         })
         return reqs
       }
-      // 1단계: M1 요청만 점수 높은 순으로 우선 배정
+      // 전체적으로 고티어인 사람(overall)을 최우선으로, 같은 수준이면 그 라인에서의 점수로 판가름
+      const reqPriority = (a: Req, b: Req) => (b.overall - a.overall) || (b.score - a.score)
+      // 1단계: M1 요청만 우선순위 순으로 우선 배정
       for (let round = 0; unassigned.size > 0 && round < 10; round++) {
-        const m1Reqs = buildRequests().filter(r => r.isM1 && (capacity[r.line] ?? 0) > 0).sort((a, b) => b.score - a.score)
+        const m1Reqs = buildRequests().filter(r => r.isM1 && (capacity[r.line] ?? 0) > 0).sort(reqPriority)
         if (m1Reqs.length === 0) break
         let progressed = false
         for (const r of m1Reqs) {
@@ -699,9 +724,9 @@ export default function RoomsTab({
         }
         if (!progressed) break
       }
-      // 2단계: 남은 사람은 M2/그 외 검증된 후보 중 점수 높은 순으로, 자리가 남은 라인에 배정
+      // 2단계: 남은 사람은 M2/그 외 검증된 후보 중 우선순위 순으로, 자리가 남은 라인에 배정
       for (let round = 0; unassigned.size > 0 && round < 10; round++) {
-        const reqs = buildRequests().filter(r => (capacity[r.line] ?? 0) > 0).sort((a, b) => b.score - a.score)
+        const reqs = buildRequests().filter(r => (capacity[r.line] ?? 0) > 0).sort(reqPriority)
         if (reqs.length === 0) break
         let progressed = false
         for (const r of reqs) {
