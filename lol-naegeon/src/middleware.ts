@@ -26,8 +26,7 @@ const MAINTENANCE_HTML = `<!DOCTYPE html>
 </head>
 <body>
   <div class="box">
-    <h1>🛠 당분간 운영을 중단합니다</h1>
-    <p>내전사이트를 잠시 쉬어가요. 데이터는 안전하게 보관되어 있으니 걱정 마시고,<br />다시 열리면 공지할게요.</p>
+    <h1>운영을 중단합니다</h1>
   </div>
 </body>
 </html>`
